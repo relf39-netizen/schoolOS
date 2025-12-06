@@ -9,7 +9,8 @@ export enum SystemView {
   FINANCE = 'FINANCE',
   ATTENDANCE = 'ATTENDANCE',
   PLAN = 'PLAN',
-  ADMIN_USERS = 'ADMIN_USERS'
+  ADMIN_USERS = 'ADMIN_USERS',
+  PROFILE = 'PROFILE' // New View
 }
 
 export type TeacherRole = 
@@ -32,6 +33,7 @@ export interface School {
   lat?: number;        // Latitude for Attendance
   lng?: number;        // Longitude for Attendance
   radius?: number;     // Allowed radius in meters
+  lateTimeThreshold?: string; // Time string e.g., "08:15"
 }
 
 export interface Attachment {
@@ -74,7 +76,8 @@ export interface LeaveRequest {
   schoolId?: string;
   teacherId: string;
   teacherName: string;
-  type: 'Sick' | 'Personal' | 'OffCampus' | 'Late';
+  teacherPosition?: string; // Snapshot of position at time of request
+  type: 'Sick' | 'Personal' | 'OffCampus' | 'Late' | 'Maternity';
   startDate: string;
   endDate: string;
   // For OffCampus or Late
@@ -82,12 +85,20 @@ export interface LeaveRequest {
   endTime?: string;
   
   reason: string;
+  contactInfo?: string; // Address/Contact info during leave
+  mobilePhone?: string; // New: Mobile Phone Number
   status: 'Pending' | 'Approved' | 'Rejected';
   
   // Approval Data
   approvedDate?: string;
   directorSignature?: string; // Director Name
   teacherSignature?: string; // Teacher Name
+  createdAt?: string; // ISO String
+  
+  // Cloud Storage
+  evidenceUrl?: string; // URL to the uploaded evidence (e.g. Medical Cert) - User uploaded
+  approvedPdfUrl?: string; // URL to the generated PDF with Director Signature - System generated
+  attachedFileUrl?: string; // Legacy field, keeping for compatibility
 }
 
 export interface FinanceAccount {
@@ -117,7 +128,7 @@ export interface FinanceAuditLog {
   actorName: string; // Who performed the action
   actionType: 'EDIT' | 'DELETE';
   transactionDescription: string;
-  details: string; // Text description of what changed (e.g., "Changed amount from 500 to 1000")
+  details: string; // Text description of what changed (e.g. "Changed amount from 500 to 1000")
   amountInvolved: number;
 }
 
@@ -129,7 +140,8 @@ export interface AttendanceRecord {
   date: string;
   checkInTime: string;
   checkOutTime: string | null;
-  status: 'OnTime' | 'Late' | 'Absent';
+  status: 'OnTime' | 'Late' | 'Absent' | 'Leave';
+  leaveType?: string; // If status is Leave
   isAutoCheckout?: boolean; // True if system auto-filled 17:00
   coordinate?: { lat: number; lng: number };
 }
@@ -142,6 +154,7 @@ export interface Teacher {
   position: string;
   roles: TeacherRole[];
   isFirstLogin?: boolean; // True = ต้องเปลี่ยนรหัสผ่าน
+  signatureBase64?: string; // User's signature for forms
 }
 
 // --- Action Plan Types ---

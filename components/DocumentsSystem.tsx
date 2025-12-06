@@ -766,8 +766,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                                  </span>
                                             )}
                                             
-                                            {/* DELETE BUTTON for Officer (Pending Only) OR Admin (All) */}
-                                            {((isDocOfficer && doc.status === 'PendingDirector') || isSystemAdmin) && (
+                                            {/* DELETE BUTTON: Admin Can Delete ALL, Doc Officer Can Delete Pending */}
+                                            {(isSystemAdmin || (isDocOfficer && doc.status === 'PendingDirector')) && (
                                                 <button 
                                                     onClick={(e) => handleDeleteDoc(e, doc.id)}
                                                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors z-10"

@@ -1,6 +1,8 @@
 
 
 
+
+
 import React, { useState, useEffect } from 'react';
 import { Transaction, FinanceAccount, Teacher, FinanceAuditLog } from '../types';
 import { MOCK_TRANSACTIONS, MOCK_ACCOUNTS } from '../constants';
@@ -8,6 +10,13 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, L
 import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft, Loader, Database, ServerOff, Edit2, Trash2, X, Save, ShieldAlert, Eye } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
 import { collection, addDoc, onSnapshot, query, where, orderBy, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+
+// Thai Date Helper
+const getThaiDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
 
 interface FinanceSystemProps {
     currentUser: Teacher;
@@ -130,6 +139,15 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
                 setActiveTab('Budget');
             }
         }
+        
+        // Auto-select "General Account" logic for NonBudget to bypass Account selection screen
+        if (activeTab === 'NonBudget') {
+            // We don't force select here, we handle it in rendering to show DetailView immediately
+            setSelectedAccount(null); // Clear selected account so we can handle "All NonBudget" logic
+        } else {
+             setSelectedAccount(null);
+        }
+
     }, [currentUser, isBudgetOfficer, isNonBudgetOfficer, isDirector, activeTab]);
 
     // --- Permissions Helpers ---
@@ -182,11 +200,32 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
         if (selectedAccount) {
             targetAccountId = selectedAccount.id;
         } else if (activeTab === 'NonBudget') {
+            // Find existing NonBudget account or Create a default one
             const nbAcc = accounts.find(a => a.type === 'NonBudget');
-            if (nbAcc) targetAccountId = nbAcc.id;
-            else {
-                alert("ไม่พบบัญชีเงินนอกงบประมาณ กรุณาสร้างบัญชีก่อน");
-                return; 
+            if (nbAcc) {
+                targetAccountId = nbAcc.id;
+            } else {
+                // Auto-create a default account for NonBudget if none exists
+                const defaultName = 'เงินรายได้สถานศึกษา (ทั่วไป)';
+                const createdAcc: any = {
+                    schoolId: currentUser.schoolId,
+                    name: defaultName,
+                    type: 'NonBudget'
+                };
+                
+                if (isConfigured && db) {
+                    try {
+                        const docRef = await addDoc(collection(db, "finance_accounts"), createdAcc);
+                        targetAccountId = docRef.id;
+                    } catch(e) {
+                         alert("ไม่สามารถสร้างบัญชีเริ่มต้นได้");
+                         return;
+                    }
+                } else {
+                     const newId = `acc_nb_${Date.now()}`;
+                     setAccounts([...accounts, { ...createdAcc, id: newId }]);
+                     targetAccountId = newId;
+                }
             }
         }
 
@@ -322,6 +361,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
             return transactions.filter(t => t.accountId === selectedAccount.id);
         }
         if (activeTab === 'NonBudget') {
+             // For NonBudget, show all transactions that belong to any NonBudget account
              const accIds = getFilteredAccounts().map(a => a.id);
              return transactions.filter(t => accIds.includes(t.accountId));
         }
@@ -413,6 +453,11 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
                         </div>
                     );
                 })}
+                {getFilteredAccounts().length === 0 && (
+                     <div className="col-span-full text-center py-10 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                         ยังไม่มีบัญชีงบประมาณ
+                     </div>
+                )}
             </div>
         </div>
     );
@@ -421,18 +466,21 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
         <div className="space-y-6 animate-fade-in">
             {/* Header & Back Button */}
             <div className="flex items-center gap-4">
-                <button 
-                    onClick={() => { setSelectedAccount(null); setShowTransForm(false); }}
-                    className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
-                >
-                    <ArrowLeft size={24} />
-                </button>
+                {/* Only show back button if we are in Budget mode where we selected an account */}
+                {activeTab === 'Budget' && (
+                    <button 
+                        onClick={() => { setSelectedAccount(null); setShowTransForm(false); }}
+                        className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+                    >
+                        <ArrowLeft size={24} />
+                    </button>
+                )}
                 <div>
                     <h2 className="text-2xl font-bold text-slate-800">
                         {activeTab === 'Budget' ? selectedAccount?.name : 'เงินนอกงบประมาณ (รวม)'}
                     </h2>
                     <p className="text-slate-500">
-                        {activeTab === 'Budget' ? 'รายการรับ-จ่ายภายในบัญชีนี้' : 'รายการรับ-จ่ายทั่วไป'}
+                        {activeTab === 'Budget' ? 'รายการรับ-จ่ายภายในบัญชีนี้' : 'สามารถบันทึกรายรับรายจ่ายได้โดยไม่ต้องตั้งชื่อบัญชี'}
                     </p>
                 </div>
             </div>
@@ -559,7 +607,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
                             <table className="w-full text-sm text-left">
                                 <thead className="text-slate-500 bg-slate-50/50 border-b">
                                     <tr>
-                                        <th className="px-4 py-3 w-32">วันที่</th>
+                                        <th className="px-4 py-3 w-40">วันที่</th>
                                         <th className="px-4 py-3">รายละเอียด</th>
                                         <th className="px-4 py-3 text-right w-32">จำนวนเงิน</th>
                                         <th className="px-4 py-3 text-center w-20">สถานะ</th>
@@ -577,7 +625,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
                                     ) : (
                                         displayTransactions.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(t => (
                                             <tr key={t.id} className="hover:bg-slate-50">
-                                                <td className="px-4 py-3 text-slate-600 font-mono">{t.date}</td>
+                                                <td className="px-4 py-3 text-slate-600">{getThaiDate(t.date)}</td>
                                                 <td className="px-4 py-3 text-slate-800 font-medium">{t.description}</td>
                                                 <td className={`px-4 py-3 text-right font-bold ${t.type === 'Income' ? 'text-green-600' : 'text-red-600'}`}>
                                                     {t.type === 'Income' ? '+' : '-'}{t.amount.toLocaleString()}
@@ -692,7 +740,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
                 )}
                 {(canSeeNonBudget) && (
                     <button 
-                        onClick={() => { setActiveTab('NonBudget'); setSelectedAccount(null); }}
+                        onClick={() => { setActiveTab('NonBudget'); }}
                         className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'NonBudget' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
                     >
                         <List size={16}/> เงินนอกงบประมาณ

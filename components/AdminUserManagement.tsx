@@ -1,7 +1,9 @@
 
+
+
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
-import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair } from 'lucide-react';
+import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
@@ -468,18 +470,33 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                             </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">รัศมีที่อนุญาตให้ลงเวลา (เมตร)</label>
-                            <div className="flex items-center gap-2">
-                                <Target size={18} className="text-slate-400"/>
-                                <input 
-                                    type="number" 
-                                    value={schoolForm.radius || 500}
-                                    onChange={e => setSchoolForm({...schoolForm, radius: parseInt(e.target.value)})}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">รัศมีที่อนุญาต (เมตร)</label>
+                                <div className="flex items-center gap-2">
+                                    <Target size={18} className="text-slate-400"/>
+                                    <input 
+                                        type="number" 
+                                        value={schoolForm.radius || 500}
+                                        onChange={e => setSchoolForm({...schoolForm, radius: parseInt(e.target.value)})}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                    />
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1">ค่าเริ่มต้นคือ 500 เมตร</p>
                             </div>
-                            <p className="text-xs text-slate-400 mt-1">ค่าเริ่มต้นคือ 500 เมตร</p>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">เวลาเข้าสาย (หลังจาก)</label>
+                                <div className="flex items-center gap-2">
+                                    <Clock size={18} className="text-slate-400"/>
+                                    <input 
+                                        type="time" 
+                                        value={schoolForm.lateTimeThreshold || '08:30'}
+                                        onChange={e => setSchoolForm({...schoolForm, lateTimeThreshold: e.target.value})}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                    />
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1">หากลงเวลาหลังเวลานี้จะถือว่า "สาย"</p>
+                            </div>
                         </div>
                         
                         <div className="pt-2">

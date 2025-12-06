@@ -39,8 +39,8 @@ const FirstLoginSetup: React.FC<FirstLoginSetupProps> = ({ user, onComplete, onL
     };
 
     return (
-        <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sarabun">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-slide-down">
+        <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sarabun overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-slide-down my-auto">
                 <div className="bg-orange-600 p-6 text-white text-center">
                     <UserCog size={48} className="mx-auto mb-2 opacity-80"/>
                     <h2 className="text-xl font-bold">ตั้งค่าเริ่มต้นใช้งาน</h2>

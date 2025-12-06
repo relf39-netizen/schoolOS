@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { DEFAULT_LOCATION, MOCK_ATTENDANCE_HISTORY } from '../constants';
-import { AttendanceRecord, Teacher, School } from '../types';
+import { DEFAULT_LOCATION, MOCK_ATTENDANCE_HISTORY, MOCK_LEAVE_REQUESTS } from '../constants';
+import { AttendanceRecord, Teacher, School, LeaveRequest } from '../types';
 import { MapPin, Navigation, CheckCircle, LogOut, History, Printer, ArrowLeft, Database, ServerOff, Loader, RefreshCw, AlertTriangle } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
 import { collection, addDoc, onSnapshot, query, orderBy, where, getDocs, updateDoc, doc, limit } from 'firebase/firestore';
@@ -22,10 +22,22 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
     return R * c;
 };
 
+// Thai Date Helpers
+const getThaiDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const getThaiDateTime = (dateStr: string, timeStr: string) => {
+    if (!dateStr || !timeStr) return '';
+    return `วันที่ ${getThaiDate(dateStr)} เวลา ${timeStr} น.`;
+};
+
 interface AttendanceSystemProps {
     currentUser: Teacher;
     allTeachers: Teacher[];
-    currentSchool: School; // Added prop
+    currentSchool: School; 
 }
 
 const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTeachers, currentSchool }) => {
@@ -42,6 +54,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
     const schoolLat = currentSchool.lat || DEFAULT_LOCATION.lat;
     const schoolLng = currentSchool.lng || DEFAULT_LOCATION.lng;
     const allowedRadius = currentSchool.radius || DEFAULT_LOCATION.allowedRadiusMeters;
+    const lateThreshold = currentSchool.lateTimeThreshold || '08:30'; // Default late time
 
     // Check-in state
     const [status, setStatus] = useState<'None' | 'CheckedIn' | 'CheckedOut'>('None');
@@ -51,15 +64,17 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
 
     // Data State
     const [history, setHistory] = useState<AttendanceRecord[]>([]);
+    const [leaves, setLeaves] = useState<LeaveRequest[]>([]); // Need to fetch leaves to cross-reference
     const [isLoadingData, setIsLoadingData] = useState(true);
-    const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]); // Default to today for Admin Report
+    const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]); 
 
     // Permissions
     const isAdminView = currentUser.roles.includes('SYSTEM_ADMIN') || currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('DOCUMENT_OFFICER');
 
     // --- Firebase Data Sync ---
     useEffect(() => {
-        let unsubscribe: () => void;
+        let unsubscribeAtt: () => void;
+        let unsubscribeLeaves: () => void;
         let timeoutId: NodeJS.Timeout;
 
         if (isConfigured && db) {
@@ -68,20 +83,19 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 if(isLoadingData) {
                     console.warn("Firestore Attendance timeout. Switching to Mock Data.");
                     setHistory(MOCK_ATTENDANCE_HISTORY);
+                    setLeaves(MOCK_LEAVE_REQUESTS);
                     setIsLoadingData(false);
                 }
             }, 3000);
 
-            // Real Mode: Listen to attendance collection
-            const q = query(collection(db, "attendance"), orderBy("date", "desc"), limit(100));
-            unsubscribe = onSnapshot(q, (snapshot) => {
-                clearTimeout(timeoutId);
+            // 1. Fetch Attendance
+            const qAtt = query(collection(db, "attendance"), orderBy("date", "desc"), limit(200));
+            unsubscribeAtt = onSnapshot(qAtt, (snapshot) => {
                 const fetched: AttendanceRecord[] = [];
                 snapshot.forEach((doc) => {
                     fetched.push({ id: doc.id, ...doc.data() } as AttendanceRecord);
                 });
                 setHistory(fetched);
-                setIsLoadingData(false);
                 
                 // Determine current user status for today
                 const today = new Date().toISOString().split('T')[0];
@@ -102,22 +116,31 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     setTimeIn(null);
                     setTimeOut(null);
                 }
+            });
 
-            }, (error) => {
+            // 2. Fetch Leaves (To check for Absent/Leave status)
+            const qLeaves = query(collection(db, "leave_requests"), where("status", "==", "Approved"));
+            unsubscribeLeaves = onSnapshot(qLeaves, (snapshot) => {
+                const fetchedLeaves: LeaveRequest[] = [];
+                snapshot.forEach((doc) => {
+                    fetchedLeaves.push({ id: doc.id, ...doc.data() } as LeaveRequest);
+                });
+                setLeaves(fetchedLeaves);
                 clearTimeout(timeoutId);
-                console.error("Error fetching attendance:", error);
-                setHistory(MOCK_ATTENDANCE_HISTORY);
                 setIsLoadingData(false);
             });
+
         } else {
             // Mock Mode
             setHistory(MOCK_ATTENDANCE_HISTORY);
+            setLeaves(MOCK_LEAVE_REQUESTS);
             setIsLoadingData(false);
         }
         
         return () => {
             if(timeoutId) clearTimeout(timeoutId);
-            if(unsubscribe) unsubscribe();
+            if(unsubscribeAtt) unsubscribeAtt();
+            if(unsubscribeLeaves) unsubscribeLeaves();
         };
     }, [currentUser.id]);
 
@@ -162,7 +185,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
         setGpsError(null);
 
         try {
-            // 1. Force get current GPS location
+            // 1. Force get current GPS location (REAL TIME CHECK)
             const position = await getCurrentPosition();
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
@@ -181,6 +204,12 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
             const now = new Date();
             const timeString = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
             const dateString = now.toISOString().split('T')[0];
+            
+            // Check Late Status
+            let checkStatus: 'OnTime' | 'Late' = 'OnTime';
+            if (type === 'In' && timeString > lateThreshold) {
+                checkStatus = 'Late';
+            }
 
             if (isConfigured && db) {
                 // ONLINE MODE
@@ -193,11 +222,11 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                         date: dateString,
                         checkInTime: timeString,
                         checkOutTime: null,
-                        status: 'OnTime', 
+                        status: checkStatus, 
                         coordinate: { lat, lng } // Save GPS data
                     };
                     await addDoc(collection(db, "attendance"), newRecord);
-                    alert(`ลงเวลามาสำเร็จ: ${timeString}`);
+                    alert(`ลงเวลามาสำเร็จ: ${timeString} ${checkStatus === 'Late' ? '(สาย)' : ''}`);
                 } else {
                     const q = query(
                         collection(db, "attendance"), 
@@ -229,7 +258,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                         date: dateString,
                         checkInTime: timeString,
                         checkOutTime: null,
-                        status: 'OnTime',
+                        status: checkStatus,
                         coordinate: { lat, lng }
                     }, ...history]);
                     alert(`(Offline) ลงเวลามาสำเร็จ: ${timeString}`);
@@ -259,10 +288,59 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
 
     // --- Helpers ---
     const getDisplayCheckOut = (record: AttendanceRecord) => {
-        if (record.checkOutTime) return record.checkOutTime;
+        if (record.checkOutTime) return record.checkOutTime + " น.";
         const today = new Date().toISOString().split('T')[0];
-        if (record.date !== today) return <span className="text-slate-400 italic">17:00 (อัตโนมัติ)</span>;
+        if (record.date !== today) return <span className="text-slate-400 italic">17:00 น. (อัตโนมัติ)</span>;
         return <span className="text-slate-300">-</span>;
+    };
+
+    // Helper: Determine status for a specific teacher on a specific date
+    const getTeacherStatusForDate = (teacherId: string, dateStr: string) => {
+        // 1. Check Attendance Record
+        const record = history.find(h => h.teacherId === teacherId && h.date === dateStr);
+        if (record) {
+            return {
+                status: record.status, // OnTime, Late
+                checkIn: record.checkInTime + " น.",
+                checkOut: record.checkOutTime ? record.checkOutTime + " น." : '-',
+                note: record.status === 'Late' ? 'มาสาย' : ''
+            };
+        }
+
+        // 2. Check Leave Requests (Approved)
+        const leave = leaves.find(l => 
+            l.teacherId === teacherId && 
+            l.status === 'Approved' && 
+            l.startDate <= dateStr && 
+            l.endDate >= dateStr
+        );
+
+        if (leave) {
+            const leaveTypeMap: {[key: string]: string} = { 'Sick': 'ลาป่วย', 'Personal': 'ลากิจ', 'OffCampus': 'ราชการ/นอกสถานที่', 'Late': 'ขอเข้าสาย' };
+            return {
+                status: 'Leave',
+                checkIn: '-',
+                checkOut: '-',
+                note: leaveTypeMap[leave.type] || 'ลา'
+            };
+        }
+
+        // 3. Absent (Only if date is today or past, and no record)
+        // Note: For future dates, it's just blank.
+        const today = new Date().toISOString().split('T')[0];
+        if (dateStr <= today) {
+            // Need to calculate Thai Date for Absent Display
+            const thaiDateTime = getThaiDateTime(dateStr, '08:00'); // Default start time
+            return {
+                status: 'Absent',
+                checkIn: '-',
+                checkOut: '-',
+                note: 'ขาดงาน',
+                absentDetail: thaiDateTime
+            };
+        }
+
+        return { status: 'None', checkIn: '-', checkOut: '-', note: '' };
     };
 
     if (isLoadingData) {
@@ -322,7 +400,10 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     <div className="flex flex-col gap-3 flex-1 w-full md:w-auto">
                         <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-xs text-blue-700 mb-2 flex items-start gap-2">
                              <Navigation size={16} className="shrink-0 mt-0.5"/>
-                             <p>ระบบจะดึงพิกัด GPS อัตโนมัติเมื่อกดปุ่มลงเวลา กรุณาเปิด GPS บนโทรศัพท์ของท่าน</p>
+                             <div>
+                                 <p>ระบบจะดึงพิกัด GPS อัตโนมัติเมื่อกดปุ่มลงเวลา</p>
+                                 <p className="font-bold mt-1">เวลาเข้าสาย: หลัง {lateThreshold} น.</p>
+                             </div>
                         </div>
 
                         <div className="flex gap-4">
@@ -337,7 +418,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                                 {isProcessing && status === 'None' && <div className="absolute inset-0 bg-white/50 flex items-center justify-center"><Loader className="animate-spin"/></div>}
                                 <CheckCircle size={28} className="mb-1" />
                                 <span className="font-bold">ลงเวลามา</span>
-                                {timeIn && <span className="text-xs bg-white px-2 rounded border mt-1 border-green-200 text-green-800 font-mono">{timeIn}</span>}
+                                {timeIn && <span className="text-xs bg-white px-2 rounded border mt-1 border-green-200 text-green-800 font-mono">{timeIn} น.</span>}
                             </button>
 
                             <button 
@@ -351,7 +432,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                                 {isProcessing && status === 'CheckedIn' && <div className="absolute inset-0 bg-white/50 flex items-center justify-center"><Loader className="animate-spin"/></div>}
                                 <LogOut size={28} className="mb-1" />
                                 <span className="font-bold">ลงเวลากลับ</span>
-                                {timeOut && <span className="text-xs bg-white px-2 rounded border mt-1 border-orange-200 text-orange-800 font-mono">{timeOut}</span>}
+                                {timeOut && <span className="text-xs bg-white px-2 rounded border mt-1 border-orange-200 text-orange-800 font-mono">{timeOut} น.</span>}
                             </button>
                         </div>
                     </div>
@@ -369,7 +450,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     className="bg-slate-800 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-slate-900 transition-colors flex items-center gap-2 text-sm"
                 >
                     <Printer size={16} /> 
-                    {isAdminView ? 'ออกรายงานสรุปประจำวัน' : 'พิมพ์ประวัติการลงเวลา'}
+                    {isAdminView ? 'พิมพ์ใบลงเวลาประจำวัน' : 'พิมพ์ประวัติการลงเวลา'}
                 </button>
             </div>
 
@@ -391,11 +472,11 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                             .map((record, idx) => (
                                 <tr key={idx} className="hover:bg-slate-50">
                                     <td className="px-6 py-3 font-medium text-slate-700">
-                                        {record.date} 
+                                        {getThaiDate(record.date)} 
                                         {isAdminView && <div className="text-xs text-slate-400">{record.teacherName}</div>}
                                     </td>
                                     <td className="px-6 py-3 text-green-700 font-mono">
-                                        {record.checkInTime}
+                                        {record.checkInTime} น.
                                         {record.coordinate && isAdminView && (
                                             <a 
                                                 href={`https://www.google.com/maps?q=${record.coordinate.lat},${record.coordinate.lng}`} 
@@ -410,9 +491,10 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                                     <td className="px-6 py-3 text-orange-700 font-mono">{getDisplayCheckOut(record)}</td>
                                     <td className="px-6 py-3 text-center">
                                         <span className={`px-2 py-1 rounded-full text-xs ${
-                                            record.status === 'OnTime' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                            record.status === 'OnTime' ? 'bg-green-100 text-green-700' : 
+                                            record.status === 'Late' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'
                                         }`}>
-                                            {record.status === 'OnTime' ? 'ปกติ' : 'สาย'}
+                                            {record.status === 'OnTime' ? 'ปกติ' : record.status === 'Late' ? 'มาสาย' : record.status}
                                         </span>
                                     </td>
                                 </tr>
@@ -439,7 +521,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                         </button>
                         <div>
                             <h2 className="font-bold text-slate-800 text-lg">
-                                {isAdminView ? 'รายงานสรุปประจำวัน (สำหรับ ผอ.)' : 'ประวัติการปฏิบัติงาน (ส่วนตัว)'}
+                                {isAdminView ? 'ใบลงเวลาประจำวัน (สำหรับเสนอ ผอ.)' : 'ประวัติการปฏิบัติงาน (ส่วนตัว)'}
                             </h2>
                             {isAdminView && (
                                 <div className="flex items-center gap-2 mt-1">
@@ -450,6 +532,9 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                                         onChange={(e) => setReportDate(e.target.value)}
                                         className="text-sm border rounded px-2 py-0.5"
                                     />
+                                    <span className="text-sm text-blue-600 font-bold ml-2">
+                                        {getThaiDate(reportDate)}
+                                    </span>
                                 </div>
                             )}
                         </div>
@@ -471,7 +556,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                      <p className="text-base">{currentSchool.name} อำเภอ{currentSchool.district} จังหวัด{currentSchool.province}</p>
                      <p className="text-sm text-slate-600 mt-2">
                          {isAdminView 
-                            ? `ประจำวันที่ ${new Date(reportDate).toLocaleDateString('th-TH', {dateStyle:'long'})}`
+                            ? `ประจำวันที่ ${getThaiDate(reportDate)}`
                             : `ข้อมูลของ: ${currentUser.name}`
                          }
                      </p>
@@ -485,41 +570,52 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                             <tr className="bg-slate-100">
                                 <th className="border border-black p-2 text-center w-10">ที่</th>
                                 <th className="border border-black p-2 text-left">ชื่อ - สกุล</th>
+                                <th className="border border-black p-2 text-left w-24">ตำแหน่ง</th>
                                 <th className="border border-black p-2 text-center w-20">เวลามา</th>
-                                <th className="border border-black p-2 text-center w-24">ลายมือชื่อ</th>
+                                <th className="border border-black p-2 text-center w-20">ลายมือชื่อ</th>
                                 <th className="border border-black p-2 text-center w-20">เวลากลับ</th>
-                                <th className="border border-black p-2 text-center w-24">ลายมือชื่อ</th>
-                                <th className="border border-black p-2 text-center w-24">หมายเหตุ</th>
+                                <th className="border border-black p-2 text-center w-20">ลายมือชื่อ</th>
+                                <th className="border border-black p-2 text-center w-28">หมายเหตุ</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {/* Filter history by selected date */}
-                            {history.filter(h => h.date === reportDate).length > 0 ? (
-                                history.filter(h => h.date === reportDate).map((record, index) => (
-                                    <tr key={record.id}>
-                                        <td className="border border-black p-2 text-center">{index + 1}</td>
-                                        <td className="border border-black p-2">{record.teacherName}</td>
-                                        <td className="border border-black p-2 text-center">{record.checkInTime}</td>
-                                        <td className="border border-black p-2 text-center text-xs text-slate-400">...................</td>
-                                        <td className="border border-black p-2 text-center">{record.checkOutTime || '-'}</td>
-                                        <td className="border border-black p-2 text-center text-xs text-slate-400">...................</td>
-                                        <td className="border border-black p-2 text-center text-xs">{record.status === 'Late' ? 'มาสาย' : ''}</td>
-                                    </tr>
-                                ))
-                            ) : (
-                                // If no records for date, show placeholder rows for manual signing
-                                allTeachers.map((t, i) => (
-                                    <tr key={t.id}>
-                                        <td className="border border-black p-2 text-center">{i+1}</td>
-                                        <td className="border border-black p-2">{t.name}</td>
-                                        <td className="border border-black p-2"></td>
-                                        <td className="border border-black p-2"></td>
-                                        <td className="border border-black p-2"></td>
-                                        <td className="border border-black p-2"></td>
-                                        <td className="border border-black p-2"></td>
-                                    </tr>
-                                ))
-                            )}
+                            {/* Iterate teachers to show status (Present/Late/Leave/Absent) */}
+                            {/* FILTER: Exclude DIRECTOR from this list */}
+                            {allTeachers
+                                .filter(t => !t.roles.includes('DIRECTOR'))
+                                .map((teacher, index) => {
+                                    const { status, checkIn, checkOut, note, absentDetail } = getTeacherStatusForDate(teacher.id, reportDate);
+                                    return (
+                                        <tr key={teacher.id}>
+                                            <td className="border border-black p-2 text-center">{index + 1}</td>
+                                            <td className="border border-black p-2">{teacher.name}</td>
+                                            <td className="border border-black p-2 text-xs">{teacher.position}</td>
+                                            
+                                            {/* Logic for Absent Display */}
+                                            {status === 'Absent' ? (
+                                                <td colSpan={5} className="border border-black p-2 text-center font-bold text-red-600 bg-red-50">
+                                                    {absentDetail}
+                                                </td>
+                                            ) : status === 'Leave' ? (
+                                                <td colSpan={5} className="border border-black p-2 text-center font-bold text-blue-600 bg-blue-50">
+                                                    {note} (ลา)
+                                                </td>
+                                            ) : (
+                                                <>
+                                                    <td className={`border border-black p-2 text-center ${status === 'Late' ? 'text-red-600 font-bold' : ''}`}>
+                                                        {checkIn}
+                                                    </td>
+                                                    <td className="border border-black p-2 text-center text-xs text-slate-400">...................</td>
+                                                    <td className="border border-black p-2 text-center">{checkOut}</td>
+                                                    <td className="border border-black p-2 text-center text-xs text-slate-400">...................</td>
+                                                    <td className="border border-black p-2 text-center text-xs">
+                                                        {status === 'Late' ? 'มาสาย' : ''}
+                                                    </td>
+                                                </>
+                                            )}
+                                        </tr>
+                                    );
+                            })}
                         </tbody>
                     </table>
                 ) : (
@@ -538,10 +634,13 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                             {history.filter(h => h.teacherId === currentUser.id).map((record, index) => (
                                 <tr key={record.id}>
                                     <td className="border border-black p-2 text-center">{index + 1}</td>
-                                    <td className="border border-black p-2 text-center">{record.date}</td>
-                                    <td className="border border-black p-2 text-center">{record.checkInTime}</td>
+                                    <td className="border border-black p-2 text-center">{getThaiDate(record.date)}</td>
+                                    <td className="border border-black p-2 text-center">{record.checkInTime} น.</td>
                                     <td className="border border-black p-2 text-center">{getDisplayCheckOut(record)}</td>
-                                    <td className="border border-black p-2 text-center">{record.status === 'OnTime' ? 'ปกติ' : 'สาย'}</td>
+                                    <td className="border border-black p-2 text-center">
+                                        {record.status === 'OnTime' ? 'ปกติ' : 
+                                         record.status === 'Late' ? 'สาย' : record.status}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
@@ -551,14 +650,17 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 {/* Footer Signature */}
                 <div className="flex flex-col items-center justify-center mt-16 page-break-inside-avoid">
                     {isAdminView ? (
-                        <>
-                            <p className="mb-8">ขอรับรองว่าข้าราชการครูและบุคลากรทางการศึกษาได้มาปฏิบัติราชการจริง</p>
-                            <div className="text-center relative">
-                                <div className="border-b border-black w-64 mb-2 border-dotted"></div>
-                                <p className="font-bold mb-1">( ผู้อำนวยการสถานศึกษา )</p>
-                                <p>ผู้อำนวยการ {currentSchool.name}</p>
+                        <div className="flex flex-col items-end w-full px-10">
+                            <div className="text-center">
+                                <p className="mb-8">ขอรับรองว่าข้าราชการครูและบุคลากรทางการศึกษาได้มาปฏิบัติราชการจริง</p>
+                                <div className="text-center relative mt-8">
+                                    <div className="border-b border-black w-64 mb-2 border-dotted mx-auto"></div>
+                                    <p className="font-bold mb-1">( ผู้อำนวยการสถานศึกษา )</p>
+                                    <p>ผู้อำนวยการ {currentSchool.name}</p>
+                                    <p className="text-sm mt-1">ผู้ตรวจสอบ / ผู้รับรอง</p>
+                                </div>
                             </div>
-                        </>
+                        </div>
                     ) : (
                         <div className="text-center w-full flex justify-end px-10">
                             <div className="text-center">

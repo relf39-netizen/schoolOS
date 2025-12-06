@@ -110,8 +110,8 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
     };
 
     return (
-        <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sarabun">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+        <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sarabun overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden my-auto">
                 {/* Header */}
                 <div className="bg-slate-800 p-6 text-center text-white">
                     <div className="w-16 h-16 bg-blue-500 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-lg">
@@ -330,7 +330,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
             </div>
             
             {/* Version Info */}
-            <div className="fixed bottom-4 text-xs text-slate-400 text-center w-full">
+            <div className="fixed bottom-4 text-xs text-slate-400 text-center w-full pointer-events-none">
                 SchoolOS v1.1.0 | รองรับการใช้งาน Mobile & Desktop
             </div>
         </div>

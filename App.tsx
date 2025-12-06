@@ -7,6 +7,7 @@ import FinanceSystem from './components/FinanceSystem';
 import AttendanceSystem from './components/AttendanceSystem';
 import ActionPlanSystem from './components/ActionPlanSystem';
 import AdminUserManagement from './components/AdminUserManagement';
+import UserProfile from './components/UserProfile';
 import LoginScreen from './components/LoginScreen';
 import FirstLoginSetup from './components/FirstLoginSetup';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
@@ -14,11 +15,11 @@ import { SystemView, Teacher, School, TeacherRole } from './types';
 import { 
     Activity, Users, Clock, FileText, CalendarRange, 
     Loader, Database, ServerOff, Home, LogOut, 
-    Settings, ChevronLeft, Building2, LayoutGrid
+    Settings, ChevronLeft, Building2, LayoutGrid, Bell, UserCircle
 } from 'lucide-react';
 import { MOCK_DOCUMENTS, MOCK_LEAVE_REQUESTS, MOCK_TRANSACTIONS, MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
 import { db, isConfigured } from './firebaseConfig';
-import { collection, onSnapshot, setDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, setDoc, doc, deleteDoc, query, where } from 'firebase/firestore';
 
 // Keys for LocalStorage
 const SESSION_KEY = 'schoolos_session_v1';
@@ -33,6 +34,10 @@ const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<Teacher | null>(null);
     const [isSuperAdminMode, setIsSuperAdminMode] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+
+    // Notification State
+    const [notification, setNotification] = useState<{message: string, type: 'info' | 'alert'} | null>(null);
+    const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
 
     // --- DATA SYNCHRONIZATION (FIREBASE) ---
     useEffect(() => {
@@ -110,6 +115,60 @@ const App: React.FC = () => {
         }
         setIsLoading(false);
     }, [isDataLoaded, allTeachers]);
+
+    // --- LEAVE & NOTIFICATION LISTENER ---
+    useEffect(() => {
+        let unsubLeave: (() => void) | undefined;
+        
+        if (currentUser && isConfigured && db) {
+            // Query for Pending requests in this school
+            const q = query(
+                collection(db, "leave_requests"), 
+                where("status", "==", "Pending"),
+                where("schoolId", "==", currentUser.schoolId) 
+            );
+            
+            // To handle "New Notification" sound, we track changes
+            let isInitial = true;
+
+            unsubLeave = onSnapshot(q, (snapshot) => {
+                // Update Count for Badge
+                setPendingLeaveCount(snapshot.size);
+
+                if (currentUser.roles.includes('DIRECTOR')) {
+                    if (isInitial) {
+                        isInitial = false;
+                        return;
+                    }
+                    
+                    snapshot.docChanges().forEach((change) => {
+                        if (change.type === 'added') {
+                            const data = change.doc.data();
+                            const teacherName = data.teacherName || 'บุคลากร';
+                            setNotification({
+                                message: `มีรายการลาใหม่จาก: ${teacherName} รอการอนุมัติ`,
+                                type: 'info'
+                            });
+                            try {
+                                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                                audio.volume = 0.5;
+                                audio.play().catch(e => console.log("Audio play blocked"));
+                            } catch(e) {}
+                        }
+                    });
+                }
+            });
+        } else if (!isConfigured) {
+            // Mock Mode count
+            const pending = MOCK_LEAVE_REQUESTS.filter(l => l.status === 'Pending').length;
+            setPendingLeaveCount(pending);
+        }
+
+        return () => {
+            if (unsubLeave) unsubLeave();
+        };
+    }, [currentUser]);
+
 
     // UI State
     const [currentView, setCurrentView] = useState<SystemView>(SystemView.DASHBOARD);
@@ -215,6 +274,15 @@ const App: React.FC = () => {
     // --- CARD DATA DEFINITION ---
     const modules = [
         {
+            id: SystemView.PROFILE,
+            title: 'ข้อมูลส่วนตัว',
+            slogan: 'แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล',
+            icon: UserCircle,
+            color: 'from-purple-500 to-indigo-400',
+            shadow: 'shadow-purple-200',
+            visible: true
+        },
+        {
             id: SystemView.DOCUMENTS,
             title: 'งานสารบรรณ',
             slogan: 'รับ-ส่ง รวดเร็ว ทันใจ',
@@ -239,7 +307,9 @@ const App: React.FC = () => {
             icon: Users,
             color: 'from-emerald-500 to-teal-400',
             shadow: 'shadow-emerald-200',
-            visible: true
+            visible: true,
+            // Add notification badge logic here
+            badge: pendingLeaveCount > 0 ? `มีใบลา ${pendingLeaveCount} ใบ` : null
         },
         {
             id: SystemView.FINANCE,
@@ -300,11 +370,19 @@ const App: React.FC = () => {
                                 <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${module.color} opacity-10 rounded-bl-full transition-transform group-hover:scale-110`}></div>
                                 
                                 <div className="flex flex-col h-full justify-between items-start relative z-10">
-                                    <div className={`p-4 rounded-2xl bg-gradient-to-br ${module.color} text-white shadow-md mb-6`}>
-                                        <Icon size={32} />
+                                    <div className="flex justify-between w-full items-start">
+                                        <div className={`p-4 rounded-2xl bg-gradient-to-br ${module.color} text-white shadow-md mb-6`}>
+                                            <Icon size={32} />
+                                        </div>
+                                        {/* Notification Badge */}
+                                        {module.badge && (
+                                            <div className="bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-md border-2 border-white">
+                                                {module.badge}
+                                            </div>
+                                        )}
                                     </div>
                                     
-                                    <div className="text-left">
+                                    <div className="text-left w-full">
                                         <h3 className="text-xl font-bold text-slate-800 mb-1 group-hover:text-blue-700 transition-colors">
                                             {module.title}
                                         </h3>
@@ -340,8 +418,9 @@ const App: React.FC = () => {
     const renderContent = () => {
         if (!currentSchool) return <div className="p-8 text-center text-slate-500">ไม่พบข้อมูลโรงเรียน</div>;
         switch (currentView) {
+            case SystemView.PROFILE: return <UserProfile currentUser={currentUser} onUpdateUser={setCurrentUser} />;
             case SystemView.DOCUMENTS: return <DocumentsSystem currentUser={currentUser} allTeachers={schoolTeachers} />;
-            case SystemView.LEAVE: return <LeaveSystem currentUser={currentUser} allTeachers={schoolTeachers} />;
+            case SystemView.LEAVE: return <LeaveSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool} />;
             case SystemView.FINANCE: return <FinanceSystem currentUser={currentUser} />;
             case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool} />;
             case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} />;
@@ -352,26 +431,47 @@ const App: React.FC = () => {
 
     return (
         <div className="flex flex-col min-h-screen bg-slate-50 font-sarabun">
+            
+            {/* --- NOTIFICATION TOAST --- */}
+            {notification && (
+                <div className="fixed top-4 right-4 z-50 animate-slide-down print:hidden">
+                    <div className="bg-white border-l-4 border-blue-500 shadow-2xl rounded-r-lg p-4 flex items-start gap-3 max-w-sm">
+                        <div className="bg-blue-100 p-2 rounded-full text-blue-600">
+                            <Bell size={24}/>
+                        </div>
+                        <div className="flex-1">
+                            <h4 className="font-bold text-slate-800">การแจ้งเตือน</h4>
+                            <p className="text-sm text-slate-600">{notification.message}</p>
+                        </div>
+                        <button onClick={() => setNotification(null)} className="text-slate-400 hover:text-slate-600">
+                            <ChevronLeft size={16} className="rotate-180"/>
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* --- HEADER --- */}
-            <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-200 shadow-sm">
-                <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+            <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-200 shadow-sm print:hidden">
+                <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 flex items-center justify-center md:justify-between relative">
+                     {/* Left: Title & Back */}
+                     <div className="absolute left-4 md:static flex items-center gap-2 md:gap-4">
                         {currentView !== SystemView.DASHBOARD && (
                             <button 
                                 onClick={() => setCurrentView(SystemView.DASHBOARD)}
-                                className="p-2 -ml-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"
+                                className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"
                             >
                                 <ChevronLeft size={24} />
                             </button>
                         )}
-                        <h1 className="text-xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent flex items-center gap-2">
+                         <h1 className="text-lg md:text-xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent flex items-center gap-2">
                             {currentView === SystemView.DASHBOARD ? (
-                                <><LayoutGrid className="text-slate-800" size={24}/> Dashboard</>
+                                <><LayoutGrid className="text-slate-800 hidden md:block" size={24}/> Dashboard</>
                             ) : getSystemTitle()}
                         </h1>
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    {/* Right: User Profile & Logout */}
+                    <div className="absolute right-4 md:static flex items-center gap-4">
                         <div className="hidden md:flex flex-col items-end mr-2">
                             <span className="text-sm font-bold text-slate-800">{currentUser.name}</span>
                             <span className="text-[10px] text-slate-500">{currentUser.position}</span>
@@ -398,7 +498,7 @@ const App: React.FC = () => {
             </main>
 
             {/* --- STICKY FOOTER --- */}
-            <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-3 px-6 z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+            <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-3 px-6 z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] print:hidden">
                 <div className="max-w-7xl mx-auto flex justify-between items-center">
                     <div className="flex items-center gap-2 text-slate-600">
                         <Building2 size={18} className="text-blue-600"/>

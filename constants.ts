@@ -12,8 +12,11 @@ export const DEFAULT_LOCATION = {
 
 export const CURRENT_SCHOOL_YEAR = '2567';
 
-// Positions List
+// Positions List (Updated as requested)
 export const ACADEMIC_POSITIONS = [
+    "เจ้าหน้าที่ธุรการ",
+    "นักการภารโรง",
+    "พนักงานราชการ",
     "ครูผู้ช่วย",
     "ครู",
     "ครูชำนาญการ",
