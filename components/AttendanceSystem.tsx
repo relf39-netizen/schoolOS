@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { SCHOOL_LOCATION, MOCK_ATTENDANCE_HISTORY, MOCK_TEACHERS } from '../constants';
-import { AttendanceRecord, Teacher } from '../types';
+import { DEFAULT_LOCATION, MOCK_ATTENDANCE_HISTORY } from '../constants';
+import { AttendanceRecord, Teacher, School } from '../types';
 import { MapPin, Navigation, CheckCircle, LogOut, History, Printer, ArrowLeft, Database, ServerOff, Loader } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
 import { collection, addDoc, onSnapshot, query, orderBy, where, getDocs, updateDoc, doc, limit } from 'firebase/firestore';
@@ -24,9 +24,10 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
 interface AttendanceSystemProps {
     currentUser: Teacher;
     allTeachers: Teacher[];
+    currentSchool: School; // Added prop
 }
 
-const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTeachers }) => {
+const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTeachers, currentSchool }) => {
     // State
     const [viewMode, setViewMode] = useState<'DASHBOARD' | 'REPORT'>('DASHBOARD');
     
@@ -36,6 +37,11 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
     const [error, setError] = useState<string | null>(null);
     const [loadingGPS, setLoadingGPS] = useState(false);
     
+    // School Location Logic
+    const schoolLat = currentSchool.lat || DEFAULT_LOCATION.lat;
+    const schoolLng = currentSchool.lng || DEFAULT_LOCATION.lng;
+    const allowedRadius = currentSchool.radius || DEFAULT_LOCATION.allowedRadiusMeters;
+
     // Check-in state
     const [status, setStatus] = useState<'None' | 'CheckedIn' | 'CheckedOut'>('None');
     const [timeIn, setTimeIn] = useState<string | null>(null);
@@ -114,7 +120,8 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 const lng = position.coords.longitude;
                 setCurrentPos({ lat, lng });
                 
-                const dist = calculateDistance(lat, lng, SCHOOL_LOCATION.lat, SCHOOL_LOCATION.lng);
+                // Calculate distance using School's settings
+                const dist = calculateDistance(lat, lng, schoolLat, schoolLng);
                 setDistance(dist);
                 setLoadingGPS(false);
             },
@@ -131,7 +138,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
     }, []);
 
     const handleAction = async (type: 'In' | 'Out') => {
-        if (!distance || distance > SCHOOL_LOCATION.allowedRadiusMeters) {
+        if (!distance || distance > allowedRadius) {
             alert('คุณอยู่นอกพื้นที่โรงเรียน ไม่สามารถลงเวลาได้');
             return;
         }
@@ -216,7 +223,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
         }
     };
 
-    const isWithinRange = distance !== null && distance <= SCHOOL_LOCATION.allowedRadiusMeters;
+    const isWithinRange = distance !== null && distance <= allowedRadius;
 
     // --- Helpers ---
     const getDisplayCheckOut = (record: AttendanceRecord) => {
@@ -258,9 +265,10 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                         <h3 className="font-bold text-slate-700">
                             {isWithinRange ? 'อยู่ในพื้นที่โรงเรียน' : 'อยู่นอกพื้นที่โรงเรียน'}
                         </h3>
-                        <p className="text-xs text-slate-500">
-                            {distance ? `ห่างจากจุดเช็คอิน ${distance.toFixed(0)} เมตร` : 'กำลังระบุตำแหน่ง...'}
+                        <p className="text-xs text-slate-500 text-center">
+                            {distance ? `ห่างจากจุดเช็คอิน ${distance.toFixed(0)} ม. (รัศมี ${allowedRadius} ม.)` : 'กำลังระบุตำแหน่ง...'}
                         </p>
+                        <p className="text-[10px] text-slate-400 text-center mt-1">พิกัดเป้าหมาย: {schoolLat.toFixed(4)}, {schoolLng.toFixed(4)}</p>
                          <button onClick={refreshLocation} className="mt-2 text-xs text-blue-600 underline">อัปเดตตำแหน่ง</button>
                     </div>
 
@@ -392,7 +400,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                      <h2 className="text-xl font-bold mb-1">
                         {isAdminView ? 'บัญชีลงเวลาปฏิบัติราชการ' : 'รายงานประวัติการปฏิบัติราชการ'}
                      </h2>
-                     <p className="text-base">โรงเรียนตัวอย่างวิทยา อำเภอเมือง จังหวัดกรุงเทพมหานคร</p>
+                     <p className="text-base">{currentSchool.name} อำเภอ{currentSchool.district} จังหวัด{currentSchool.province}</p>
                      <p className="text-sm text-slate-600 mt-2">
                          {isAdminView 
                             ? `ประจำวันที่ ${new Date(reportDate).toLocaleDateString('th-TH', {dateStyle:'long'})}`
@@ -479,8 +487,8 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                             <p className="mb-8">ขอรับรองว่าข้าราชการครูและบุคลากรทางการศึกษาได้มาปฏิบัติราชการจริง</p>
                             <div className="text-center relative">
                                 <div className="border-b border-black w-64 mb-2 border-dotted"></div>
-                                <p className="font-bold mb-1">( นายอำนวย การดี )</p>
-                                <p>ผู้อำนวยการโรงเรียนตัวอย่างวิทยา</p>
+                                <p className="font-bold mb-1">( ผู้อำนวยการสถานศึกษา )</p>
+                                <p>ผู้อำนวยการ {currentSchool.name}</p>
                             </div>
                         </>
                     ) : (

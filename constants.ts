@@ -3,10 +3,10 @@
 import { DocumentItem, LeaveRequest, Transaction, Teacher, FinanceAccount, AttendanceRecord, PlanDepartment, School } from './types';
 
 // Configuration
-export const SCHOOL_LOCATION = {
+// Default location if school setting is missing
+export const DEFAULT_LOCATION = {
     lat: 13.736717, 
     lng: 100.523186,
-    name: 'โรงเรียนตัวอย่างวิทยา',
     allowedRadiusMeters: 500
 };
 
@@ -26,8 +26,24 @@ export const ACADEMIC_POSITIONS = [
 
 // Mock Schools
 export const MOCK_SCHOOLS: School[] = [
-    { id: '31030019', name: 'โรงเรียนบ้านโคกหลวงพ่อ', district: 'เมือง', province: 'กรุงเทพฯ' },
-    { id: '10000001', name: 'โรงเรียนตัวอย่างวิทยา', district: 'เมือง', province: 'เชียงใหม่' }
+    { 
+        id: '31030019', 
+        name: 'โรงเรียนบ้านโคกหลวงพ่อ', 
+        district: 'เมือง', 
+        province: 'กรุงเทพฯ',
+        lat: 13.736717,
+        lng: 100.523186,
+        radius: 500
+    },
+    { 
+        id: '10000001', 
+        name: 'โรงเรียนตัวอย่างวิทยา', 
+        district: 'เมือง', 
+        province: 'เชียงใหม่',
+        lat: 18.7883,
+        lng: 98.9853,
+        radius: 300
+    }
 ];
 
 // Mock Teachers (Updated with schoolId and password)

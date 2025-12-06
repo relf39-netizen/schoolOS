@@ -1,15 +1,20 @@
 
 
 import React, { useState, useEffect } from 'react';
-import { Teacher, TeacherRole, SystemConfig } from '../types';
-import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize } from 'lucide-react';
+import { Teacher, TeacherRole, SystemConfig, School } from '../types';
+import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface AdminUserManagementProps {
     teachers: Teacher[];
-    onUpdateTeachers: (teachers: Teacher[]) => void;
-    currentSchoolId: string;
+    // Updated props to handle CRUD individually for DB sync
+    onAddTeacher: (teacher: Teacher) => void;
+    onEditTeacher: (teacher: Teacher) => void;
+    onDeleteTeacher: (id: string) => void;
+    
+    currentSchool: School;
+    onUpdateSchool: (school: School) => void;
 }
 
 const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
@@ -22,8 +27,8 @@ const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
     { id: 'TEACHER', label: 'ครูผู้สอน' },
 ];
 
-const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onUpdateTeachers, currentSchoolId }) => {
-    const [activeTab, setActiveTab] = useState<'USERS' | 'SETTINGS'>('USERS');
+const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onAddTeacher, onEditTeacher, onDeleteTeacher, currentSchool, onUpdateSchool }) => {
+    const [activeTab, setActiveTab] = useState<'USERS' | 'SETTINGS' | 'SCHOOL_SETTINGS'>('USERS');
     
     // User Management State
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -31,10 +36,14 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
     const [isAdding, setIsAdding] = useState(false);
 
     // System Settings State
-    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0 });
+    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '' });
     const [driveLinkInput, setDriveLinkInput] = useState('');
     const [isLoadingConfig, setIsLoadingConfig] = useState(false);
     const [signaturePreview, setSignaturePreview] = useState<string>('');
+    const [logoPreview, setLogoPreview] = useState<string>('');
+
+    // School Settings State (Local)
+    const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
 
     // Load Config on Mount
     useEffect(() => {
@@ -52,6 +61,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
                         });
                         setDriveLinkInput(data.driveFolderId ? `https://drive.google.com/drive/folders/${data.driveFolderId}` : '');
                         setSignaturePreview(data.directorSignatureBase64 || '');
+                        setLogoPreview(data.schoolLogoBase64 || '');
                     }
                 } catch (e) {
                     console.error("Error loading config:", e);
@@ -61,7 +71,10 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
         if (activeTab === 'SETTINGS') {
             loadConfig();
         }
-    }, [activeTab]);
+        if (activeTab === 'SCHOOL_SETTINGS') {
+            setSchoolForm({...currentSchool});
+        }
+    }, [activeTab, currentSchool]);
 
     // --- User Management Functions ---
     const handleEdit = (teacher: Teacher) => {
@@ -84,25 +97,42 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
         if (!editForm.name) return alert('กรุณาระบุชื่อ');
 
         if (isAdding) {
+            // Need a new ID. For manual add, we can ask for ID or generate one.
+            // Assuming we generate a placeholder or ask input.
+            // Let's assume we use a timestamp or ask for ID in a real scenario.
+            // For now, let's use a timestamp ID for non-citizen-id users, or check if ID exists.
+            
+            // To be safe, let's force ID input if it's adding manually? 
+            // The form currently doesn't show ID input for add. Let's add it or auto-gen.
+            // Auto-gen for now.
+            const newId = editForm.id || `t_${Date.now()}`;
+
             const newTeacher: Teacher = {
-                id: `t_${Date.now()}`,
-                schoolId: currentSchoolId,
+                id: newId,
+                schoolId: currentSchool.id,
                 name: editForm.name || '',
                 position: editForm.position || 'ครู',
-                roles: editForm.roles || ['TEACHER']
+                roles: editForm.roles || ['TEACHER'],
+                // Set default password for manually added users
+                password: '123456',
+                isFirstLogin: true 
             };
-            onUpdateTeachers([...teachers, newTeacher]);
+            onAddTeacher(newTeacher);
         } else {
-            const updated = teachers.map(t => t.id === editingId ? { ...t, ...editForm } as Teacher : t);
-            onUpdateTeachers(updated);
+            // Merge existing teacher data with form
+            const original = teachers.find(t => t.id === editingId);
+            if (original) {
+                const updated: Teacher = { ...original, ...editForm };
+                onEditTeacher(updated);
+            }
         }
         setEditingId(null);
         setIsAdding(false);
     };
 
     const handleDeleteUser = (id: string) => {
-        if (confirm('ต้องการลบข้อมูลบุคลากรรายนี้ใช่หรือไม่?')) {
-            onUpdateTeachers(teachers.filter(t => t.id !== id));
+        if (confirm('ต้องการลบข้อมูลบุคลากรรายนี้ใช่หรือไม่? \n(การกระทำนี้จะลบข้อมูลจากฐานข้อมูลทันที)')) {
+            onDeleteTeacher(id);
         }
     };
 
@@ -134,6 +164,25 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
         }
     };
 
+    const handleSchoolLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                const base64 = evt.target?.result as string;
+                setSchoolForm(prev => ({ ...prev, logoBase64: base64 }));
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleSaveSchoolSettings = () => {
+        if (schoolForm) {
+            onUpdateSchool({ ...currentSchool, ...schoolForm });
+            alert('บันทึกข้อมูลโรงเรียนเรียบร้อยแล้ว');
+        }
+    };
+
     const handleSaveConfig = async () => {
         setIsLoadingConfig(true);
         const folderId = extractFolderId(driveLinkInput);
@@ -143,6 +192,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
             scriptUrl: config.scriptUrl.trim(),
             schoolName: config.schoolName?.trim(),
             directorSignatureBase64: config.directorSignatureBase64,
+            schoolLogoBase64: config.schoolLogoBase64,
             directorSignatureScale: Number(config.directorSignatureScale),
             directorSignatureYOffset: Number(config.directorSignatureYOffset)
         };
@@ -165,26 +215,32 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
 
     return (
         <div className="space-y-6 animate-fade-in pb-10">
-            <div className="bg-slate-800 text-white p-4 rounded-xl flex justify-between items-center">
+            <div className="bg-slate-800 text-white p-4 rounded-xl flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
                     <h2 className="text-xl font-bold flex items-center gap-2">
                         <Users size={24}/> ผู้ดูแลระบบ (Admin)
                     </h2>
-                    <p className="text-slate-300 text-sm">จัดการผู้ใช้งานและการตั้งค่าระบบ</p>
+                    <p className="text-slate-300 text-sm">จัดการผู้ใช้งานและการตั้งค่าโรงเรียน</p>
                 </div>
                 
-                <div className="flex bg-slate-700 rounded-lg p-1">
+                <div className="flex flex-wrap gap-2 bg-slate-700 rounded-lg p-1">
                     <button 
                         onClick={() => setActiveTab('USERS')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${activeTab === 'USERS' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'USERS' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                     >
                         จัดการบุคลากร
                     </button>
                     <button 
-                        onClick={() => setActiveTab('SETTINGS')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${activeTab === 'SETTINGS' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        onClick={() => setActiveTab('SCHOOL_SETTINGS')}
+                        className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                     >
-                        ตั้งค่าระบบ
+                        ตั้งค่าโรงเรียน/GPS
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('SETTINGS')}
+                        className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'SETTINGS' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                    >
+                        ตั้งค่าระบบ (Drive)
                     </button>
                 </div>
             </div>
@@ -223,6 +279,19 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
                                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                     />
                                 </div>
+                                {isAdding && (
+                                     <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">รหัสประจำตัว/เลขบัตร (ID)</label>
+                                        <input 
+                                            type="text" 
+                                            value={editForm.id || ''} 
+                                            placeholder="เลขบัตร 13 หลัก"
+                                            onChange={e => setEditForm({ ...editForm, id: e.target.value })}
+                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                                        />
+                                        <p className="text-xs text-slate-400 mt-1">หากไม่ระบุ ระบบจะสร้าง ID อัตโนมัติ</p>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="mb-6">
@@ -303,6 +372,83 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
                 </>
             )}
 
+            {/* TAB: SCHOOL SETTINGS */}
+            {activeTab === 'SCHOOL_SETTINGS' && (
+                <div className="max-w-2xl mx-auto space-y-6">
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-6">
+                         <h3 className="font-bold text-slate-800 flex items-center gap-2 border-b pb-3">
+                            <MapPin size={20} className="text-orange-600"/> ตั้งค่าโรงเรียนและการลงเวลา (GPS)
+                        </h3>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                โลโก้โรงเรียน (แสดงใน Dashboard)
+                            </label>
+                            <div className="flex items-center gap-4">
+                                {schoolForm.logoBase64 ? (
+                                    <img src={schoolForm.logoBase64} alt="Logo" className="w-16 h-16 object-contain border rounded-lg bg-slate-50"/>
+                                ) : (
+                                    <div className="w-16 h-16 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400">
+                                        <ImageIcon size={24}/>
+                                    </div>
+                                )}
+                                <label className="cursor-pointer bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-2 transition-colors shadow-sm">
+                                    <UploadCloud size={18} className="text-slate-600"/>
+                                    <span className="text-sm font-bold text-slate-700">อัปโหลดโลโก้</span>
+                                    <input type="file" accept="image/png,image/jpeg" onChange={handleSchoolLogoUpload} className="hidden" />
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">ละติจูด (Latitude)</label>
+                                <input 
+                                    type="number" 
+                                    step="0.000001"
+                                    value={schoolForm.lat || ''}
+                                    onChange={e => setSchoolForm({...schoolForm, lat: parseFloat(e.target.value)})}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">ลองจิจูด (Longitude)</label>
+                                <input 
+                                    type="number" 
+                                    step="0.000001"
+                                    value={schoolForm.lng || ''}
+                                    onChange={e => setSchoolForm({...schoolForm, lng: parseFloat(e.target.value)})}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">รัศมีที่อนุญาตให้ลงเวลา (เมตร)</label>
+                            <div className="flex items-center gap-2">
+                                <Target size={18} className="text-slate-400"/>
+                                <input 
+                                    type="number" 
+                                    value={schoolForm.radius || 500}
+                                    onChange={e => setSchoolForm({...schoolForm, radius: parseInt(e.target.value)})}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                            </div>
+                            <p className="text-xs text-slate-400 mt-1">ค่าเริ่มต้นคือ 500 เมตร</p>
+                        </div>
+                        
+                        <div className="pt-2">
+                             <button 
+                                onClick={handleSaveSchoolSettings}
+                                className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold shadow-md flex justify-center items-center gap-2"
+                            >
+                                <Save size={18}/> บันทึกการตั้งค่าโรงเรียน
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* TAB: SYSTEM SETTINGS */}
             {activeTab === 'SETTINGS' && (
                 <div className="max-w-2xl mx-auto space-y-6">
@@ -310,28 +456,16 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
                         <AlertCircle className="shrink-0" size={20}/>
                         <div>
                             <p className="font-bold mb-1">คำแนะนำการตั้งค่า</p>
-                            <p>กรุณากรอกข้อมูลให้ครบถ้วนเพื่อประสิทธิภาพในการใช้งานสูงสุด</p>
+                            <p>การตั้งค่าส่วนนี้ใช้สำหรับการเชื่อมต่อระบบภายนอก (Google Drive)</p>
                         </div>
                     </div>
 
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-6">
                         <h3 className="font-bold text-slate-800 flex items-center gap-2 border-b pb-3">
-                            <Settings size={20} className="text-blue-600"/> การตั้งค่าทั่วไป
+                            <Settings size={20} className="text-blue-600"/> การตั้งค่าลายเซ็นและตราครุฑ (เอกสารราชการ)
                         </h3>
                         
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">
-                                ชื่อโรงเรียน (สำหรับหัวกระดาษ)
-                            </label>
-                            <input 
-                                type="text" 
-                                value={config.schoolName || ''}
-                                onChange={e => setConfig({...config, schoolName: e.target.value})}
-                                placeholder="เช่น โรงเรียนตัวอย่างวิทยา"
-                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
-                        </div>
-
+                        {/* Signature and Garuda Config Section */}
                          <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
                             <label className="block text-sm font-medium text-slate-700 mb-2">
                                 ลายเซ็นผู้อำนวยการ (ไฟล์ภาพ .PNG พื้นหลังโปร่งใส)
@@ -386,10 +520,6 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
                                                 onChange={e => setConfig({...config, directorSignatureYOffset: parseFloat(e.target.value)})}
                                                 className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
                                             />
-                                            <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                                                <span>ลงต่ำ</span>
-                                                <span>ขึ้นบน</span>
-                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -416,9 +546,6 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
                                     className="w-full px-3 py-2 border rounded-r-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 />
                             </div>
-                            <p className="text-xs text-slate-500 mt-1">
-                                {config.driveFolderId ? `Folder ID ที่ตรวจพบ: ${config.driveFolderId}` : 'กรุณาวางลิงก์เพื่อดึง ID'}
-                            </p>
                         </div>
 
                         <div>
@@ -432,9 +559,6 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
                                 placeholder="เช่น https://script.google.com/macros/s/.../exec"
                                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xs font-mono"
                             />
-                            <p className="text-xs text-slate-500 mt-1">
-                                Script ต้องตั้งค่า Execute as: Me และ Access: Anyone
-                            </p>
                         </div>
 
                         <button 
@@ -442,7 +566,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onU
                             disabled={isLoadingConfig}
                             className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold shadow-md flex justify-center items-center gap-2"
                         >
-                            {isLoadingConfig ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+                            {isLoadingConfig ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่าระบบ'}
                         </button>
                     </div>
                 </div>

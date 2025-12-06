@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import DocumentsSystem from './components/DocumentsSystem';
@@ -11,24 +12,77 @@ import LoginScreen from './components/LoginScreen';
 import FirstLoginSetup from './components/FirstLoginSetup';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import { SystemView, Teacher, School, TeacherRole } from './types';
-import { Menu, Activity, Users, Clock, FileText, CalendarRange, Loader } from 'lucide-react';
+import { Menu, Activity, Users, Clock, FileText, CalendarRange, Loader, Database, ServerOff } from 'lucide-react';
 import { MOCK_DOCUMENTS, MOCK_LEAVE_REQUESTS, MOCK_TRANSACTIONS, MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
+import { db, isConfigured } from './firebaseConfig';
+import { collection, onSnapshot, setDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 
 // Keys for LocalStorage
 const SESSION_KEY = 'schoolos_session_v1';
 
 const App: React.FC = () => {
     // Global Data State
-    const [allTeachers, setAllTeachers] = useState<Teacher[]>(MOCK_TEACHERS);
-    const [allSchools, setAllSchools] = useState<School[]>(MOCK_SCHOOLS);
+    const [allTeachers, setAllTeachers] = useState<Teacher[]>([]);
+    const [allSchools, setAllSchools] = useState<School[]>([]);
+    const [isDataLoaded, setIsDataLoaded] = useState(false);
     
     // Auth State
     const [currentUser, setCurrentUser] = useState<Teacher | null>(null);
     const [isSuperAdminMode, setIsSuperAdminMode] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Check LocalStorage on Mount (Auto Login)
+    // --- DATA SYNCHRONIZATION (FIREBASE) ---
     useEffect(() => {
+        if (isConfigured && db) {
+            // 1. Sync Schools
+            const unsubSchools = onSnapshot(collection(db, 'schools'), (snapshot) => {
+                const schoolsData = snapshot.docs.map(doc => doc.data() as School);
+                // If DB is empty, might fallback or just show empty. 
+                // For this demo, if empty we might want to keep Mocks, but let's prefer DB.
+                if (schoolsData.length > 0) {
+                    setAllSchools(schoolsData);
+                } else {
+                    // Initialize with Mocks if DB is completely empty (first run)
+                    setAllSchools(MOCK_SCHOOLS);
+                    // Optionally seed DB here
+                }
+            }, (err) => {
+                console.error("School Sync Error:", err);
+                setAllSchools(MOCK_SCHOOLS);
+            });
+
+            // 2. Sync Teachers
+            const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snapshot) => {
+                const teachersData = snapshot.docs.map(doc => doc.data() as Teacher);
+                if (teachersData.length > 0) {
+                    setAllTeachers(teachersData);
+                } else {
+                    setAllTeachers(MOCK_TEACHERS);
+                }
+                setIsDataLoaded(true);
+            }, (err) => {
+                console.error("Teacher Sync Error:", err);
+                setAllTeachers(MOCK_TEACHERS);
+                setIsDataLoaded(true);
+            });
+
+            return () => {
+                unsubSchools();
+                unsubTeachers();
+            };
+        } else {
+            // Offline Mode / Config Missing
+            setAllSchools(MOCK_SCHOOLS);
+            setAllTeachers(MOCK_TEACHERS);
+            setIsDataLoaded(true);
+        }
+    }, []);
+
+
+    // Check LocalStorage on Mount (Auto Login) - Runs after data is potentially loaded
+    useEffect(() => {
+        if (!isDataLoaded) return;
+
         const storedSession = localStorage.getItem(SESSION_KEY);
         if (storedSession) {
             try {
@@ -37,7 +91,12 @@ const App: React.FC = () => {
                     setIsSuperAdminMode(true);
                 } else {
                     const user = allTeachers.find(t => t.id === session.userId);
-                    if (user) setCurrentUser(user);
+                    if (user) {
+                        setCurrentUser(user);
+                    } else {
+                        // User might have been deleted or data not synced yet
+                        console.warn("Session found but user not in list (yet).");
+                    }
                 }
             } catch (e) {
                 console.error("Session parse error", e);
@@ -45,7 +104,7 @@ const App: React.FC = () => {
             }
         }
         setIsLoading(false);
-    }, []);
+    }, [isDataLoaded, allTeachers]); // Re-run when teachers list updates
 
     // UI State
     const [currentView, setCurrentView] = useState<SystemView>(SystemView.DASHBOARD);
@@ -59,7 +118,7 @@ const App: React.FC = () => {
         localStorage.setItem(SESSION_KEY, JSON.stringify({ userId: user.id, isSuperAdmin: false }));
     };
 
-    const handleRegister = (schoolId: string, id: string, name: string) => {
+    const handleRegister = async (schoolId: string, id: string, name: string) => {
         const newUser: Teacher = {
             id,
             schoolId,
@@ -69,7 +128,21 @@ const App: React.FC = () => {
             roles: ['TEACHER'],
             isFirstLogin: true // Force Setup
         };
-        setAllTeachers([...allTeachers, newUser]);
+
+        if (isConfigured && db) {
+            try {
+                await setDoc(doc(db, 'teachers', newUser.id), newUser);
+                // No need to setAllTeachers here, the snapshot listener will pick it up
+            } catch (e) {
+                console.error("Register Error:", e);
+                alert("เกิดข้อผิดพลาดในการบันทึกข้อมูลลงฐานข้อมูล");
+                return;
+            }
+        } else {
+            // Offline fallback
+            setAllTeachers([...allTeachers, newUser]);
+        }
+        
         // Auto Login after register
         handleLogin(newUser);
     };
@@ -86,7 +159,7 @@ const App: React.FC = () => {
         setCurrentView(SystemView.DASHBOARD);
     };
 
-    const handleFirstLoginComplete = (newPass: string, position: string) => {
+    const handleFirstLoginComplete = async (newPass: string, position: string) => {
         if (!currentUser) return;
         
         const updatedUser: Teacher = { 
@@ -98,35 +171,77 @@ const App: React.FC = () => {
             roles: position.includes('ผู้อำนวยการ') ? (['DIRECTOR', 'TEACHER'] as TeacherRole[]) : currentUser.roles
         };
 
-        const updatedList = allTeachers.map(t => t.id === currentUser.id ? updatedUser : t);
-        setAllTeachers(updatedList);
+        if (isConfigured && db) {
+            try {
+                await setDoc(doc(db, 'teachers', updatedUser.id), updatedUser);
+            } catch (e) {
+                console.error("Update User Error:", e);
+                alert("บันทึกข้อมูลไม่สำเร็จ");
+                return;
+            }
+        } else {
+            const updatedList = allTeachers.map(t => t.id === currentUser.id ? updatedUser : t);
+            setAllTeachers(updatedList);
+        }
+
         setCurrentUser(updatedUser);
         alert('ตั้งค่าเรียบร้อยแล้ว ยินดีต้อนรับเข้าสู่ระบบ');
     };
 
-    // --- School & User Management Handlers ---
+    // --- School & User Management Handlers (CRUD) ---
 
-    const handleCreateSchool = (newSchool: School) => {
-        setAllSchools([...allSchools, newSchool]);
+    const handleCreateSchool = async (newSchool: School) => {
+        if (isConfigured && db) {
+            await setDoc(doc(db, 'schools', newSchool.id), newSchool);
+        } else {
+            setAllSchools([...allSchools, newSchool]);
+        }
     };
 
-    const handleUpdateSchool = (updatedSchool: School) => {
-        setAllSchools(allSchools.map(s => s.id === updatedSchool.id ? updatedSchool : s));
+    const handleUpdateSchool = async (updatedSchool: School) => {
+        if (isConfigured && db) {
+            await setDoc(doc(db, 'schools', updatedSchool.id), updatedSchool);
+        } else {
+            setAllSchools(allSchools.map(s => s.id === updatedSchool.id ? updatedSchool : s));
+        }
     };
 
-    const handleDeleteSchool = (schoolId: string) => {
-        setAllSchools(allSchools.filter(s => s.id !== schoolId));
-        // Optionally clean up teachers associated with this school
-        // setAllTeachers(allTeachers.filter(t => t.schoolId !== schoolId));
+    const handleDeleteSchool = async (schoolId: string) => {
+        if (isConfigured && db) {
+            await deleteDoc(doc(db, 'schools', schoolId));
+        } else {
+            setAllSchools(allSchools.filter(s => s.id !== schoolId));
+        }
     };
 
-    const handleUpdateTeacher = (updatedTeacher: Teacher) => {
-        setAllTeachers(allTeachers.map(t => t.id === updatedTeacher.id ? updatedTeacher : t));
+    // For SuperAdmin and SchoolAdmin usage
+    const handleAddTeacher = async (newTeacher: Teacher) => {
+        if (isConfigured && db) {
+            await setDoc(doc(db, 'teachers', newTeacher.id), newTeacher);
+        } else {
+            setAllTeachers([...allTeachers, newTeacher]);
+        }
+    };
+
+    const handleEditTeacher = async (updatedTeacher: Teacher) => {
+        if (isConfigured && db) {
+            await setDoc(doc(db, 'teachers', updatedTeacher.id), updatedTeacher);
+        } else {
+            setAllTeachers(allTeachers.map(t => t.id === updatedTeacher.id ? updatedTeacher : t));
+        }
+    };
+
+    const handleDeleteTeacher = async (teacherId: string) => {
+        if (isConfigured && db) {
+            await deleteDoc(doc(db, 'teachers', teacherId));
+        } else {
+            setAllTeachers(allTeachers.filter(t => t.id !== teacherId));
+        }
     };
 
     // --- Loading Screen ---
-    if (isLoading) {
-        return <div className="h-screen flex items-center justify-center bg-slate-100 text-slate-400 gap-2"><Loader className="animate-spin"/> กำลังโหลด...</div>;
+    if (isLoading || !isDataLoaded) {
+        return <div className="h-screen flex items-center justify-center bg-slate-100 text-slate-400 gap-2"><Loader className="animate-spin"/> กำลังเชื่อมต่อฐานข้อมูล...</div>;
     }
 
     // --- Router Logic ---
@@ -139,7 +254,7 @@ const App: React.FC = () => {
             onCreateSchool={handleCreateSchool} 
             onUpdateSchool={handleUpdateSchool}
             onDeleteSchool={handleDeleteSchool}
-            onUpdateTeacher={handleUpdateTeacher}
+            onUpdateTeacher={handleEditTeacher}
             onLogout={handleLogout} 
         />;
     }
@@ -173,6 +288,9 @@ const App: React.FC = () => {
     // Filter Data by School ID
     const schoolTeachers = allTeachers.filter(t => t.schoolId === currentUser.schoolId);
     
+    // Find Current School Object
+    const currentSchool = allSchools.find(s => s.id === currentUser.schoolId);
+    
     // Dashboard Overview Component (Internal)
     const Dashboard = () => {
         // Filter Mocks by School ID (In real DB this is done by Query)
@@ -189,13 +307,27 @@ const App: React.FC = () => {
         const pendingLeaves = schoolLeaves.filter(l => l.status === 'Pending').length;
         const todayTrans = schoolTrans.length;
         
-        const currentSchool = allSchools.find(s => s.id === currentUser.schoolId);
-
         return (
             <div className="space-y-6 animate-fade-in">
-                <div className="mb-6">
-                    <h2 className="text-3xl font-bold text-slate-800">ยินดีต้อนรับ, {currentUser.name}</h2>
-                    <p className="text-slate-500">{currentSchool?.name} (รหัส: {currentSchool?.id})</p>
+                <div className="mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                    <div className="flex items-start gap-6">
+                        {/* Display School Logo on Dashboard if available */}
+                        {currentSchool?.logoBase64 && (
+                            <div className="w-24 h-24 bg-white rounded-xl shadow-sm p-2 shrink-0 hidden md:block border border-slate-100">
+                                <img src={currentSchool.logoBase64} alt="School Logo" className="w-full h-full object-contain" />
+                            </div>
+                        )}
+                        <div>
+                            <h2 className="text-3xl font-bold text-slate-800">ยินดีต้อนรับ, {currentUser.name}</h2>
+                            <p className="text-slate-500 text-lg">{currentSchool?.name}</p>
+                            <p className="text-slate-400 text-sm">รหัสโรงเรียน: {currentSchool?.id}</p>
+                        </div>
+                    </div>
+                    {/* Connection Status Indicator */}
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${isConfigured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {isConfigured ? <Database size={12}/> : <ServerOff size={12}/>}
+                        {isConfigured ? 'Connected to Firebase' : 'Offline / Mock Data'}
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -256,21 +388,22 @@ const App: React.FC = () => {
     };
 
     const renderContent = () => {
+        if (!currentSchool) return <div className="p-8 text-center text-slate-500">ไม่พบข้อมูลโรงเรียน (School ID: {currentUser.schoolId})</div>;
+
         // Pass only school teachers to components
         switch (currentView) {
             case SystemView.DOCUMENTS: return <DocumentsSystem currentUser={currentUser} allTeachers={schoolTeachers} />;
             case SystemView.LEAVE: return <LeaveSystem currentUser={currentUser} allTeachers={schoolTeachers} />;
             case SystemView.FINANCE: return <FinanceSystem currentUser={currentUser} />;
-            case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} />;
+            case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool} />;
             case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} />;
             case SystemView.ADMIN_USERS: return <AdminUserManagement 
                 teachers={schoolTeachers} 
-                currentSchoolId={currentUser.schoolId} 
-                onUpdateTeachers={(updated) => {
-                    // Merge updated school teachers back to global state
-                    const otherTeachers = allTeachers.filter(t => t.schoolId !== currentUser.schoolId);
-                    setAllTeachers([...otherTeachers, ...updated]);
-                }} 
+                currentSchool={currentSchool}
+                onUpdateSchool={handleUpdateSchool}
+                onAddTeacher={handleAddTeacher}
+                onEditTeacher={handleEditTeacher}
+                onDeleteTeacher={handleDeleteTeacher}
             />;
             default: return <Dashboard />;
         }
@@ -285,6 +418,7 @@ const App: React.FC = () => {
                 toggleMobile={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                 currentUser={currentUser}
                 allTeachers={schoolTeachers} // Only show school colleagues
+                schoolLogo={currentSchool?.logoBase64}
                 onSwitchUser={(id) => {
                     // For dev purposes: easy switch within school
                     const t = schoolTeachers.find(u => u.id === id);
@@ -309,7 +443,7 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2">
-                             <div className="w-8 h-8 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 font-bold">
+                             <div className="w-8 h-8 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 font-bold overflow-hidden">
                                 {currentUser.name[0]}
                              </div>
                              <div className="hidden md:block text-right">
