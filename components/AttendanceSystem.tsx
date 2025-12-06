@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { DEFAULT_LOCATION, MOCK_ATTENDANCE_HISTORY } from '../constants';
 import { AttendanceRecord, Teacher, School } from '../types';
@@ -57,11 +58,24 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
 
     // --- Firebase Data Sync ---
     useEffect(() => {
+        let unsubscribe: () => void;
+        let timeoutId: NodeJS.Timeout;
+
         if (isConfigured && db) {
+             // SAFETY TIMEOUT: Fallback if Firestore takes too long (3s)
+             timeoutId = setTimeout(() => {
+                if(isLoadingData) {
+                    console.warn("Firestore Attendance timeout. Switching to Mock Data.");
+                    setHistory(MOCK_ATTENDANCE_HISTORY);
+                    setIsLoadingData(false);
+                }
+            }, 3000);
+
             // Real Mode: Listen to attendance collection
             // Note: For production, you might want to limit this query to recent records
             const q = query(collection(db, "attendance"), orderBy("date", "desc"), limit(100));
-            const unsubscribe = onSnapshot(q, (snapshot) => {
+            unsubscribe = onSnapshot(q, (snapshot) => {
+                clearTimeout(timeoutId);
                 const fetched: AttendanceRecord[] = [];
                 snapshot.forEach((doc) => {
                     fetched.push({ id: doc.id, ...doc.data() } as AttendanceRecord);
@@ -90,16 +104,21 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 }
 
             }, (error) => {
+                clearTimeout(timeoutId);
                 console.error("Error fetching attendance:", error);
                 setHistory(MOCK_ATTENDANCE_HISTORY);
                 setIsLoadingData(false);
             });
-            return () => unsubscribe();
         } else {
             // Mock Mode
             setHistory(MOCK_ATTENDANCE_HISTORY);
             setIsLoadingData(false);
         }
+        
+        return () => {
+            if(timeoutId) clearTimeout(timeoutId);
+            if(unsubscribe) unsubscribe();
+        };
     }, [currentUser.id]);
 
 

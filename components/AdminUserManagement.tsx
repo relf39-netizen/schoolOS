@@ -99,8 +99,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
         if (isAdding) {
             // Need a new ID. For manual add, we can ask for ID or generate one.
             // Assuming we generate a placeholder or ask input.
-            // Let's assume we use a timestamp or ask for ID in a real scenario.
-            // For now, let's use a timestamp ID for non-citizen-id users, or check if ID exists.
+            // Let's assume we use a timestamp ID for non-citizen-id users, or check if ID exists.
             
             // To be safe, let's force ID input if it's adding manually? 
             // The form currently doesn't show ID input for add. Let's add it or auto-gen.
@@ -384,19 +383,26 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                             <label className="block text-sm font-medium text-slate-700 mb-1">
                                 โลโก้โรงเรียน (แสดงใน Dashboard)
                             </label>
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-start gap-4 flex-col sm:flex-row">
                                 {schoolForm.logoBase64 ? (
                                     <img src={schoolForm.logoBase64} alt="Logo" className="w-16 h-16 object-contain border rounded-lg bg-slate-50"/>
                                 ) : (
-                                    <div className="w-16 h-16 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400">
+                                    <div className="w-16 h-16 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 shrink-0">
                                         <ImageIcon size={24}/>
                                     </div>
                                 )}
-                                <label className="cursor-pointer bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-2 transition-colors shadow-sm">
-                                    <UploadCloud size={18} className="text-slate-600"/>
-                                    <span className="text-sm font-bold text-slate-700">อัปโหลดโลโก้</span>
-                                    <input type="file" accept="image/png,image/jpeg" onChange={handleSchoolLogoUpload} className="hidden" />
-                                </label>
+                                <div className="flex flex-col gap-2">
+                                    <label className="cursor-pointer bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-2 transition-colors shadow-sm w-fit">
+                                        <UploadCloud size={18} className="text-slate-600"/>
+                                        <span className="text-sm font-bold text-slate-700">อัปโหลดโลโก้</span>
+                                        <input type="file" accept="image/png,image/jpeg" onChange={handleSchoolLogoUpload} className="hidden" />
+                                    </label>
+                                    <p className="text-xs text-slate-500">
+                                        คำแนะนำ: ควรใช้ไฟล์ภาพนามสกุล .png หรือ .jpg <br/>
+                                        ขนาดที่แนะนำ: <strong>512x512 พิกเซล</strong> (สี่เหลี่ยมจัตุรัส)<br/>
+                                        ขนาดไฟล์ไม่เกิน 2MB เพื่อความรวดเร็วในการโหลด
+                                    </p>
+                                </div>
                             </div>
                         </div>
 

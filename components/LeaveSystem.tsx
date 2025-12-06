@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { LeaveRequest, Teacher } from '../types';
 import { Clock, CheckCircle, XCircle, FilePlus, AlertTriangle, FileText, Download, UserCheck, Printer, ArrowLeft, Loader, Database, ServerOff } from 'lucide-react';
@@ -43,10 +44,23 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers }) =
 
     // --- Data Connection (Hybrid) ---
     useEffect(() => {
+        let unsubscribe: () => void;
+        let timeoutId: NodeJS.Timeout;
+
         if (isConfigured && db) {
+            // SAFETY TIMEOUT: Fallback if Firestore takes too long (3s)
+            timeoutId = setTimeout(() => {
+                if(isLoading) {
+                    console.warn("Firestore Leave Requests timeout. Switching to Mock Data.");
+                    setRequests(MOCK_LEAVE_REQUESTS);
+                    setIsLoading(false);
+                }
+            }, 3000);
+
             // 1. Real Mode: Connect to Firestore
             const q = query(collection(db, "leave_requests"), orderBy("createdAt", "desc"));
-            const unsubscribe = onSnapshot(q, (querySnapshot: QuerySnapshot<DocumentData>) => {
+            unsubscribe = onSnapshot(q, (querySnapshot: QuerySnapshot<DocumentData>) => {
+                clearTimeout(timeoutId);
                 const fetchedRequests: LeaveRequest[] = [];
                 querySnapshot.forEach((doc) => {
                     fetchedRequests.push({ id: doc.id, ...doc.data() } as LeaveRequest);
@@ -54,12 +68,12 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers }) =
                 setRequests(fetchedRequests);
                 setIsLoading(false);
             }, (error) => {
+                clearTimeout(timeoutId);
                 console.error("Error fetching leave requests:", error);
                 // Fallback to mock on permission error or other issues
                 setRequests(MOCK_LEAVE_REQUESTS);
                 setIsLoading(false);
             });
-            return () => unsubscribe();
         } else {
             // 2. Mock Mode: Use local constant data
             console.log("Using Mock Data for Leave System");
@@ -69,6 +83,11 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers }) =
                 setIsLoading(false);
             }, 800);
         }
+
+        return () => {
+            if(timeoutId) clearTimeout(timeoutId);
+            if(unsubscribe) unsubscribe();
+        };
     }, []);
 
     // --- Helpers ---

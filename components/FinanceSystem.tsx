@@ -1,8 +1,12 @@
+
+
 import React, { useState, useEffect } from 'react';
 import { Transaction, FinanceAccount, Teacher } from '../types';
 import { MOCK_TRANSACTIONS, MOCK_ACCOUNTS } from '../constants';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft, Loader, Database, ServerOff } from 'lucide-react';
+import { db, isConfigured } from '../firebaseConfig';
+import { collection, addDoc, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 
 interface FinanceSystemProps {
     currentUser: Teacher;
@@ -15,25 +19,14 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
     const isNonBudgetOfficer = currentUser.roles.includes('FINANCE_NONBUDGET');
 
     // State
-    const [accounts, setAccounts] = useState<FinanceAccount[]>(MOCK_ACCOUNTS);
-    const [transactions, setTransactions] = useState<Transaction[]>(MOCK_TRANSACTIONS);
+    const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [isLoadingData, setIsLoadingData] = useState(true);
     
     // Determine default active tab
     const [activeTab, setActiveTab] = useState<'Budget' | 'NonBudget'>(
         isBudgetOfficer ? 'Budget' : isNonBudgetOfficer ? 'NonBudget' : 'Budget'
     );
-    
-    // Update active tab if user switches role and loses access to current tab
-    useEffect(() => {
-        if (!isDirector) {
-            if (activeTab === 'Budget' && !isBudgetOfficer && isNonBudgetOfficer) {
-                setActiveTab('NonBudget');
-            } else if (activeTab === 'NonBudget' && !isNonBudgetOfficer && isBudgetOfficer) {
-                setActiveTab('Budget');
-            }
-        }
-    }, [currentUser, isBudgetOfficer, isNonBudgetOfficer, isDirector, activeTab]);
-
     
     // Drill-down State
     const [selectedAccount, setSelectedAccount] = useState<FinanceAccount | null>(null);
@@ -46,6 +39,77 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
     const [newTrans, setNewTrans] = useState({ date: new Date().toISOString().split('T')[0], desc: '', amount: '', type: 'Income' });
     const [newAccount, setNewAccount] = useState({ name: '' });
 
+    // --- Data Synchronization ---
+    useEffect(() => {
+        let unsubAccounts: () => void;
+        let unsubTrans: () => void;
+        let timeoutId: NodeJS.Timeout;
+
+        if (isConfigured && db) {
+            // SAFETY TIMEOUT: Fallback if Firestore takes too long (3s)
+            timeoutId = setTimeout(() => {
+                if(isLoadingData) {
+                    console.warn("Firestore Finance timeout. Switching to Mock Data.");
+                    setAccounts(MOCK_ACCOUNTS);
+                    setTransactions(MOCK_TRANSACTIONS);
+                    setIsLoadingData(false);
+                }
+            }, 3000);
+
+            // Sync Accounts
+            const qAccounts = query(collection(db, "finance_accounts"), where("schoolId", "==", currentUser.schoolId));
+            unsubAccounts = onSnapshot(qAccounts, (snapshot) => {
+                // Keep waiting for transactions to load fully
+                const fetched: FinanceAccount[] = [];
+                snapshot.forEach((doc) => {
+                    fetched.push({ id: doc.id, ...doc.data() } as FinanceAccount);
+                });
+                setAccounts(fetched);
+            });
+
+            // Sync Transactions
+            const qTransactions = query(collection(db, "finance_transactions"), where("schoolId", "==", currentUser.schoolId));
+            unsubTrans = onSnapshot(qTransactions, (snapshot) => {
+                clearTimeout(timeoutId);
+                const fetched: Transaction[] = [];
+                snapshot.forEach((doc) => {
+                    fetched.push({ id: doc.id, ...doc.data() } as Transaction);
+                });
+                setTransactions(fetched);
+                setIsLoadingData(false);
+            }, (error) => {
+                 clearTimeout(timeoutId);
+                 console.error(error);
+                 // Fallback on error
+                 setAccounts(MOCK_ACCOUNTS);
+                 setTransactions(MOCK_TRANSACTIONS);
+                 setIsLoadingData(false);
+            });
+        } else {
+            // Offline Mode
+            setAccounts(MOCK_ACCOUNTS);
+            setTransactions(MOCK_TRANSACTIONS);
+            setIsLoadingData(false);
+        }
+        
+        return () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            if (unsubAccounts) unsubAccounts();
+            if (unsubTrans) unsubTrans();
+        };
+    }, [currentUser.schoolId]);
+
+    // Update active tab if user switches role and loses access to current tab
+    useEffect(() => {
+        if (!isDirector) {
+            if (activeTab === 'Budget' && !isBudgetOfficer && isNonBudgetOfficer) {
+                setActiveTab('NonBudget');
+            } else if (activeTab === 'NonBudget' && !isNonBudgetOfficer && isBudgetOfficer) {
+                setActiveTab('Budget');
+            }
+        }
+    }, [currentUser, isBudgetOfficer, isNonBudgetOfficer, isDirector, activeTab]);
+
     // --- Logic ---
 
     const getAccountBalance = (accId: string) => {
@@ -55,19 +119,31 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
         return income - expense;
     };
 
-    const handleAddAccount = (e: React.FormEvent) => {
+    const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
-        const created: FinanceAccount = {
-            id: `acc_${Date.now()}`,
+        
+        const created: any = { // ID generated by firestore
+            schoolId: currentUser.schoolId,
             name: newAccount.name,
             type: activeTab
         };
-        setAccounts([...accounts, created]);
+
+        if (isConfigured && db) {
+            try {
+                await addDoc(collection(db, "finance_accounts"), created);
+            } catch(e) {
+                console.error(e);
+                alert("บันทึกข้อมูลไม่สำเร็จ");
+            }
+        } else {
+            setAccounts([...accounts, { ...created, id: `acc_${Date.now()}` }]);
+        }
+
         setNewAccount({ name: '' });
         setShowAccountForm(false);
     };
 
-    const handleAddTransaction = (e: React.FormEvent) => {
+    const handleAddTransaction = async (e: React.FormEvent) => {
         e.preventDefault();
         
         let targetAccountId = '';
@@ -77,18 +153,32 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
         } else if (activeTab === 'NonBudget') {
             const nbAcc = accounts.find(a => a.type === 'NonBudget');
             if (nbAcc) targetAccountId = nbAcc.id;
-            else return; 
+            else {
+                alert("ไม่พบบัญชีเงินนอกงบประมาณ กรุณาสร้างบัญชีก่อน");
+                return; 
+            }
         }
 
-        const created: Transaction = {
-            id: `t_${Date.now()}`,
+        const created: any = {
+            schoolId: currentUser.schoolId,
             accountId: targetAccountId,
             date: newTrans.date,
             description: newTrans.desc,
             amount: parseFloat(newTrans.amount),
             type: newTrans.type as 'Income' | 'Expense'
         };
-        setTransactions([created, ...transactions]);
+
+        if (isConfigured && db) {
+            try {
+                await addDoc(collection(db, "finance_transactions"), created);
+            } catch(e) {
+                console.error(e);
+                alert("บันทึกข้อมูลไม่สำเร็จ");
+            }
+        } else {
+             setTransactions([{ ...created, id: `t_${Date.now()}` }, ...transactions]);
+        }
+
         setNewTrans({ date: new Date().toISOString().split('T')[0], desc: '', amount: '', type: 'Income' });
         setShowTransForm(false);
     };
@@ -118,6 +208,15 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
         { name: 'รายรับ', value: totalIncome },
         { name: 'รายจ่าย', value: totalExpense },
     ];
+
+    if (isLoadingData) {
+        return (
+             <div className="flex items-center justify-center h-64 text-slate-400 flex-col gap-2">
+                <Loader className="animate-spin" size={32}/>
+                <p>กำลังเชื่อมต่อข้อมูลการเงิน...</p>
+            </div>
+        );
+    }
 
     // --- Renderers ---
 
@@ -404,25 +503,31 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
                     <h2 className="text-2xl font-bold text-slate-800">ระบบบริหารการเงิน</h2>
                     <p className="text-slate-500">จัดการเงินงบประมาณและเงินนอกงบประมาณ</p>
                 </div>
-                <div className="bg-white p-1 rounded-lg border border-slate-200 flex shadow-sm">
-                    {/* Only show buttons if user has role or is director */}
-                    {(isDirector || isBudgetOfficer) && (
-                        <button 
-                            onClick={() => { setActiveTab('Budget'); setSelectedAccount(null); }}
-                            className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'Budget' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
-                        >
-                            <LayoutGrid size={16}/> เงินงบประมาณ
-                        </button>
-                    )}
-                    {(isDirector || isNonBudgetOfficer) && (
-                        <button 
-                            onClick={() => { setActiveTab('NonBudget'); setSelectedAccount(null); }}
-                            className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'NonBudget' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
-                        >
-                            <List size={16}/> เงินนอกงบประมาณ
-                        </button>
-                    )}
+                {/* Offline/Online Indicator */}
+                <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${isConfigured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {isConfigured ? <Database size={12}/> : <ServerOff size={12}/>}
+                    {isConfigured ? 'ออนไลน์ (Firebase)' : 'ออฟไลน์ (Mock Data)'}
                 </div>
+            </div>
+            
+            <div className="bg-white p-1 rounded-lg border border-slate-200 flex shadow-sm w-fit">
+                {/* Only show buttons if user has role or is director */}
+                {(isDirector || isBudgetOfficer) && (
+                    <button 
+                        onClick={() => { setActiveTab('Budget'); setSelectedAccount(null); }}
+                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'Budget' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                        <LayoutGrid size={16}/> เงินงบประมาณ
+                    </button>
+                )}
+                {(isDirector || isNonBudgetOfficer) && (
+                    <button 
+                        onClick={() => { setActiveTab('NonBudget'); setSelectedAccount(null); }}
+                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'NonBudget' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                        <List size={16}/> เงินนอกงบประมาณ
+                    </button>
+                )}
             </div>
 
             {/* Main Content Switcher */}

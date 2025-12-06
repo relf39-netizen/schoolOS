@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { DocumentItem, Teacher, Attachment, SystemConfig } from '../types';
 import { MOCK_DOCUMENTS, CURRENT_SCHOOL_YEAR } from '../constants';
@@ -89,11 +88,24 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
 
     // --- Data Connection ---
     useEffect(() => {
+        let unsubscribe: () => void;
+        let timeoutId: NodeJS.Timeout;
+
         if (isConfigured && db) {
+            // SAFETY TIMEOUT: Fallback if Firestore takes too long (3s)
+            timeoutId = setTimeout(() => {
+                if(isLoading) {
+                    console.warn("Firestore Documents timeout. Switching to Mock Data.");
+                    setDocs(MOCK_DOCUMENTS);
+                    setIsLoading(false);
+                }
+            }, 3000);
+
             try {
                 // 1. Fetch Documents
                 const q = query(collection(db, "documents"), orderBy("id", "desc")); 
-                const unsubscribe = onSnapshot(q, (snapshot) => {
+                unsubscribe = onSnapshot(q, (snapshot) => {
+                    clearTimeout(timeoutId);
                     const fetched: DocumentItem[] = [];
                     snapshot.forEach((doc) => {
                         fetched.push({ ...doc.data() } as DocumentItem);
@@ -101,6 +113,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                     setDocs(fetched);
                     setIsLoading(false);
                 }, (error) => {
+                    clearTimeout(timeoutId);
                     console.error("Error fetching docs:", error);
                     setDocs(MOCK_DOCUMENTS);
                     setIsLoading(false);
@@ -119,9 +132,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                     }
                 };
                 fetchConfig();
-
-                return () => unsubscribe();
             } catch (err) {
+                clearTimeout(timeoutId);
                 console.error("Setup error", err);
                 setDocs(MOCK_DOCUMENTS);
                 setIsLoading(false);
@@ -131,6 +143,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 setDocs(MOCK_DOCUMENTS);
                 setIsLoading(false);
             }, 500);
+        }
+
+        return () => {
+            if(timeoutId) clearTimeout(timeoutId);
+            if(unsubscribe) unsubscribe();
         }
     }, []);
 
@@ -643,14 +660,15 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                     <div className="grid grid-cols-1 gap-4">
                         {displayedDocs.length === 0 ? (
                             <div className="text-center py-10 text-slate-400 bg-white rounded-xl">ไม่มีหนังสือราชการ</div>
-                        ) : displayedDocs.map((doc) => {
+                        ) : displayedDocs.map((doc, index) => {
                              const isUnread = doc.status === 'Distributed' && doc.targetTeachers.includes(currentUser.id) && !doc.acknowledgedBy.includes(currentUser.id);
                              const isAcknowledged = doc.status === 'Distributed' && doc.acknowledgedBy.includes(currentUser.id);
                              
                              return (
                                 <div key={doc.id}
-                                    className={`bg-white p-4 rounded-xl shadow-sm border transition-all relative overflow-hidden group
+                                    className={`p-4 rounded-xl shadow-sm border transition-all relative overflow-hidden group
                                         ${doc.status === 'PendingDirector' && isDirector ? 'border-l-4 border-l-yellow-400' : 'border-slate-200'}
+                                        ${index % 2 === 1 ? 'bg-blue-50' : 'bg-white'}
                                     `}
                                 >
                                     <div className="flex justify-between items-start cursor-pointer" onClick={() => { setSelectedDoc(doc); setViewMode('DETAIL'); }}>

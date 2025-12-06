@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+
+
+import React, { useState, useEffect } from 'react';
 import { PlanDepartment, Project, Teacher, ProjectStatus } from '../types';
 import { MOCK_PLAN_DATA } from '../constants';
-import { Briefcase, CheckCircle, Clock, Lock, Plus, ArrowRight, ArrowLeft, Edit2, Trash2 } from 'lucide-react';
+import { Briefcase, CheckCircle, Clock, Lock, Plus, ArrowRight, ArrowLeft, Edit2, Trash2, Loader, Database, ServerOff } from 'lucide-react';
+import { db, isConfigured } from '../firebaseConfig';
+import { collection, addDoc, onSnapshot, query, where, doc, updateDoc, setDoc } from 'firebase/firestore';
 
 interface ActionPlanSystemProps {
     currentUser: Teacher;
@@ -9,7 +13,8 @@ interface ActionPlanSystemProps {
 
 const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser }) => {
     // State
-    const [departments, setDepartments] = useState<PlanDepartment[]>(MOCK_PLAN_DATA);
+    const [departments, setDepartments] = useState<PlanDepartment[]>([]);
+    const [isLoadingData, setIsLoadingData] = useState(true);
     const [totalSchoolBudget, setTotalSchoolBudget] = useState(1000000); // Default 1M
     const [selectedDept, setSelectedDept] = useState<PlanDepartment | null>(null);
     const [viewMode, setViewMode] = useState<'OVERVIEW' | 'DETAIL'>('OVERVIEW');
@@ -21,6 +26,65 @@ const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser }) => {
     // Edit States
     const [isEditingBudget, setIsEditingBudget] = useState(false);
     const [newProject, setNewProject] = useState({ name: '', budget: '' });
+
+    // --- Data Synchronization ---
+    useEffect(() => {
+        let unsubscribe: () => void;
+        let timeoutId: NodeJS.Timeout;
+
+        if (isConfigured && db) {
+            // SAFETY TIMEOUT: Fallback if Firestore takes too long (3s)
+            timeoutId = setTimeout(() => {
+                if(isLoadingData) {
+                    console.warn("Firestore Plan Data timeout. Switching to Mock Data.");
+                    setDepartments(MOCK_PLAN_DATA);
+                    setIsLoadingData(false);
+                }
+            }, 3000);
+
+            // Subscribe to departments for this school
+            const q = query(collection(db, "plan_departments"), where("schoolId", "==", currentUser.schoolId));
+            unsubscribe = onSnapshot(q, (snapshot) => {
+                clearTimeout(timeoutId);
+                const fetched: PlanDepartment[] = [];
+                snapshot.forEach((doc) => {
+                    fetched.push({ id: doc.id, ...doc.data() } as PlanDepartment);
+                });
+                
+                // Sort departments by name or creation? Let's sort by name for now
+                fetched.sort((a, b) => a.name.localeCompare(b.name));
+                
+                setDepartments(fetched);
+                setIsLoadingData(false);
+
+                // If currently viewing a department, update it with live data
+                if (selectedDept) {
+                    const updated = fetched.find(d => d.id === selectedDept.id);
+                    if (updated) setSelectedDept(updated);
+                    else {
+                        // Department was deleted
+                        setSelectedDept(null);
+                        setViewMode('OVERVIEW');
+                    }
+                }
+            }, (error) => {
+                clearTimeout(timeoutId);
+                console.error("Fetch Plan Data Error:", error);
+                setDepartments(MOCK_PLAN_DATA);
+                setIsLoadingData(false);
+            });
+        } else {
+            // Offline Mode
+            setDepartments(MOCK_PLAN_DATA);
+            setIsLoadingData(false);
+        }
+        
+        return () => {
+            if(timeoutId) clearTimeout(timeoutId);
+            if(unsubscribe) unsubscribe();
+        };
+    }, [currentUser.schoolId, selectedDept?.id]); // Note: selectedDept dependency helps refresh detail view but careful not to loop. 
+    // Actually, updating selectedDept inside snapshot callback handles the sync.
 
     // --- Logic ---
 
@@ -44,16 +108,49 @@ const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser }) => {
 
     // --- Actions ---
 
-    const handleUpdateAllocated = (deptId: string, newAmount: number) => {
-        setDepartments(departments.map(d => d.id === deptId ? { ...d, allocatedBudget: newAmount } : d));
-        setIsEditingBudget(false);
-        // Also update selectedDept if it matches
-        if (selectedDept && selectedDept.id === deptId) {
-             setSelectedDept({ ...selectedDept, allocatedBudget: newAmount });
+    const handleAddDepartment = async () => {
+        const name = prompt('ชื่อกลุ่มงานใหม่:');
+        if (!name) return;
+
+        const newDept: any = { // omit ID for auto-gen
+            schoolId: currentUser.schoolId,
+            name,
+            allocatedBudget: 0,
+            projects: []
+        };
+
+        if (isConfigured && db) {
+            try {
+                await addDoc(collection(db, "plan_departments"), newDept);
+            } catch (e) {
+                console.error("Error adding dept:", e);
+                alert("เกิดข้อผิดพลาดในการเพิ่มกลุ่มงาน");
+            }
+        } else {
+            const mock = { ...newDept, id: `d_${Date.now()}` };
+            setDepartments([...departments, mock]);
         }
     };
 
-    const handleAddProject = (e: React.FormEvent) => {
+    const handleUpdateAllocated = async (deptId: string, newAmount: number) => {
+        setIsEditingBudget(false);
+        
+        if (isConfigured && db) {
+            try {
+                const docRef = doc(db, "plan_departments", deptId);
+                await updateDoc(docRef, { allocatedBudget: newAmount });
+            } catch (e) {
+                console.error(e);
+            }
+        } else {
+            setDepartments(departments.map(d => d.id === deptId ? { ...d, allocatedBudget: newAmount } : d));
+            if (selectedDept && selectedDept.id === deptId) {
+                setSelectedDept({ ...selectedDept, allocatedBudget: newAmount });
+            }
+        }
+    };
+
+    const handleAddProject = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedDept) return;
         
@@ -72,66 +169,121 @@ const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser }) => {
             status: 'Draft'
         };
 
-        const updatedDepts = departments.map(d => {
-            if (d.id === selectedDept.id) {
-                return { ...d, projects: [...d.projects, project] };
-            }
-            return d;
-        });
+        const updatedProjects = [...selectedDept.projects, project];
 
-        setDepartments(updatedDepts);
-        setSelectedDept(updatedDepts.find(d => d.id === selectedDept.id) || null);
-        setNewProject({ name: '', budget: '' });
+        if (isConfigured && db) {
+            try {
+                const docRef = doc(db, "plan_departments", selectedDept.id);
+                await updateDoc(docRef, { projects: updatedProjects });
+                setNewProject({ name: '', budget: '' });
+            } catch (e) {
+                console.error(e);
+                alert("บันทึกข้อมูลไม่สำเร็จ");
+            }
+        } else {
+            const updatedDepts = departments.map(d => {
+                if (d.id === selectedDept.id) {
+                    return { ...d, projects: updatedProjects };
+                }
+                return d;
+            });
+            setDepartments(updatedDepts);
+            setSelectedDept(updatedDepts.find(d => d.id === selectedDept.id) || null);
+            setNewProject({ name: '', budget: '' });
+        }
     };
 
-    const handleStatusChange = (deptId: string, projectId: string, newStatus: ProjectStatus) => {
-        const updatedDepts = departments.map(d => {
-            if (d.id === deptId) {
-                return {
-                    ...d,
-                    projects: d.projects.map(p => p.id === projectId ? { ...p, status: newStatus } : p)
-                };
+    const handleStatusChange = async (deptId: string, projectId: string, newStatus: ProjectStatus) => {
+        // Find dept
+        const dept = departments.find(d => d.id === deptId);
+        if (!dept) return;
+
+        const updatedProjects = dept.projects.map(p => p.id === projectId ? { ...p, status: newStatus } : p);
+
+        if (isConfigured && db) {
+            try {
+                const docRef = doc(db, "plan_departments", deptId);
+                await updateDoc(docRef, { projects: updatedProjects });
+            } catch (e) {
+                console.error(e);
             }
-            return d;
-        });
-        setDepartments(updatedDepts);
-        setSelectedDept(updatedDepts.find(d => d.id === deptId) || null);
+        } else {
+            const updatedDepts = departments.map(d => {
+                if (d.id === deptId) {
+                    return { ...d, projects: updatedProjects };
+                }
+                return d;
+            });
+            setDepartments(updatedDepts);
+            setSelectedDept(updatedDepts.find(d => d.id === deptId) || null);
+        }
     };
 
-    const handleDeleteProject = (deptId: string, projectId: string) => {
+    const handleDeleteProject = async (deptId: string, projectId: string) => {
         if(!confirm('ต้องการลบโครงการนี้ใช่หรือไม่?')) return;
-        const updatedDepts = departments.map(d => {
-            if (d.id === deptId) {
-                return {
-                    ...d,
-                    projects: d.projects.filter(p => p.id !== projectId)
-                };
+        
+        const dept = departments.find(d => d.id === deptId);
+        if (!dept) return;
+
+        const updatedProjects = dept.projects.filter(p => p.id !== projectId);
+
+        if (isConfigured && db) {
+             try {
+                const docRef = doc(db, "plan_departments", deptId);
+                await updateDoc(docRef, { projects: updatedProjects });
+            } catch (e) {
+                console.error(e);
             }
-            return d;
-        });
-        setDepartments(updatedDepts);
-        setSelectedDept(updatedDepts.find(d => d.id === deptId) || null);
+        } else {
+            const updatedDepts = departments.map(d => {
+                if (d.id === deptId) {
+                    return { ...d, projects: updatedProjects };
+                }
+                return d;
+            });
+            setDepartments(updatedDepts);
+            setSelectedDept(updatedDepts.find(d => d.id === deptId) || null);
+        }
     }
 
-    const handleUpdateProjectBudget = (deptId: string, projectId: string, newAmount: number) => {
-        const updatedDepts = departments.map(d => {
-            if (d.id === deptId) {
-                return {
-                    ...d,
-                    projects: d.projects.map(p => {
-                        // Prevent edit if completed
-                        if (p.id === projectId && p.status !== 'Completed') {
-                            return { ...p, budget: newAmount };
-                        }
-                        return p;
-                    })
-                };
+    const handleUpdateProjectBudget = async (deptId: string, projectId: string, newAmount: number) => {
+        const dept = departments.find(d => d.id === deptId);
+        if (!dept) return;
+
+        const updatedProjects = dept.projects.map(p => {
+            if (p.id === projectId && p.status !== 'Completed') {
+                return { ...p, budget: newAmount };
             }
-            return d;
+            return p;
         });
-        setDepartments(updatedDepts);
-        setSelectedDept(updatedDepts.find(d => d.id === deptId) || null);
+
+        if (isConfigured && db) {
+             try {
+                const docRef = doc(db, "plan_departments", deptId);
+                await updateDoc(docRef, { projects: updatedProjects });
+            } catch (e) {
+                console.error(e);
+            }
+        } else {
+             const updatedDepts = departments.map(d => {
+                if (d.id === deptId) {
+                    return { ...d, projects: updatedProjects };
+                }
+                return d;
+            });
+            setDepartments(updatedDepts);
+            setSelectedDept(updatedDepts.find(d => d.id === deptId) || null);
+        }
     };
+
+    if (isLoadingData) {
+        return (
+             <div className="flex items-center justify-center h-64 text-slate-400 flex-col gap-2">
+                <Loader className="animate-spin" size={32}/>
+                <p>กำลังเชื่อมต่อข้อมูลแผนงาน...</p>
+            </div>
+        );
+    }
 
     // --- Renderers ---
 
@@ -151,6 +303,17 @@ const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser }) => {
 
         return (
             <div className="space-y-8 animate-fade-in pb-10">
+                {/* Header with Offline Indicator */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                         <h2 className="text-2xl font-bold text-slate-800">ระบบแผนปฏิบัติการ</h2>
+                    </div>
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${isConfigured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {isConfigured ? <Database size={12}/> : <ServerOff size={12}/>}
+                        {isConfigured ? 'ออนไลน์ (Firebase)' : 'ออฟไลน์ (Mock Data)'}
+                    </div>
+                </div>
+
                 {/* Top Stats */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
@@ -202,55 +365,58 @@ const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser }) => {
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold text-slate-700">กลุ่มงาน / ฝ่าย</h3>
                         {isPlanOfficer && (
-                            <button onClick={() => {
-                                const name = prompt('ชื่อกลุ่มงานใหม่:');
-                                if(name) setDepartments([...departments, { id: `d_${Date.now()}`, name, allocatedBudget: 0, projects: [] }]);
-                            }} className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 flex items-center gap-1">
+                            <button onClick={handleAddDepartment} className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 flex items-center gap-1 shadow-sm">
                                 <Plus size={16}/> เพิ่มกลุ่มงาน
                             </button>
                         )}
                     </div>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {departments.map(dept => {
-                            const stats = getDeptStats(dept);
-                            const percentUsed = dept.allocatedBudget > 0 ? (stats.used / dept.allocatedBudget) * 100 : 0;
-                            
-                            return (
-                                <div 
-                                    key={dept.id} 
-                                    onClick={() => { setSelectedDept(dept); setViewMode('DETAIL'); }}
-                                    className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md hover:border-blue-400 transition-all group relative overflow-hidden"
-                                >
-                                    <div className="flex justify-between items-start mb-4 relative z-10">
-                                        <div className="p-3 bg-slate-100 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                            <Briefcase size={24}/>
+                    {departments.length === 0 ? (
+                        <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300 text-slate-400">
+                            ยังไม่มีข้อมูลกลุ่มงาน กรุณาเพิ่มกลุ่มงาน
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {departments.map(dept => {
+                                const stats = getDeptStats(dept);
+                                const percentUsed = dept.allocatedBudget > 0 ? (stats.used / dept.allocatedBudget) * 100 : 0;
+                                
+                                return (
+                                    <div 
+                                        key={dept.id} 
+                                        onClick={() => { setSelectedDept(dept); setViewMode('DETAIL'); }}
+                                        className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md hover:border-blue-400 transition-all group relative overflow-hidden"
+                                    >
+                                        <div className="flex justify-between items-start mb-4 relative z-10">
+                                            <div className="p-3 bg-slate-100 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                                <Briefcase size={24}/>
+                                            </div>
+                                            <ArrowRight className="text-slate-300 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all"/>
                                         </div>
-                                        <ArrowRight className="text-slate-300 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all"/>
+                                        
+                                        <h4 className="font-bold text-lg text-slate-800 mb-2">{dept.name}</h4>
+                                        
+                                        <div className="space-y-3">
+                                            <div className="flex justify-between text-sm">
+                                                <span className="text-slate-500">ได้รับจัดสรร</span>
+                                                <span className="font-bold text-slate-800">฿{dept.allocatedBudget.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm">
+                                                <span className="text-slate-500">ใช้ไปแล้ว</span>
+                                                <span className="font-bold text-emerald-600">฿{stats.used.toLocaleString()}</span>
+                                            </div>
+                                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                                <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${percentUsed}%` }}></div>
+                                            </div>
+                                            <div className="text-xs text-right text-slate-400">
+                                                คงเหลือ ฿{stats.remaining.toLocaleString()}
+                                            </div>
+                                        </div>
                                     </div>
-                                    
-                                    <h4 className="font-bold text-lg text-slate-800 mb-2">{dept.name}</h4>
-                                    
-                                    <div className="space-y-3">
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-slate-500">ได้รับจัดสรร</span>
-                                            <span className="font-bold text-slate-800">฿{dept.allocatedBudget.toLocaleString()}</span>
-                                        </div>
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-slate-500">ใช้ไปแล้ว</span>
-                                            <span className="font-bold text-emerald-600">฿{stats.used.toLocaleString()}</span>
-                                        </div>
-                                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                                            <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${percentUsed}%` }}></div>
-                                        </div>
-                                        <div className="text-xs text-right text-slate-400">
-                                            คงเหลือ ฿{stats.remaining.toLocaleString()}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             </div>
         );
