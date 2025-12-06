@@ -104,8 +104,24 @@ const App: React.FC = () => {
         alert('ตั้งค่าเรียบร้อยแล้ว ยินดีต้อนรับเข้าสู่ระบบ');
     };
 
+    // --- School & User Management Handlers ---
+
     const handleCreateSchool = (newSchool: School) => {
         setAllSchools([...allSchools, newSchool]);
+    };
+
+    const handleUpdateSchool = (updatedSchool: School) => {
+        setAllSchools(allSchools.map(s => s.id === updatedSchool.id ? updatedSchool : s));
+    };
+
+    const handleDeleteSchool = (schoolId: string) => {
+        setAllSchools(allSchools.filter(s => s.id !== schoolId));
+        // Optionally clean up teachers associated with this school
+        // setAllTeachers(allTeachers.filter(t => t.schoolId !== schoolId));
+    };
+
+    const handleUpdateTeacher = (updatedTeacher: Teacher) => {
+        setAllTeachers(allTeachers.map(t => t.id === updatedTeacher.id ? updatedTeacher : t));
     };
 
     // --- Loading Screen ---
@@ -121,6 +137,9 @@ const App: React.FC = () => {
             schools={allSchools} 
             teachers={allTeachers}
             onCreateSchool={handleCreateSchool} 
+            onUpdateSchool={handleUpdateSchool}
+            onDeleteSchool={handleDeleteSchool}
+            onUpdateTeacher={handleUpdateTeacher}
             onLogout={handleLogout} 
         />;
     }

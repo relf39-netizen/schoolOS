@@ -33,16 +33,24 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
         e.preventDefault();
         setError('');
 
-        if (mode === 'SUPER_ADMIN') {
-            if (loginUsername === 'admin' && loginPassword === 'schoolos') {
+        // 1. Check for Super Admin (Allow from ANY mode if username is 'admin')
+        if (loginUsername === 'admin') {
+            if (loginPassword === 'schoolos') {
                 onSuperAdminLogin();
+                return;
             } else {
                 setError('รหัสผ่าน Super Admin ไม่ถูกต้อง');
+                return;
             }
+        }
+
+        // 2. If explicitly in Super Admin mode but username is not admin
+        if (mode === 'SUPER_ADMIN') {
+            setError('ชื่อผู้ใช้งาน Super Admin ไม่ถูกต้อง (ต้องใช้ admin)');
             return;
         }
 
-        // Find User globally (National ID is unique)
+        // 3. Regular Teacher Login (Find User globally)
         const user = teachers.find(t => t.id === loginUsername);
         
         if (!user) {
@@ -160,7 +168,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
                                         type="text" 
                                         required
                                         maxLength={mode === 'SUPER_ADMIN' ? 20 : 13}
-                                        placeholder={mode === 'SUPER_ADMIN' ? 'admin' : 'เลขบัตร 13 หลัก'}
+                                        placeholder={mode === 'SUPER_ADMIN' ? 'admin' : 'เลขบัตร 13 หลัก หรือ admin'}
                                         value={loginUsername}
                                         onChange={(e) => setLoginUsername(e.target.value)}
                                         className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"

@@ -1,46 +1,97 @@
 
 import React, { useState } from 'react';
 import { School, Teacher } from '../types';
-import { Building, Plus, LogOut, MapPin, Search, Users, X, User, ChevronRight } from 'lucide-react';
+import { Building, Plus, LogOut, MapPin, Users, X, User, ChevronRight, Edit, Trash2, Save, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 interface SuperAdminDashboardProps {
     schools: School[];
     teachers: Teacher[];
     onCreateSchool: (school: School) => void;
+    onUpdateSchool: (school: School) => void;
+    onDeleteSchool: (schoolId: string) => void;
+    onUpdateTeacher: (teacher: Teacher) => void;
     onLogout: () => void;
 }
 
-const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teachers, onCreateSchool, onLogout }) => {
+const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teachers, onCreateSchool, onUpdateSchool, onDeleteSchool, onUpdateTeacher, onLogout }) => {
     const [showForm, setShowForm] = useState(false);
-    const [newSchool, setNewSchool] = useState<Partial<School>>({ id: '', name: '', district: '', province: '' });
+    const [formMode, setFormMode] = useState<'CREATE' | 'EDIT'>('CREATE');
+    const [formData, setFormData] = useState<Partial<School>>({ id: '', name: '', district: '', province: '' });
     const [error, setError] = useState('');
 
     // Teacher List Modal
     const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(null);
 
+    const handleStartCreate = () => {
+        setFormMode('CREATE');
+        setFormData({ id: '', name: '', district: '', province: '' });
+        setShowForm(true);
+    };
+
+    const handleStartEdit = (school: School) => {
+        setFormMode('EDIT');
+        setFormData({ ...school });
+        setShowForm(true);
+    };
+
+    const handleDelete = (schoolId: string) => {
+        const teacherCount = teachers.filter(t => t.schoolId === schoolId).length;
+        if (teacherCount > 0) {
+            if (!confirm(`โรงเรียนนี้มีบุคลากรอยู่จำนวน ${teacherCount} ท่าน \nการลบโรงเรียนจะไม่ลบบุคลากร (แต่บุคลากรจะเข้าสู่ระบบไม่ได้จนกว่าจะย้ายสังกัด) \n\nยืนยันที่จะลบโรงเรียนนี้หรือไม่?`)) {
+                return;
+            }
+        } else {
+            if (!confirm('ยืนยันการลบโรงเรียนนี้?')) return;
+        }
+        
+        onDeleteSchool(schoolId);
+    };
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
 
-        if (!newSchool.id || newSchool.id.length !== 8) {
-            setError('รหัสโรงเรียนต้องมี 8 หลัก');
-            return;
+        if (formMode === 'CREATE') {
+            if (!formData.id || formData.id.length !== 8) {
+                setError('รหัสโรงเรียนต้องมี 8 หลัก');
+                return;
+            }
+            if (schools.find(s => s.id === formData.id)) {
+                setError('รหัสโรงเรียนนี้มีอยู่ในระบบแล้ว');
+                return;
+            }
         }
 
-        if (schools.find(s => s.id === newSchool.id)) {
-            setError('รหัสโรงเรียนนี้มีอยู่ในระบบแล้ว');
-            return;
-        }
-
-        if (!newSchool.name) {
+        if (!formData.name) {
             setError('กรุณาระบุชื่อโรงเรียน');
             return;
         }
 
-        onCreateSchool(newSchool as School);
-        setNewSchool({ id: '', name: '', district: '', province: '' });
+        if (formMode === 'CREATE') {
+            onCreateSchool(formData as School);
+            alert('สร้างโรงเรียนเรียบร้อยแล้ว');
+        } else {
+            onUpdateSchool(formData as School);
+            alert('แก้ไขข้อมูลเรียบร้อยแล้ว');
+        }
+
+        setFormData({ id: '', name: '', district: '', province: '' });
         setShowForm(false);
-        alert('สร้างโรงเรียนเรียบร้อยแล้ว');
+    };
+
+    const toggleSchoolAdmin = (teacher: Teacher) => {
+        const isCurrentlyAdmin = teacher.roles.includes('SYSTEM_ADMIN');
+        let newRoles = [...teacher.roles];
+        
+        if (isCurrentlyAdmin) {
+            if(!confirm(`ต้องการปลด ${teacher.name} ออกจากการเป็น Admin โรงเรียนใช่หรือไม่?`)) return;
+            newRoles = newRoles.filter(r => r !== 'SYSTEM_ADMIN');
+        } else {
+            if(!confirm(`ต้องการตั้งให้ ${teacher.name} เป็น Admin ผู้ดูแลระบบของโรงเรียนนี้ใช่หรือไม่?`)) return;
+            newRoles.push('SYSTEM_ADMIN');
+        }
+        
+        onUpdateTeacher({ ...teacher, roles: newRoles });
     };
 
     return (
@@ -65,19 +116,20 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                         <p className="text-slate-500">ระบบมีโรงเรียนทั้งหมด {schools.length} แห่ง และบุคลากร {teachers.filter(t => !t.schoolId.includes('9999')).length} ท่าน</p>
                     </div>
                     <button 
-                        onClick={() => setShowForm(true)}
+                        onClick={handleStartCreate}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl shadow-lg flex items-center gap-2 font-bold transition-transform hover:scale-105"
                     >
                         <Plus size={20}/> สร้างโรงเรียนใหม่
                     </button>
                 </div>
 
-                {/* Create Form Modal */}
+                {/* Create/Edit Form Modal */}
                 {showForm && (
                     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 animate-slide-down">
                             <h3 className="text-xl font-bold text-slate-800 mb-4 border-b pb-2 flex items-center gap-2">
-                                <Building className="text-blue-600"/> สร้างโรงเรียนใหม่
+                                {formMode === 'CREATE' ? <Plus className="text-blue-600"/> : <Edit className="text-orange-500"/>}
+                                {formMode === 'CREATE' ? 'สร้างโรงเรียนใหม่' : 'แก้ไขข้อมูลโรงเรียน'}
                             </h3>
                             
                             {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 text-sm font-bold border border-red-200">{error}</div>}
@@ -88,18 +140,20 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                                     <input 
                                         type="text" 
                                         maxLength={8}
-                                        value={newSchool.id}
-                                        onChange={e => setNewSchool({...newSchool, id: e.target.value.replace(/\D/g,'')})}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono tracking-widest text-lg"
+                                        value={formData.id}
+                                        disabled={formMode === 'EDIT'}
+                                        onChange={e => setFormData({...formData, id: e.target.value.replace(/\D/g,'')})}
+                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono tracking-widest text-lg ${formMode === 'EDIT' ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
                                         placeholder="XXXXXXXX"
                                     />
+                                    {formMode === 'EDIT' && <p className="text-xs text-slate-400 mt-1">รหัสโรงเรียนไม่สามารถแก้ไขได้</p>}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อโรงเรียน</label>
                                     <input 
                                         type="text" 
-                                        value={newSchool.name}
-                                        onChange={e => setNewSchool({...newSchool, name: e.target.value})}
+                                        value={formData.name}
+                                        onChange={e => setFormData({...formData, name: e.target.value})}
                                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                         placeholder="ระบุชื่อโรงเรียน"
                                     />
@@ -109,8 +163,8 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                                         <label className="block text-sm font-bold text-slate-700 mb-1">อำเภอ/เขต</label>
                                         <input 
                                             type="text" 
-                                            value={newSchool.district}
-                                            onChange={e => setNewSchool({...newSchool, district: e.target.value})}
+                                            value={formData.district}
+                                            onChange={e => setFormData({...formData, district: e.target.value})}
                                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                         />
                                     </div>
@@ -118,8 +172,8 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                                         <label className="block text-sm font-bold text-slate-700 mb-1">จังหวัด</label>
                                         <input 
                                             type="text" 
-                                            value={newSchool.province}
-                                            onChange={e => setNewSchool({...newSchool, province: e.target.value})}
+                                            value={formData.province}
+                                            onChange={e => setFormData({...formData, province: e.target.value})}
                                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                         />
                                     </div>
@@ -127,7 +181,9 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
 
                                 <div className="flex gap-3 pt-4">
                                     <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200">ยกเลิก</button>
-                                    <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-md">บันทึก</button>
+                                    <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-md flex items-center justify-center gap-2">
+                                        <Save size={18}/> บันทึก
+                                    </button>
                                 </div>
                             </form>
                         </div>
@@ -137,7 +193,7 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                 {/* Teacher List Modal (Full View) */}
                 {selectedSchoolId && (
                     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col animate-slide-down">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col animate-slide-down">
                             {(() => {
                                 const school = schools.find(s => s.id === selectedSchoolId);
                                 const schoolTeachers = teachers.filter(t => t.schoolId === selectedSchoolId);
@@ -153,31 +209,53 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                                                 <X size={24}/>
                                             </button>
                                         </div>
-                                        <div className="overflow-y-auto p-6 custom-scrollbar">
+                                        <div className="overflow-y-auto p-6 custom-scrollbar bg-slate-50/50">
                                             {schoolTeachers.length === 0 ? (
-                                                <div className="text-center py-10 text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-300">
+                                                <div className="text-center py-10 text-slate-400 bg-white rounded-lg border border-dashed border-slate-300">
                                                     ยังไม่มีบุคลากรลงทะเบียน
                                                 </div>
                                             ) : (
                                                 <div className="grid gap-3">
-                                                    {schoolTeachers.map(t => (
-                                                        <div key={t.id} className="flex items-center gap-4 p-3 border rounded-xl hover:bg-slate-50 transition-colors">
-                                                            <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold">
-                                                                <User size={20}/>
+                                                    {schoolTeachers.map(t => {
+                                                        const isSchoolAdmin = t.roles.includes('SYSTEM_ADMIN');
+                                                        return (
+                                                            <div key={t.id} className={`flex items-center gap-4 p-4 border rounded-xl transition-colors ${isSchoolAdmin ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                                                                <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg ${isSchoolAdmin ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                                                                    {isSchoolAdmin ? <ShieldCheck size={24}/> : <User size={24}/>}
+                                                                </div>
+                                                                <div className="flex-1">
+                                                                    <div className="font-bold text-slate-800 flex items-center gap-2">
+                                                                        {t.name}
+                                                                        {isSchoolAdmin && <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full">School Admin</span>}
+                                                                    </div>
+                                                                    <div className="text-sm text-slate-500">ตำแหน่ง: {t.position} | ID: {t.id}</div>
+                                                                    <div className="flex gap-1 flex-wrap mt-1">
+                                                                        {t.roles.map(r => (
+                                                                            <span key={r} className="text-[10px] bg-white border border-slate-200 text-slate-500 px-2 py-0.5 rounded-full">
+                                                                                {r}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex flex-col items-end gap-2">
+                                                                    <button 
+                                                                        onClick={() => toggleSchoolAdmin(t)}
+                                                                        className={`text-xs px-3 py-2 rounded-lg font-bold flex items-center gap-1 transition-all ${
+                                                                            isSchoolAdmin 
+                                                                                ? 'bg-white text-red-600 border border-red-200 hover:bg-red-50' 
+                                                                                : 'bg-slate-800 text-white hover:bg-slate-900 shadow-sm'
+                                                                        }`}
+                                                                    >
+                                                                        {isSchoolAdmin ? (
+                                                                            <><ShieldAlert size={14}/> ปลด Admin</>
+                                                                        ) : (
+                                                                            <><ShieldCheck size={14}/> ตั้งเป็น Admin</>
+                                                                        )}
+                                                                    </button>
+                                                                </div>
                                                             </div>
-                                                            <div className="flex-1">
-                                                                <div className="font-bold text-slate-800">{t.name}</div>
-                                                                <div className="text-xs text-slate-500">ตำแหน่ง: {t.position} | ID: {t.id}</div>
-                                                            </div>
-                                                            <div className="flex gap-1 flex-wrap justify-end max-w-[150px]">
-                                                                {t.roles.map(r => (
-                                                                    <span key={r} className="text-[10px] bg-slate-100 text-slate-600 px-2 py-1 rounded-full border border-slate-200 truncate max-w-full">
-                                                                        {r}
-                                                                    </span>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </div>
                                             )}
                                         </div>
@@ -196,8 +274,27 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                         const previewTeachers = schoolTeachers.slice(0, 5); // Show first 5
 
                         return (
-                            <div key={s.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-lg transition-all group flex flex-col h-full">
+                            <div key={s.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-lg transition-all group flex flex-col h-full relative">
                                 <div className="h-2 bg-gradient-to-r from-blue-400 to-indigo-500"></div>
+                                
+                                {/* Edit/Delete Buttons Overlay */}
+                                <div className="absolute top-4 right-4 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); handleStartEdit(s); }}
+                                        className="p-2 bg-white text-slate-500 hover:text-blue-600 border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-all"
+                                        title="แก้ไขข้อมูล"
+                                    >
+                                        <Edit size={16}/>
+                                    </button>
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); handleDelete(s.id); }}
+                                        className="p-2 bg-white text-slate-500 hover:text-red-600 border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-all"
+                                        title="ลบโรงเรียน"
+                                    >
+                                        <Trash2 size={16}/>
+                                    </button>
+                                </div>
+
                                 <div className="p-6 flex-1 flex flex-col">
                                     <div className="flex justify-between items-start mb-4">
                                         <div className="p-3 bg-blue-50 text-blue-600 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
@@ -228,7 +325,7 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                                             {previewTeachers.length > 0 ? (
                                                 previewTeachers.map(t => (
                                                     <div key={t.id} className="text-xs text-slate-600 flex items-center gap-2 truncate">
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-slate-300"></div>
+                                                        <div className={`w-1.5 h-1.5 rounded-full ${t.roles.includes('SYSTEM_ADMIN') ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
                                                         {t.name}
                                                     </div>
                                                 ))
