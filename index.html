@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SchoolOS - Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Charm:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Sarabun', sans-serif;
+        background-color: #f3f4f6;
+      }
+      .font-cursive {
+        font-family: 'Charm', cursive;
+      }
+      .font-sarabun {
+        font-family: 'Sarabun', sans-serif;
+      }
+      @media print {
+        @page { size: A4; margin: 0; }
+        body { background: white; }
+        .no-print { display: none !important; }
+        .page-break-inside-avoid { break-inside: avoid; }
+      }
+      /* Custom Scrollbar */
+      .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+          background: #f1f1f1; 
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #cbd5e1; 
+          border-radius: 4px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8; 
+      }
+      /* Animations */
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-fade-in {
+        animation: fadeIn 0.3s ease-out forwards;
+      }
+      @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-slide-down {
+        animation: slideDown 0.2s ease-out forwards;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "pdf-lib": "https://aistudiocdn.com/pdf-lib@1.17.1",
+    "@pdf-lib/fontkit": "https://aistudiocdn.com/@pdf-lib/fontkit@1.1.1",
+    "react-dom/client": "https://aistudiocdn.com/react-dom@18.2.0/client",
+    "react-dom": "https://aistudiocdn.com/react-dom@18.2.0",
+    "react": "https://aistudiocdn.com/react@18.2.0",
+    "react/": "https://aistudiocdn.com/react@18.2.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@0.300.0",
+    "recharts": "https://aistudiocdn.com/recharts@2.10.3",
+    "vite": "https://aistudiocdn.com/vite@5.0.8",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@4.2.1",
+    "firebase/app": "https://aistudiocdn.com/firebase@10.7.1/app",
+    "firebase/firestore": "https://aistudiocdn.com/firebase@10.7.1/firestore",
+    "firebase/auth": "https://aistudiocdn.com/firebase@10.7.1/auth",
+    "firebase/storage": "https://aistudiocdn.com/firebase@10.7.1/storage",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
