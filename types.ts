@@ -34,6 +34,10 @@ export interface School {
   lng?: number;        // Longitude for Attendance
   radius?: number;     // Allowed radius in meters
   lateTimeThreshold?: string; // Time string e.g., "08:15"
+  
+  // Academic Year Settings (MM-DD)
+  academicYearStart?: string; // e.g. "05-16"
+  academicYearEnd?: string;   // e.g. "03-31" or next year "05-15"
 }
 
 export interface Attachment {
@@ -185,6 +189,9 @@ export interface SystemConfig {
   directorSignatureBase64?: string; // Base64 PNG of Director Signature
   schoolLogoBase64?: string; // Base64 PNG of School Logo / Garuda
   
+  // Official Document Logo (Garuda) - New
+  officialGarudaBase64?: string;
+
   // Signature Customization
   directorSignatureScale?: number;    // Scale factor (default 1.0)
   directorSignatureYOffset?: number;  // Vertical offset in pixels (default 0)

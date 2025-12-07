@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { DocumentItem, Teacher, Attachment, SystemConfig } from '../types';
 import { MOCK_DOCUMENTS, CURRENT_SCHOOL_YEAR } from '../constants';
@@ -9,9 +10,11 @@ import { stampPdfDocument, stampReceiveNumber } from '../utils/pdfStamper';
 interface DocumentsSystemProps {
     currentUser: Teacher;
     allTeachers: Teacher[];
+    focusDocId?: string | null;
+    onClearFocus?: () => void;
 }
 
-const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeachers }) => {
+const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeachers, focusDocId, onClearFocus }) => {
     // State
     const [docs, setDocs] = useState<DocumentItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -28,6 +31,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     
     const [viewMode, setViewMode] = useState<'LIST' | 'CREATE' | 'DETAIL'>('LIST');
     const [selectedDoc, setSelectedDoc] = useState<DocumentItem | null>(null);
+    const [isHighlighted, setIsHighlighted] = useState(false);
 
     // Form State (Admin)
     const [newDoc, setNewDoc] = useState({ 
@@ -185,6 +189,23 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             if(unsubscribe) unsubscribe();
         }
     }, []);
+
+    // --- Focus Deep Link Effect ---
+    useEffect(() => {
+        if (focusDocId && docs.length > 0) {
+            const found = docs.find(d => d.id === focusDocId);
+            if (found) {
+                setSelectedDoc(found);
+                setViewMode('DETAIL');
+                
+                // Visual Highlight Effect
+                setIsHighlighted(true);
+                setTimeout(() => setIsHighlighted(false), 2500);
+
+                if (onClearFocus) onClearFocus();
+            }
+        }
+    }, [focusDocId, docs, onClearFocus]);
 
     // --- Attachment Handlers ---
 
@@ -1012,7 +1033,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
 
             {/* --- DETAIL VIEW --- */}
             {viewMode === 'DETAIL' && selectedDoc && (
-                <div className="max-w-4xl mx-auto space-y-6">
+                <div className={`max-w-4xl mx-auto space-y-6 ${isHighlighted ? 'ring-4 ring-blue-300 rounded-xl transition-all duration-500' : ''}`}>
                      {/* Overlay Loader for Signing */}
                      {isSigning && (
                         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center flex-col text-white">

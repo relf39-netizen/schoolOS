@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 // Sidebar is removed
 import DocumentsSystem from './components/DocumentsSystem';
@@ -14,7 +15,7 @@ import { SystemView, Teacher, School, TeacherRole } from './types';
 import { 
     Activity, Users, Clock, FileText, CalendarRange, 
     Loader, Database, ServerOff, Home, LogOut, 
-    Settings, ChevronLeft, Building2, LayoutGrid, Bell, UserCircle
+    Settings, ChevronLeft, Building2, LayoutGrid, Bell, UserCircle, ExternalLink, X
 } from 'lucide-react';
 import { MOCK_DOCUMENTS, MOCK_LEAVE_REQUESTS, MOCK_TRANSACTIONS, MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
 import { db, isConfigured } from './firebaseConfig';
@@ -22,6 +23,13 @@ import { collection, onSnapshot, setDoc, doc, deleteDoc, query, where } from 'fi
 
 // Keys for LocalStorage
 const SESSION_KEY = 'schoolos_session_v1';
+
+interface AppNotification {
+    message: string;
+    type: 'info' | 'alert';
+    linkTo?: SystemView;
+    linkId?: string;
+}
 
 const App: React.FC = () => {
     // Global Data State
@@ -35,8 +43,11 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
 
     // Notification State
-    const [notification, setNotification] = useState<{message: string, type: 'info' | 'alert'} | null>(null);
+    const [notification, setNotification] = useState<AppNotification | null>(null);
     const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+
+    // Deep Link State (For clicking notification)
+    const [focusItem, setFocusItem] = useState<{ view: SystemView, id: string } | null>(null);
 
     // --- DATA SYNCHRONIZATION (FIREBASE) ---
     useEffect(() => {
@@ -115,7 +126,31 @@ const App: React.FC = () => {
         setIsLoading(false);
     }, [isDataLoaded, allTeachers]);
 
-    // --- LEAVE & NOTIFICATION LISTENER ---
+    // --- NOTIFICATION HELPERS ---
+    const requestNotificationPermission = async () => {
+        if ('Notification' in window && Notification.permission !== 'granted') {
+            await Notification.requestPermission();
+        }
+    };
+
+    useEffect(() => {
+        requestNotificationPermission();
+    }, []);
+
+    const sendSystemNotification = (title: string, body: string) => {
+        // 1. Browser Notification
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(title, { body, icon: '/vite.svg' });
+        }
+        // 2. Sound
+        try {
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+            audio.volume = 0.5;
+            audio.play().catch(() => {}); // Catch autoplay blocks
+        } catch(e) {}
+    };
+
+    // --- LEAVE LISTENER ---
     useEffect(() => {
         let unsubLeave: (() => void) | undefined;
         
@@ -144,15 +179,15 @@ const App: React.FC = () => {
                         if (change.type === 'added') {
                             const data = change.doc.data();
                             const teacherName = data.teacherName || 'บุคลากร';
+                            const msg = `มีรายการลาใหม่จาก: ${teacherName} รอการอนุมัติ`;
+                            
                             setNotification({
-                                message: `มีรายการลาใหม่จาก: ${teacherName} รอการอนุมัติ`,
-                                type: 'info'
+                                message: msg,
+                                type: 'info',
+                                linkTo: SystemView.LEAVE,
+                                linkId: change.doc.id
                             });
-                            try {
-                                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-                                audio.volume = 0.5;
-                                audio.play().catch(e => console.log("Audio play blocked"));
-                            } catch(e) {}
+                            sendSystemNotification('อนุมัติการลา', msg);
                         }
                     });
                 }
@@ -165,6 +200,67 @@ const App: React.FC = () => {
 
         return () => {
             if (unsubLeave) unsubLeave();
+        };
+    }, [currentUser]);
+
+    // --- DOCUMENTS LISTENER ---
+    useEffect(() => {
+        let unsubDocs: (() => void) | undefined;
+
+        if (currentUser && isConfigured && db) {
+            // Query documents for this school
+            const qDocs = query(
+                collection(db, "documents"), 
+                where("schoolId", "==", currentUser.schoolId)
+            );
+
+            let isInitial = true;
+
+            unsubDocs = onSnapshot(qDocs, (snapshot) => {
+                if (isInitial) {
+                    isInitial = false;
+                    return;
+                }
+
+                snapshot.docChanges().forEach((change) => {
+                    const docData = change.doc.data();
+                    const docId = change.doc.id;
+
+                    // 1. Notify Director for New Pending Documents
+                    if (change.type === 'added' && docData.status === 'PendingDirector' && currentUser.roles.includes('DIRECTOR')) {
+                        const msg = `หนังสือราชการใหม่: ${docData.title} รอเกษียณ`;
+                        setNotification({
+                            message: msg,
+                            type: 'info',
+                            linkTo: SystemView.DOCUMENTS,
+                            linkId: docId
+                        });
+                        sendSystemNotification('งานสารบรรณ', msg);
+                    }
+
+                    // 2. Notify Teachers for Distributed Documents
+                    if ((change.type === 'added' || change.type === 'modified') && docData.status === 'Distributed') {
+                        const targets = docData.targetTeachers || [];
+                        const acks = docData.acknowledgedBy || [];
+
+                        // If user is target and hasn't acknowledged yet
+                        if (targets.includes(currentUser.id) && !acks.includes(currentUser.id)) {
+                             const msg = `มีหนังสือสั่งการถึงท่าน: ${docData.title}`;
+                            setNotification({
+                                message: msg,
+                                type: 'alert',
+                                linkTo: SystemView.DOCUMENTS,
+                                linkId: docId
+                            });
+                            sendSystemNotification('หนังสือสั่งการ', msg);
+                        }
+                    }
+                });
+            });
+        }
+
+        return () => {
+            if (unsubDocs) unsubDocs();
         };
     }, [currentUser]);
 
@@ -247,6 +343,16 @@ const App: React.FC = () => {
     const handleDeleteTeacher = async (teacherId: string) => {
         if (isConfigured && db) await deleteDoc(doc(db, 'teachers', teacherId));
         else setAllTeachers(allTeachers.filter(t => t.id !== teacherId));
+    };
+
+    const handleNotificationClick = () => {
+        if (notification?.linkTo) {
+            setCurrentView(notification.linkTo);
+            if (notification.linkId) {
+                setFocusItem({ view: notification.linkTo, id: notification.linkId });
+            }
+            setNotification(null);
+        }
     };
 
     // --- Renderers ---
@@ -418,8 +524,21 @@ const App: React.FC = () => {
         if (!currentSchool) return <div className="p-8 text-center text-slate-500">ไม่พบข้อมูลโรงเรียน</div>;
         switch (currentView) {
             case SystemView.PROFILE: return <UserProfile currentUser={currentUser} onUpdateUser={setCurrentUser} />;
-            case SystemView.DOCUMENTS: return <DocumentsSystem currentUser={currentUser} allTeachers={schoolTeachers} />;
-            case SystemView.LEAVE: return <LeaveSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool} />;
+            case SystemView.DOCUMENTS: 
+                return <DocumentsSystem 
+                    currentUser={currentUser} 
+                    allTeachers={schoolTeachers} 
+                    focusDocId={focusItem?.view === SystemView.DOCUMENTS ? focusItem.id : null}
+                    onClearFocus={() => setFocusItem(null)}
+                />;
+            case SystemView.LEAVE: 
+                return <LeaveSystem 
+                    currentUser={currentUser} 
+                    allTeachers={schoolTeachers} 
+                    currentSchool={currentSchool} 
+                    focusRequestId={focusItem?.view === SystemView.LEAVE ? focusItem.id : null}
+                    onClearFocus={() => setFocusItem(null)}
+                />;
             case SystemView.FINANCE: return <FinanceSystem currentUser={currentUser} />;
             case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool} />;
             case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} />;
@@ -433,17 +552,32 @@ const App: React.FC = () => {
             
             {/* --- NOTIFICATION TOAST --- */}
             {notification && (
-                <div className="fixed top-4 right-4 z-50 animate-slide-down print:hidden">
-                    <div className="bg-white border-l-4 border-blue-500 shadow-2xl rounded-r-lg p-4 flex items-start gap-3 max-w-sm">
-                        <div className="bg-blue-100 p-2 rounded-full text-blue-600">
+                <div 
+                    onClick={handleNotificationClick}
+                    className="fixed bottom-6 right-6 z-50 animate-slide-up print:hidden cursor-pointer"
+                >
+                    <div className={`border-l-4 shadow-2xl rounded-lg p-4 flex items-start gap-4 max-w-sm transition-transform hover:scale-105 bg-white ${
+                        notification.type === 'alert' ? 'border-red-500 ring-1 ring-red-100' : 'border-blue-500 ring-1 ring-blue-100'
+                    }`}>
+                        <div className={`p-2.5 rounded-full shrink-0 ${
+                            notification.type === 'alert' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
+                        }`}>
                             <Bell size={24}/>
                         </div>
-                        <div className="flex-1">
-                            <h4 className="font-bold text-slate-800">การแจ้งเตือน</h4>
-                            <p className="text-sm text-slate-600">{notification.message}</p>
+                        <div className="flex-1 min-w-0">
+                            <h4 className="font-bold text-slate-800 text-sm mb-1">{notification.type === 'alert' ? 'แจ้งเตือนด่วน' : 'แจ้งเตือนระบบ'}</h4>
+                            <p className="text-sm text-slate-600 leading-snug break-words">{notification.message}</p>
+                            {notification.linkTo && (
+                                <p className="text-xs text-blue-600 mt-2 flex items-center gap-1 font-bold bg-blue-50 w-fit px-2 py-1 rounded hover:bg-blue-100 transition-colors">
+                                    คลิกเพื่อเปิดดู <ExternalLink size={10}/>
+                                </p>
+                            )}
                         </div>
-                        <button onClick={() => setNotification(null)} className="text-slate-400 hover:text-slate-600">
-                            <ChevronLeft size={16} className="rotate-180"/>
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); setNotification(null); }} 
+                            className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-full"
+                        >
+                            <X size={16}/>
                         </button>
                     </div>
                 </div>

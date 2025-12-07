@@ -1,16 +1,23 @@
+
 import React, { useState, useEffect } from 'react';
-import { Transaction, FinanceAccount, Teacher, FinanceAuditLog } from '../types';
+import { Transaction, FinanceAccount, Teacher, FinanceAuditLog, SystemConfig } from '../types';
 import { MOCK_TRANSACTIONS, MOCK_ACCOUNTS } from '../constants';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft, Loader, Database, ServerOff, Edit2, Trash2, X, Save, ShieldAlert, Eye } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft, Loader, Database, ServerOff, Edit2, Trash2, X, Save, ShieldAlert, Eye, Printer } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
-import { collection, addDoc, onSnapshot, query, where, orderBy, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, where, orderBy, doc, deleteDoc, updateDoc, getDoc } from 'firebase/firestore';
 
 // Thai Date Helper
 const getThaiDate = (dateStr: string) => {
     if (!dateStr) return '';
     const date = new Date(dateStr);
     return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const getThaiMonthYear = (dateStr: string) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
 };
 
 interface FinanceSystemProps {
@@ -29,11 +36,17 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
     const [auditLogs, setAuditLogs] = useState<FinanceAuditLog[]>([]); // For Director
     const [isLoadingData, setIsLoadingData] = useState(true);
     
+    // System Config for Reports
+    const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
+
     // Determine default active tab
     const [activeTab, setActiveTab] = useState<'Budget' | 'NonBudget'>(
         isBudgetOfficer ? 'Budget' : isNonBudgetOfficer ? 'NonBudget' : 'Budget'
     );
     
+    // View State
+    const [viewMode, setViewMode] = useState<'DASHBOARD' | 'DETAIL' | 'PRINT'>('DASHBOARD');
+
     // Drill-down State
     const [selectedAccount, setSelectedAccount] = useState<FinanceAccount | null>(null);
 
@@ -110,6 +123,18 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
                 });
             }
 
+            // Fetch Config
+            const fetchConfig = async () => {
+                try {
+                    const docRef = doc(db, "system_config", "settings");
+                    const docSnap = await getDoc(docRef);
+                    if (docSnap.exists()) {
+                        setSysConfig(docSnap.data() as SystemConfig);
+                    }
+                } catch (e) {}
+            };
+            fetchConfig();
+
         } else {
             // Offline Mode
             setAccounts(MOCK_ACCOUNTS);
@@ -139,8 +164,10 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
         if (activeTab === 'NonBudget') {
             // We don't force select here, we handle it in rendering to show DetailView immediately
             setSelectedAccount(null); // Clear selected account so we can handle "All NonBudget" logic
+            if (viewMode === 'DASHBOARD') setViewMode('DETAIL');
         } else {
              setSelectedAccount(null);
+             if (viewMode === 'DETAIL') setViewMode('DASHBOARD');
         }
 
     }, [currentUser, isBudgetOfficer, isNonBudgetOfficer, isDirector, activeTab]);
@@ -427,7 +454,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
                     return (
                         <div 
                             key={acc.id} 
-                            onClick={() => setSelectedAccount(acc)}
+                            onClick={() => { setSelectedAccount(acc); setViewMode('DETAIL'); }}
                             className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-lg hover:border-blue-300 cursor-pointer transition-all relative overflow-hidden group"
                         >
                             <div className="absolute top-0 right-0 w-20 h-20 bg-blue-50 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-125"></div>
@@ -460,24 +487,36 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
     const renderDetailView = () => (
         <div className="space-y-6 animate-fade-in">
             {/* Header & Back Button */}
-            <div className="flex items-center gap-4">
-                {/* Only show back button if we are in Budget mode where we selected an account */}
-                {activeTab === 'Budget' && (
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                    {/* Only show back button if we are in Budget mode where we selected an account */}
+                    {activeTab === 'Budget' && (
+                        <button 
+                            onClick={() => { setSelectedAccount(null); setShowTransForm(false); setViewMode('DASHBOARD'); }}
+                            className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+                        >
+                            <ArrowLeft size={24} />
+                        </button>
+                    )}
+                    <div>
+                        <h2 className="text-2xl font-bold text-slate-800">
+                            {activeTab === 'Budget' ? selectedAccount?.name : 'เงินนอกงบประมาณ (รวม)'}
+                        </h2>
+                        <p className="text-slate-500">
+                            {activeTab === 'Budget' ? 'รายการรับ-จ่ายภายในบัญชีนี้' : 'สามารถบันทึกรายรับรายจ่ายได้โดยไม่ต้องตั้งชื่อบัญชี'}
+                        </p>
+                    </div>
+                </div>
+                
+                {/* Print Button (For Review) */}
+                {(isDirector || isBudgetOfficer || isNonBudgetOfficer) && (
                     <button 
-                        onClick={() => { setSelectedAccount(null); setShowTransForm(false); }}
-                        className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+                        onClick={() => setViewMode('PRINT')}
+                        className="bg-slate-800 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-slate-900 transition-colors flex items-center gap-2"
                     >
-                        <ArrowLeft size={24} />
+                        <Printer size={18} /> พิมพ์รายงานเสนอ ผอ.
                     </button>
                 )}
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-800">
-                        {activeTab === 'Budget' ? selectedAccount?.name : 'เงินนอกงบประมาณ (รวม)'}
-                    </h2>
-                    <p className="text-slate-500">
-                        {activeTab === 'Budget' ? 'รายการรับ-จ่ายภายในบัญชีนี้' : 'สามารถบันทึกรายรับรายจ่ายได้โดยไม่ต้องตั้งชื่อบัญชี'}
-                    </p>
-                </div>
             </div>
 
             {/* Summary Cards for this specific view */}
@@ -695,56 +734,222 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser }) => {
         </div>
     );
 
+    // --- RENDER PRINT VIEW (MEMO STYLE) ---
+    const renderPrintView = () => (
+        <div className="animate-fade-in pb-10">
+            {/* Toolbar */}
+            <div className="bg-white p-4 shadow-sm mb-6 print:hidden">
+                <div className="max-w-4xl mx-auto flex justify-between items-center gap-4">
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => setViewMode('DETAIL')} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">
+                            <ArrowLeft size={20}/>
+                        </button>
+                        <h2 className="font-bold text-slate-800 text-lg">รายงานการเงิน (สำหรับพิมพ์เสนอ ผอ.)</h2>
+                    </div>
+                    <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 shadow-sm">
+                        <Printer size={18} /> สั่งพิมพ์เอกสาร
+                    </button>
+                </div>
+            </div>
+
+            {/* A4 Paper */}
+            <div className="bg-white shadow-lg p-10 mx-auto max-w-[800px] min-h-[1000px] font-sarabun text-black leading-relaxed print:shadow-none print:border-none print:p-0 print:w-full">
+                {/* Header: Garuda & Memo */}
+                <div className="flex flex-col items-center mb-6">
+                     <img 
+                        src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Emblem_of_the_Ministry_of_Education_of_Thailand.svg/1200px-Emblem_of_the_Ministry_of_Education_of_Thailand.svg.png" 
+                        alt="Garuda" 
+                        className="h-20 mb-2 grayscale opacity-90"
+                    />
+                    <h2 className="text-xl font-bold">บันทึกข้อความ</h2>
+                </div>
+
+                <div className="flex gap-2 mb-2">
+                    <span className="font-bold w-20">ส่วนราชการ</span>
+                    <span className="border-b border-dotted border-black flex-1">{sysConfig?.schoolName || 'โรงเรียน.......................................................'}</span>
+                </div>
+                <div className="flex gap-8 mb-2">
+                     <div className="flex gap-2 flex-1">
+                        <span className="font-bold w-10">ที่</span>
+                        <span className="border-b border-dotted border-black flex-1">........................................</span>
+                     </div>
+                     <div className="flex gap-2 flex-1">
+                        <span className="font-bold w-10">วันที่</span>
+                        <span className="border-b border-dotted border-black flex-1">{getThaiDate(new Date().toISOString())}</span>
+                     </div>
+                </div>
+                <div className="flex gap-2 mb-6">
+                    <span className="font-bold w-20">เรื่อง</span>
+                    <span className="border-b border-dotted border-black flex-1">
+                        รายงานการรับ-จ่ายเงิน {activeTab === 'Budget' ? 'งบประมาณ' : 'นอกงบประมาณ'}
+                        {selectedAccount ? ` (${selectedAccount.name})` : ''} ประจำเดือน {getThaiMonthYear(new Date().toISOString())}
+                    </span>
+                </div>
+
+                <div className="mb-4">
+                    <span className="font-bold mr-2">เรียน</span> ผู้อำนวยการโรงเรียน
+                </div>
+
+                <div className="indent-12 text-justify mb-4">
+                    ตามที่ ข้าพเจ้า {currentUser.name} ตำแหน่ง {currentUser.position} ปฏิบัติหน้าที่เจ้าหน้าที่การเงิน ({activeTab === 'Budget' ? 'งบประมาณ' : 'นอกงบประมาณ'}) ได้ดำเนินการบันทึกรายการรับ-จ่ายเงิน
+                    {selectedAccount ? ` ของบัญชี "${selectedAccount.name}"` : ` ประเภทเงิน${activeTab === 'Budget' ? 'งบประมาณ' : 'นอกงบประมาณ'}`}
+                    นั้น บัดนี้ขอรายงานผลการดำเนินงาน ดังรายละเอียดต่อไปนี้
+                </div>
+
+                {/* Transaction Table */}
+                <table className="w-full border-collapse border border-black mb-6 text-sm">
+                    <thead>
+                        <tr className="bg-slate-100">
+                            <th className="border border-black p-2 text-center w-12">ที่</th>
+                            <th className="border border-black p-2 text-center w-24">ว/ด/ป</th>
+                            <th className="border border-black p-2 text-left">รายการ</th>
+                            <th className="border border-black p-2 text-right w-24">รายรับ</th>
+                            <th className="border border-black p-2 text-right w-24">รายจ่าย</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {displayTransactions.length === 0 ? (
+                             <tr><td colSpan={5} className="border border-black p-4 text-center text-slate-400">ไม่มีรายการเคลื่อนไหว</td></tr>
+                        ) : (
+                            displayTransactions
+                            .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime()) // Sort by Date ASC for Report
+                            .map((t, index) => (
+                                <tr key={t.id}>
+                                    <td className="border border-black p-2 text-center">{index + 1}</td>
+                                    <td className="border border-black p-2 text-center">{getThaiDate(t.date)}</td>
+                                    <td className="border border-black p-2">{t.description}</td>
+                                    <td className="border border-black p-2 text-right">
+                                        {t.type === 'Income' ? t.amount.toLocaleString() : '-'}
+                                    </td>
+                                    <td className="border border-black p-2 text-right">
+                                        {t.type === 'Expense' ? t.amount.toLocaleString() : '-'}
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                    <tfoot>
+                         <tr className="bg-slate-50 font-bold">
+                            <td colSpan={3} className="border border-black p-2 text-right">รวมทั้งสิ้น</td>
+                            <td className="border border-black p-2 text-right">{totalIncome.toLocaleString()}</td>
+                            <td className="border border-black p-2 text-right">{totalExpense.toLocaleString()}</td>
+                         </tr>
+                         <tr>
+                            <td colSpan={3} className="border border-black p-2 text-right font-bold">คงเหลือสุทธิ</td>
+                            <td colSpan={2} className="border border-black p-2 text-center font-bold">
+                                {totalBalance.toLocaleString()} บาท
+                            </td>
+                         </tr>
+                    </tfoot>
+                </table>
+
+                <div className="indent-12 mb-8">
+                    จึงเรียนมาเพื่อโปรดทราบและพิจารณา
+                </div>
+
+                {/* Signature Section 1: Officer */}
+                <div className="flex justify-end mb-10">
+                    <div className="text-center w-64">
+                         <p className="mb-4">ขอแสดงความนับถือ</p>
+                         
+                         {/* Digital Signature of Officer */}
+                         {currentUser.signatureBase64 ? (
+                            <div className="flex flex-col items-center justify-center h-16 mb-2">
+                                <img src={currentUser.signatureBase64} alt="Signature" className="h-full object-contain" />
+                            </div>
+                         ) : (
+                             <p className="mt-8 mb-4">...........................................................</p>
+                         )}
+
+                         <p>({currentUser.name})</p>
+                         <p>ตำแหน่ง {currentUser.position}</p>
+                         <p>เจ้าหน้าที่การเงิน</p>
+                    </div>
+                </div>
+
+                {/* Signature Section 2: Director Box */}
+                <div className="border border-black p-4 rounded-sm flex flex-col items-center justify-center mx-auto w-3/4">
+                    <p className="font-bold mb-4 underline">คำสั่ง / ข้อพิจารณา</p>
+                    <div className="flex gap-8 mb-6 w-full px-10">
+                        <div className="flex items-center gap-2">
+                             <div className="w-4 h-4 border border-black"></div> ทราบ
+                        </div>
+                        <div className="flex items-center gap-2">
+                             <div className="w-4 h-4 border border-black"></div> อนุมัติ
+                        </div>
+                        <div className="flex items-center gap-2">
+                             <div className="w-4 h-4 border border-black"></div> ไม่อนุมัติ
+                        </div>
+                    </div>
+                    
+                    <p className="self-start px-10 mb-8">ข้อคิดเห็นเพิ่มเติม: ........................................................................................................................</p>
+                    
+                    <p className="mt-4">...........................................................</p>
+                    <p className="mt-1">(...........................................................)</p>
+                    <p className="mt-1">ตำแหน่ง ผู้อำนวยการโรงเรียน</p>
+                    <p className="mt-1">วันที่.........../......................../................</p>
+                </div>
+            </div>
+        </div>
+    );
+
     // --- MAIN RENDER ---
 
     return (
         <div className="space-y-6 animate-fade-in pb-10">
-            {/* Top Bar */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-800">ระบบบริหารการเงิน</h2>
-                    <p className="text-slate-500">จัดการเงินงบประมาณและเงินนอกงบประมาณ</p>
-                </div>
-                <div className="flex gap-2 items-center">
-                     {/* SECRET BUTTON FOR DIRECTOR ONLY: AUDIT LOGS */}
-                     {isDirector && (
-                        <button 
-                            onClick={() => setShowAuditModal(true)}
-                            className="p-2 bg-slate-800 text-yellow-400 rounded-full shadow-lg hover:scale-110 transition-transform flex items-center gap-2 px-4"
-                            title="ดูประวัติการแก้ไขข้อมูล (ลับ)"
-                        >
-                            <ShieldAlert size={18}/>
-                            <span className="text-xs font-bold text-white">ประวัติการแก้ไข</span>
-                        </button>
-                    )}
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${isConfigured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {isConfigured ? <Database size={12}/> : <ServerOff size={12}/>}
-                        {isConfigured ? 'ออนไลน์ (Firebase)' : 'ออฟไลน์ (Mock Data)'}
+            {/* Top Bar (Hide in Print Mode) */}
+            {viewMode !== 'PRINT' && (
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h2 className="text-2xl font-bold text-slate-800">ระบบบริหารการเงิน</h2>
+                        <p className="text-slate-500">จัดการเงินงบประมาณและเงินนอกงบประมาณ</p>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                        {/* SECRET BUTTON FOR DIRECTOR ONLY: AUDIT LOGS */}
+                        {isDirector && (
+                            <button 
+                                onClick={() => setShowAuditModal(true)}
+                                className="p-2 bg-slate-800 text-yellow-400 rounded-full shadow-lg hover:scale-110 transition-transform flex items-center gap-2 px-4"
+                                title="ดูประวัติการแก้ไขข้อมูล (ลับ)"
+                            >
+                                <ShieldAlert size={18}/>
+                                <span className="text-xs font-bold text-white">ประวัติการแก้ไข</span>
+                            </button>
+                        )}
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${isConfigured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {isConfigured ? <Database size={12}/> : <ServerOff size={12}/>}
+                            {isConfigured ? 'ออนไลน์ (Firebase)' : 'ออฟไลน์ (Mock Data)'}
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
             
-            <div className="bg-white p-1 rounded-lg border border-slate-200 flex shadow-sm w-fit">
-                {(canSeeBudget) && (
-                    <button 
-                        onClick={() => { setActiveTab('Budget'); setSelectedAccount(null); }}
-                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'Budget' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
-                    >
-                        <LayoutGrid size={16}/> เงินงบประมาณ
-                    </button>
-                )}
-                {(canSeeNonBudget) && (
-                    <button 
-                        onClick={() => { setActiveTab('NonBudget'); }}
-                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'NonBudget' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
-                    >
-                        <List size={16}/> เงินนอกงบประมาณ
-                    </button>
-                )}
-            </div>
+            {/* Tab Switcher (Hide in Print Mode) */}
+            {viewMode !== 'PRINT' && (
+                <div className="bg-white p-1 rounded-lg border border-slate-200 flex shadow-sm w-fit">
+                    {(canSeeBudget) && (
+                        <button 
+                            onClick={() => { setActiveTab('Budget'); setSelectedAccount(null); setViewMode('DASHBOARD'); }}
+                            className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'Budget' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                            <LayoutGrid size={16}/> เงินงบประมาณ
+                        </button>
+                    )}
+                    {(canSeeNonBudget) && (
+                        <button 
+                            onClick={() => { setActiveTab('NonBudget'); }}
+                            className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'NonBudget' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                            <List size={16}/> เงินนอกงบประมาณ
+                        </button>
+                    )}
+                </div>
+            )}
 
             {/* Main Content Switcher */}
-            {activeTab === 'Budget' && !selectedAccount ? renderBudgetOverview() : renderDetailView()}
+            {viewMode === 'PRINT' ? renderPrintView() : (
+                activeTab === 'Budget' && !selectedAccount ? renderBudgetOverview() : renderDetailView()
+            )}
 
             {/* --- MODAL: EDIT TRANSACTION --- */}
             {showEditModal && editingTransaction && (

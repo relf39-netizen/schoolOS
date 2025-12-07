@@ -1,9 +1,13 @@
 
 
 
+
+
+
+
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
-import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock } from 'lucide-react';
+import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, Calendar, RefreshCw, UserCheck } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
@@ -37,15 +41,31 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     const [isAdding, setIsAdding] = useState(false);
 
     // System Settings State
-    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '' });
+    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '', officialGarudaBase64: '' });
     const [driveLinkInput, setDriveLinkInput] = useState('');
     const [isLoadingConfig, setIsLoadingConfig] = useState(false);
+    
+    // Previews
     const [signaturePreview, setSignaturePreview] = useState<string>('');
-    const [logoPreview, setLogoPreview] = useState<string>('');
+    const [logoPreview, setLogoPreview] = useState<string>(''); // School Logo
+    const [garudaPreview, setGarudaPreview] = useState<string>(''); // Official Garuda
 
     // School Settings State (Local)
     const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
     const [isGettingLocation, setIsGettingLocation] = useState(false);
+
+    // Helpers
+    const getDirector = () => teachers.find(t => t.roles.includes('DIRECTOR'));
+
+    // Date Input Helpers (Convert "05-16" to "16/05" for display and vice versa)
+    const getDayMonthFromMMDD = (mmdd?: string) => {
+        if (!mmdd) return { day: '', month: '' };
+        const [m, d] = mmdd.split('-');
+        return { day: d, month: m };
+    };
+
+    const [acStart, setAcStart] = useState({ day: '16', month: '05' });
+    const [acEnd, setAcEnd] = useState({ day: '31', month: '03' });
 
     // Load Config on Mount
     useEffect(() => {
@@ -64,6 +84,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                         setDriveLinkInput(data.driveFolderId ? `https://drive.google.com/drive/folders/${data.driveFolderId}` : '');
                         setSignaturePreview(data.directorSignatureBase64 || '');
                         setLogoPreview(data.schoolLogoBase64 || '');
+                        setGarudaPreview(data.officialGarudaBase64 || '');
                     }
                 } catch (e) {
                     console.error("Error loading config:", e);
@@ -75,6 +96,11 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
         }
         if (activeTab === 'SCHOOL_SETTINGS') {
             setSchoolForm({...currentSchool});
+            // Init dates
+            const start = getDayMonthFromMMDD(currentSchool.academicYearStart || "05-16");
+            const end = getDayMonthFromMMDD(currentSchool.academicYearEnd || "03-31");
+            setAcStart(start);
+            setAcEnd(end);
         }
     }, [activeTab, currentSchool]);
 
@@ -99,13 +125,6 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
         if (!editForm.name) return alert('กรุณาระบุชื่อ');
 
         if (isAdding) {
-            // Need a new ID. For manual add, we can ask for ID or generate one.
-            // Assuming we generate a placeholder or ask input.
-            // Let's assume we use a timestamp ID for non-citizen-id users, or check if ID exists.
-            
-            // To be safe, let's force ID input if it's adding manually? 
-            // The form currently doesn't show ID input for add. Let's add it or auto-gen.
-            // Auto-gen for now.
             const newId = editForm.id || `t_${Date.now()}`;
 
             const newTeacher: Teacher = {
@@ -114,13 +133,11 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                 name: editForm.name || '',
                 position: editForm.position || 'ครู',
                 roles: editForm.roles || ['TEACHER'],
-                // Set default password for manually added users
                 password: '123456',
                 isFirstLogin: true 
             };
             onAddTeacher(newTeacher);
         } else {
-            // Merge existing teacher data with form
             const original = teachers.find(t => t.id === editingId);
             if (original) {
                 const updated: Teacher = { ...original, ...editForm };
@@ -152,14 +169,32 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
         return match ? match[0] : '';
     };
 
-    const handleSignatureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Updated: Pull Director Signature
+    const handleSyncDirectorSignature = () => {
+        const director = getDirector();
+        if (!director) {
+            alert("ไม่พบข้อมูลผู้อำนวยการในระบบ กรุณาตั้งค่าบทบาท 'ผู้อำนวยการ' ให้กับบุคลากรก่อน");
+            return;
+        }
+
+        if (!director.signatureBase64) {
+             alert(`ผู้อำนวยการ (${director.name}) ยังไม่ได้อัปโหลดลายเซ็นในข้อมูลส่วนตัว`);
+             return;
+        }
+
+        setConfig(prev => ({ ...prev, directorSignatureBase64: director.signatureBase64 }));
+        setSignaturePreview(director.signatureBase64);
+        alert(`ดึงลายเซ็นของ ${director.name} เรียบร้อยแล้ว (กดบันทึกเพื่อยืนยัน)`);
+    };
+
+    const handleGarudaUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
             const reader = new FileReader();
             reader.onload = (evt) => {
                 const base64 = evt.target?.result as string;
-                setConfig(prev => ({ ...prev, directorSignatureBase64: base64 }));
-                setSignaturePreview(base64);
+                setConfig(prev => ({ ...prev, officialGarudaBase64: base64 }));
+                setGarudaPreview(base64);
             };
             reader.readAsDataURL(file);
         }
@@ -178,10 +213,19 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     };
 
     const handleSaveSchoolSettings = () => {
-        if (schoolForm) {
-            onUpdateSchool({ ...currentSchool, ...schoolForm });
-            alert('บันทึกข้อมูลโรงเรียนเรียบร้อยแล้ว');
-        }
+        // Construct MM-DD strings
+        const startMMDD = `${acStart.month.padStart(2,'0')}-${acStart.day.padStart(2,'0')}`;
+        const endMMDD = `${acEnd.month.padStart(2,'0')}-${acEnd.day.padStart(2,'0')}`;
+        
+        const updatedSchool = { 
+            ...currentSchool, 
+            ...schoolForm,
+            academicYearStart: startMMDD,
+            academicYearEnd: endMMDD
+        };
+        
+        onUpdateSchool(updatedSchool);
+        alert('บันทึกข้อมูลโรงเรียนเรียบร้อยแล้ว');
     };
 
     const handleGetCurrentLocation = () => {
@@ -221,6 +265,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
             schoolName: config.schoolName?.trim(),
             directorSignatureBase64: config.directorSignatureBase64,
             schoolLogoBase64: config.schoolLogoBase64,
+            officialGarudaBase64: config.officialGarudaBase64,
             directorSignatureScale: Number(config.directorSignatureScale),
             directorSignatureYOffset: Number(config.directorSignatureYOffset)
         };
@@ -240,6 +285,8 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
         }
         setIsLoadingConfig(false);
     };
+
+    const director = getDirector();
 
     return (
         <div className="space-y-6 animate-fade-in pb-10">
@@ -262,7 +309,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                         onClick={() => setActiveTab('SCHOOL_SETTINGS')}
                         className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                     >
-                        ตั้งค่าโรงเรียน/GPS
+                        ตั้งค่าโรงเรียน/ปีการศึกษา
                     </button>
                     <button 
                         onClick={() => setActiveTab('SETTINGS')}
@@ -405,7 +452,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                 <div className="max-w-2xl mx-auto space-y-6">
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-6">
                          <h3 className="font-bold text-slate-800 flex items-center gap-2 border-b pb-3">
-                            <MapPin size={20} className="text-orange-600"/> ตั้งค่าโรงเรียนและการลงเวลา (GPS)
+                            <Settings size={20} className="text-orange-600"/> ตั้งค่าโรงเรียนและการลงเวลา
                         </h3>
 
                         <div>
@@ -435,9 +482,61 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                             </div>
                         </div>
 
+                        {/* ACADEMIC YEAR SETTINGS */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                             <div className="flex items-center gap-2 mb-3">
+                                 <Calendar size={18} className="text-blue-600"/>
+                                 <label className="text-sm font-bold text-slate-800">
+                                    รอบปีการศึกษา / รอบการนับสถิติวันลา
+                                 </label>
+                             </div>
+                             <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">วันที่เริ่มต้น (วว/ดด)</label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" maxLength={2} placeholder="16"
+                                            value={acStart.day}
+                                            onChange={e => setAcStart({...acStart, day: e.target.value})}
+                                            className="w-12 text-center border rounded px-1 py-1"
+                                        />
+                                        <span className="self-center">/</span>
+                                        <input 
+                                            type="text" maxLength={2} placeholder="05"
+                                            value={acStart.month}
+                                            onChange={e => setAcStart({...acStart, month: e.target.value})}
+                                            className="w-12 text-center border rounded px-1 py-1"
+                                        />
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-1">ปกติ 16 พ.ค. (หรือ 1 ต.ค.)</p>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-500 mb-1">วันที่สิ้นสุด (วว/ดด)</label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" maxLength={2} placeholder="31"
+                                            value={acEnd.day}
+                                            onChange={e => setAcEnd({...acEnd, day: e.target.value})}
+                                            className="w-12 text-center border rounded px-1 py-1"
+                                        />
+                                        <span className="self-center">/</span>
+                                        <input 
+                                            type="text" maxLength={2} placeholder="03"
+                                            value={acEnd.month}
+                                            onChange={e => setAcEnd({...acEnd, month: e.target.value})}
+                                            className="w-12 text-center border rounded px-1 py-1"
+                                        />
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-1">ปกติ 31 มี.ค. (หรือ 30 ก.ย.)</p>
+                                </div>
+                            </div>
+                        </div>
+
                         <div>
                             <div className="flex justify-between items-center mb-1">
-                                <label className="block text-sm font-medium text-slate-700">พิกัดโรงเรียน (Lat, Lng)</label>
+                                <label className="block text-sm font-medium text-slate-700 flex items-center gap-2">
+                                    <MapPin size={16}/> พิกัดโรงเรียน (Lat, Lng)
+                                </label>
                                 <button 
                                     onClick={handleGetCurrentLocation}
                                     disabled={isGettingLocation}
@@ -518,7 +617,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                         <AlertCircle className="shrink-0" size={20}/>
                         <div>
                             <p className="font-bold mb-1">คำแนะนำการตั้งค่า</p>
-                            <p>การตั้งค่าส่วนนี้ใช้สำหรับการเชื่อมต่อระบบภายนอก (Google Drive)</p>
+                            <p>การตั้งค่าส่วนนี้ใช้สำหรับการเชื่อมต่อระบบภายนอก และการตั้งค่าเอกสารราชการ</p>
                         </div>
                     </div>
 
@@ -527,32 +626,69 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                             <Settings size={20} className="text-blue-600"/> การตั้งค่าลายเซ็นและตราครุฑ (เอกสารราชการ)
                         </h3>
                         
-                        {/* Signature and Garuda Config Section */}
+                        {/* OFFICIAL GARUDA CONFIG */}
                          <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
                             <label className="block text-sm font-medium text-slate-700 mb-2">
-                                ลายเซ็นผู้อำนวยการ (ไฟล์ภาพ .PNG พื้นหลังโปร่งใส)
+                                ตราครุฑ/ตราสัญลักษณ์ (สำหรับเอกสารราชการ)
                             </label>
                             
+                            <div className="flex items-start gap-4">
+                                <label className="cursor-pointer bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-2 transition-colors shadow-sm">
+                                    <UploadCloud size={18} className="text-slate-600"/>
+                                    <span className="text-sm font-bold text-slate-700">อัปโหลดตราครุฑ</span>
+                                    <input type="file" accept="image/png,image/jpeg" onChange={handleGarudaUpload} className="hidden" />
+                                </label>
+                                
+                                {garudaPreview ? (
+                                    <div className="border border-slate-200 rounded p-2 bg-white flex items-center justify-center min-w-[80px]">
+                                        <img src={garudaPreview} alt="Garuda Preview" className="h-14 object-contain" />
+                                    </div>
+                                ) : (
+                                    <div className="text-xs text-slate-400 italic mt-2">ใช้ตราครุฑมาตรฐาน</div>
+                                )}
+                            </div>
+                             <p className="text-[10px] text-slate-400 mt-2">
+                                หากไม่อัปโหลด ระบบจะใช้ตราครุฑมาตรฐาน (Wikimedia Commons)
+                            </p>
+                        </div>
+
+                        {/* DIRECTOR SIGNATURE CONFIG (AUTO PULL) */}
+                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                            <div className="flex justify-between items-start mb-2">
+                                <label className="block text-sm font-medium text-slate-700">
+                                    ลายเซ็นผู้อำนวยการ (ดึงจากข้อมูลส่วนตัว)
+                                </label>
+                                {director && (
+                                     <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                                         ผู้อำนวยการปัจจุบัน: {director.name}
+                                     </span>
+                                )}
+                            </div>
+                            
                             <div className="flex flex-col gap-4">
-                                <div className="flex items-start gap-4">
-                                    <label className="cursor-pointer bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-2 transition-colors shadow-sm">
-                                        <UploadCloud size={18} className="text-slate-600"/>
-                                        <span className="text-sm font-bold text-slate-700">อัปโหลดรูปภาพ</span>
-                                        <input type="file" accept="image/png" onChange={handleSignatureUpload} className="hidden" />
-                                    </label>
-                                    
+                                <div className="flex items-center gap-4">
+                                    <button 
+                                        onClick={handleSyncDirectorSignature}
+                                        className="bg-white hover:bg-slate-50 px-4 py-2 rounded-lg border border-slate-300 flex items-center gap-2 transition-colors shadow-sm text-sm font-bold text-blue-700"
+                                    >
+                                        <RefreshCw size={16}/> ดึงลายเซ็นจาก Profile ผอ.
+                                    </button>
+
                                     {signaturePreview ? (
                                         <div className="border border-slate-200 rounded p-2 bg-white flex items-center justify-center min-w-[100px]">
                                             <img src={signaturePreview} alt="Signature Preview" className="h-10 object-contain" />
                                         </div>
                                     ) : (
-                                        <div className="text-xs text-slate-400 italic mt-2">ยังไม่มีลายเซ็น</div>
+                                        <div className="text-xs text-red-400 italic">ยังไม่ตั้งค่าลายเซ็น</div>
                                     )}
                                 </div>
+                                <p className="text-[10px] text-slate-400">
+                                    * หากผู้อำนวยการเปลี่ยนลายเซ็นใน "ข้อมูลส่วนตัว" ให้กดปุ่มนี้เพื่ออัปเดตเข้าระบบ
+                                </p>
 
                                 {/* Customization Sliders */}
                                 {signaturePreview && (
-                                    <div className="grid grid-cols-2 gap-4 mt-2">
+                                    <div className="grid grid-cols-2 gap-4 mt-2 pt-2 border-t border-slate-200">
                                         <div>
                                             <label className="flex items-center justify-between text-xs text-slate-600 mb-1">
                                                 <span className="flex items-center gap-1"><Maximize size={12}/> ขนาด (Scale)</span>

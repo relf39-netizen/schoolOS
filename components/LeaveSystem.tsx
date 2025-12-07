@@ -1,3 +1,8 @@
+
+
+
+
+
 import React, { useState, useEffect } from 'react';
 import { LeaveRequest, Teacher, School, SystemConfig } from '../types';
 import { Clock, CheckCircle, XCircle, FilePlus, AlertTriangle, FileText, Download, UserCheck, Printer, ArrowLeft, Loader, Database, ServerOff, UploadCloud, Link as LinkIcon, Paperclip, Eye, Phone } from 'lucide-react';
@@ -9,9 +14,11 @@ interface LeaveSystemProps {
     currentUser: Teacher;
     allTeachers: Teacher[];
     currentSchool?: School;
+    focusRequestId?: string | null;
+    onClearFocus?: () => void;
 }
 
-const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, currentSchool }) => {
+const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, currentSchool, focusRequestId, onClearFocus }) => {
     // State
     const [requests, setRequests] = useState<LeaveRequest[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -19,6 +26,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     // View Modes: LIST | FORM | PDF | REPORT_DASHBOARD
     const [viewMode, setViewMode] = useState<'LIST' | 'FORM' | 'PDF' | 'REPORT_DASHBOARD'>('LIST');
     const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
+    const [isHighlighted, setIsHighlighted] = useState(false);
 
     // Form State
     const [leaveType, setLeaveType] = useState('Sick');
@@ -113,6 +121,29 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         };
     }, []);
 
+    // --- Focus Deep Link Effect ---
+    useEffect(() => {
+        if (focusRequestId && requests.length > 0) {
+            const found = requests.find(r => r.id === focusRequestId);
+            if (found) {
+                setSelectedRequest(found);
+                
+                // If director pending approval, set to LIST to trigger modal
+                if (canApprove && found.status === 'Pending') {
+                    setViewMode('LIST');
+                } else {
+                    setViewMode('PDF');
+                }
+                
+                // Visual Highlight
+                setIsHighlighted(true);
+                setTimeout(() => setIsHighlighted(false), 2500);
+
+                if (onClearFocus) onClearFocus();
+            }
+        }
+    }, [focusRequestId, requests, canApprove, onClearFocus]);
+
     // --- Helpers ---
 
     const getLeaveTypeName = (type: string) => {
@@ -120,7 +151,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             'Sick': 'ลาป่วย', 
             'Personal': 'ลากิจส่วนตัว', 
             'OffCampus': 'ออกนอกบริเวณ',
-            'Late': 'เข้าสาย',
+            'Late': 'เข้าสาย', 
             'Maternity': 'ลาคลอดบุตร'
         };
         return map[type] || type;
@@ -155,21 +186,59 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         return count;
     };
 
-    // Helper: Fiscal Year
-    const getFiscalYear = (date: Date) => {
-        return date.getMonth() >= 9 ? date.getFullYear() + 1 : date.getFullYear(); // Fiscal year starts Oct 1
+    // --- Dynamic Academic Year Logic ---
+    const getAcademicYearRange = (reqDateStr: string, school?: School) => {
+        const reqDate = new Date(reqDateStr);
+        
+        // Default to Standard Thai Academic Year (16 May - 31 March next year) or Fiscal
+        const startConfig = school?.academicYearStart || "05-16";
+        const endConfig = school?.academicYearEnd || "03-31"; // Default End
+
+        const [sMonth, sDay] = startConfig.split('-').map(Number);
+        const [eMonth, eDay] = endConfig.split('-').map(Number);
+
+        // Determine which academic year the request date belongs to.
+        // Logic: Create candidate start date in the same year as reqDate.
+        const year = reqDate.getFullYear();
+        const candidateStart = new Date(year, sMonth - 1, sDay);
+        
+        let cycleStart: Date;
+        let cycleEnd: Date;
+
+        if (reqDate >= candidateStart) {
+            // It belongs to the cycle starting this year
+            cycleStart = candidateStart;
+            // End date is next year if endMonth < startMonth (e.g. Mar < May)
+            const endYear = (eMonth < sMonth) ? year + 1 : year;
+            cycleEnd = new Date(endYear, eMonth - 1, eDay);
+        } else {
+            // It belongs to the cycle starting previous year
+            cycleStart = new Date(year - 1, sMonth - 1, sDay);
+            // End date is this year if endMonth < startMonth
+            const endYear = (eMonth < sMonth) ? year : year - 1; // Wait, if Mar < May. Prev cycle ended this year Mar.
+            cycleEnd = new Date(year, eMonth - 1, eDay);
+            
+            // Correction: if EndMonth > StartMonth (e.g. Jan-Dec), then if reqDate < Start, it's prev year.
+            if (eMonth >= sMonth) {
+                 cycleEnd = new Date(year - 1, eMonth - 1, eDay);
+            }
+        }
+        
+        return { 
+            startStr: cycleStart.toISOString().split('T')[0], 
+            endStr: cycleEnd.toISOString().split('T')[0] 
+        };
     };
 
     const calculateFormStats = (req: LeaveRequest) => {
-        const reqDate = new Date(req.startDate);
-        const fiscalYear = getFiscalYear(reqDate);
-        const fyStart = new Date(fiscalYear - 1, 9, 1).toISOString().split('T')[0];
+        const { startStr, endStr } = getAcademicYearRange(req.startDate, currentSchool);
         
         const previousRequests = requests.filter(r => 
             r.teacherId === req.teacherId && 
             r.status === 'Approved' && 
-            r.startDate >= fyStart && 
-            r.startDate < req.startDate
+            r.startDate >= startStr && 
+            r.startDate <= endStr && // Must be within current cycle
+            r.startDate < req.startDate // Strictly before current request
         );
 
         const sumDays = (type: string) => previousRequests
@@ -199,7 +268,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         
         const lastLeaveDays = lastLeave ? countWorkingDays(lastLeave.startDate, lastLeave.endDate) : 0;
 
-        return { prevSick, prevPersonal, prevMaternity, prevLate, prevOffCampus, currentDays, lastLeave, lastLeaveDays };
+        return { prevSick, prevPersonal, prevMaternity, prevLate, prevOffCampus, currentDays, lastLeave, lastLeaveDays, cycleStart: startStr, cycleEnd: endStr };
     };
 
     // --- Handlers ---
@@ -306,7 +375,8 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             mobilePhone: mobilePhone || '',
             status: 'Pending',
             teacherSignature: currentUser.name,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            schoolId: currentUser.schoolId // Ensure schoolId is saved
         };
 
         // Conditionally add optional fields
@@ -403,6 +473,9 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         
         // Director Signature comes from sysConfig if approved
         const directorSig = (req.status === 'Approved' && sysConfig?.directorSignatureBase64) ? sysConfig.directorSignatureBase64 : null;
+        
+        // Official Garuda
+        const garudaBase64 = sysConfig?.officialGarudaBase64;
 
         // Dynamic Header & Content based on Type
         let formTitle = "แบบใบลาป่วย ลาคลอดบุตร ลากิจส่วนตัว";
@@ -418,11 +491,19 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             <div id="printable-area" className="bg-white border border-slate-300 shadow-lg p-10 min-h-[1123px] w-[794px] mx-auto relative font-sarabun text-black leading-relaxed print:shadow-none print:border-none print:m-0 print:w-full">
                 {/* Garuda Header */}
                 <div className="flex flex-col items-center mb-6">
-                    <img 
-                        src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Emblem_of_the_Ministry_of_Education_of_Thailand.svg/1200px-Emblem_of_the_Ministry_of_Education_of_Thailand.svg.png" 
-                        alt="Garuda" 
-                        className="h-20 mb-2 grayscale opacity-90"
-                    />
+                    {garudaBase64 ? (
+                         <img 
+                            src={garudaBase64} 
+                            alt="Garuda" 
+                            className="h-20 mb-2 object-contain"
+                        />
+                    ) : (
+                         <img 
+                            src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Emblem_of_the_Ministry_of_Education_of_Thailand.svg/1200px-Emblem_of_the_Ministry_of_Education_of_Thailand.svg.png" 
+                            alt="Garuda" 
+                            className="h-20 mb-2 grayscale opacity-90"
+                        />
+                    )}
                     <div className="font-bold text-lg">{formTitle}</div>
                 </div>
 
@@ -789,7 +870,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
 
             {/* --- PDF VIEW (or Fallback Download View) --- */}
             {viewMode === 'PDF' && selectedRequest && (
-                <div className="flex flex-col lg:flex-row gap-6">
+                <div className={`flex flex-col lg:flex-row gap-6 ${isHighlighted ? 'ring-4 ring-emerald-300 rounded-xl transition-all duration-500' : ''}`}>
                     {/* Add styles for printing */}
                     <style>{`
                         @media print {
@@ -842,7 +923,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             {/* --- MODAL: DIRECTOR APPROVE --- */}
             {canApprove && selectedRequest && viewMode === 'LIST' && selectedRequest.status === 'Pending' && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden">
+                    <div className={`bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden ${isHighlighted ? 'ring-4 ring-blue-300 transition-all duration-500' : ''}`}>
                         <div className="bg-blue-600 text-white p-4 font-bold text-lg flex items-center gap-2">
                              <UserCheck size={24}/> พิจารณาคำขออนุญาต
                         </div>
