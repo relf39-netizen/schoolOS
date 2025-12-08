@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { LeaveRequest, Teacher, School, SystemConfig } from '../types';
 import { Clock, CheckCircle, XCircle, FilePlus, FileText, UserCheck, Printer, ArrowLeft, Loader, Database, Phone, Calendar, User, ChevronRight, Paperclip, Trash2 } from 'lucide-react';
@@ -84,9 +85,10 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                 clearTimeout(timeoutId);
                 const fetchedRequests: LeaveRequest[] = [];
                 querySnapshot.forEach((doc) => {
-                    const data = doc.data() as LeaveRequest;
+                    const data = doc.data();
                     if (!data.schoolId || data.schoolId === currentUser.schoolId) {
-                         fetchedRequests.push({ id: doc.id, ...data });
+                        // Fix spread error by casting entire object
+                        fetchedRequests.push({ id: doc.id, ...data } as LeaveRequest);
                     }
                 });
                 setRequests(fetchedRequests);

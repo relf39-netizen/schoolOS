@@ -51,7 +51,8 @@ export interface Attachment {
 export interface DocumentItem {
   id: string;
   schoolId?: string; // Filter by school
-  bookNumber: string; // เลขที่รับหนังสือ เช่น 001/2567
+  category?: 'INCOMING' | 'ORDER'; // NEW: INCOMING=หนังสือรับ, ORDER=หนังสือคำสั่ง
+  bookNumber: string; // เลขที่รับหนังสือ หรือ เลขที่คำสั่ง
   title: string;
   description: string;
   from: string; // หน่วยงานต้นเรื่อง
