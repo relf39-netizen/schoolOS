@@ -10,7 +10,8 @@ export const DEFAULT_LOCATION = {
     allowedRadiusMeters: 500
 };
 
-export const CURRENT_SCHOOL_YEAR = '2567';
+// Calculate Current Thai Year Dynamically (YYYY + 543)
+export const CURRENT_SCHOOL_YEAR = String(new Date().getFullYear() + 543);
 
 // Positions List (Updated as requested)
 export const ACADEMIC_POSITIONS = [

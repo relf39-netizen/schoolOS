@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { DocumentItem, Teacher, Attachment, SystemConfig } from '../types';
 import { MOCK_DOCUMENTS, CURRENT_SCHOOL_YEAR } from '../constants';
@@ -76,17 +77,23 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
 
     // Generate Next Book Number Logic
     const generateNextBookNumber = (currentDocs: DocumentItem[]) => {
+        // Calculate current Thai year dynamically (e.g., 2568)
+        const currentThaiYear = String(new Date().getFullYear() + 543);
         let maxNum = 0;
+        
         currentDocs.forEach(d => {
-            // Try to parse "XXX/YYYY"
             const parts = d.bookNumber.split('/');
-            const num = parseInt(parts[0]);
-            if (!isNaN(num) && num > maxNum) {
-                maxNum = num;
+            // Check if format is XXX/YYYY and if the year matches current year
+            if (parts.length === 2 && parts[1] === currentThaiYear) {
+                const num = parseInt(parts[0]);
+                if (!isNaN(num) && num > maxNum) {
+                    maxNum = num;
+                }
             }
         });
-        // Increment and Format
-        return `${String(maxNum + 1).padStart(3, '0')}/${CURRENT_SCHOOL_YEAR}`;
+        
+        // Increment and Format. If maxNum is 0 (new year or no docs), starts at 001.
+        return `${String(maxNum + 1).padStart(3, '0')}/${currentThaiYear}`;
     };
 
     // Init Create Form
