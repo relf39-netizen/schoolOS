@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect } from 'react';
 import { PlanDepartment, Project, Teacher, ProjectStatus } from '../types';
 import { MOCK_PLAN_DATA } from '../constants';
 import { Briefcase, CheckCircle, Clock, Lock, Plus, ArrowRight, ArrowLeft, Edit2, Trash2, Loader, Database, ServerOff } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
-import { collection, addDoc, onSnapshot, query, where, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, where, doc, updateDoc, setDoc, QuerySnapshot, DocumentData } from 'firebase/firestore';
 
 interface ActionPlanSystemProps {
     currentUser: Teacher;
@@ -42,7 +43,7 @@ const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser }) => {
 
             // Subscribe to departments for this school
             const q = query(collection(db, "plan_departments"), where("schoolId", "==", currentUser.schoolId));
-            unsubscribe = onSnapshot(q, (snapshot) => {
+            unsubscribe = onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
                 clearTimeout(timeoutId);
                 const fetched: PlanDepartment[] = [];
                 snapshot.forEach((doc) => {
