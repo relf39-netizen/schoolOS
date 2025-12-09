@@ -1,11 +1,12 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Transaction, FinanceAccount, Teacher, FinanceAuditLog, SystemConfig } from '../types';
 import { MOCK_TRANSACTIONS, MOCK_ACCOUNTS } from '../constants';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft, Loader, Database, ServerOff, Edit2, Trash2, X, Save, ShieldAlert, Eye, Printer } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft, Loader, Database, ServerOff, Edit2, Trash2, X, Save, ShieldAlert, Eye, Printer, Upload, Calendar, Search, ChevronLeft, ChevronRight, HardDrive, Cloud } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { db, isConfigured } from '../firebaseConfig';
-import { collection, addDoc, onSnapshot, query, where, orderBy, doc, deleteDoc, updateDoc, getDoc, QuerySnapshot, DocumentData } from 'firebase/firestore';
+// import { collection, query, where, getDocs, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore'; // Removed due to import errors
 
 // Thai Date Helper
 const getThaiDate = (dateStr: string) => {
@@ -14,11 +15,13 @@ const getThaiDate = (dateStr: string) => {
     return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
 };
 
-const getThaiMonthYear = (dateStr: string) => {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
-};
+// Convert YYYY-MM to Thai Month Year
+const formatMonthYearInput = (ym: string) => {
+    if (!ym) return '';
+    const [year, month] = ym.split('-');
+    const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+    return date.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
+}
 
 interface FinanceSystemProps {
     currentUser: Teacher;
@@ -34,11 +37,11 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     // State
     const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
-    const [auditLogs, setAuditLogs] = useState<FinanceAuditLog[]>([]); // For Director
     const [isLoadingData, setIsLoadingData] = useState(true);
     
-    // System Config for Reports
-    const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 15;
 
     // Determine default active tab
     const [activeTab, setActiveTab] = useState<'Budget' | 'NonBudget'>(
@@ -51,6 +54,19 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     // Drill-down State
     const [selectedAccount, setSelectedAccount] = useState<FinanceAccount | null>(null);
 
+    // Report Configuration State
+    const [reportConfig, setReportConfig] = useState<{
+        type: 'ALL' | 'MONTH' | 'CUSTOM';
+        month: string;
+        customStart: string;
+        customEnd: string;
+    }>({
+        type: 'MONTH',
+        month: new Date().toISOString().slice(0, 7), // Current Month YYYY-MM
+        customStart: new Date().toISOString().split('T')[0],
+        customEnd: new Date().toISOString().split('T')[0]
+    });
+
     // UI State
     const [showTransForm, setShowTransForm] = useState(false);
     const [showAccountForm, setShowAccountForm] = useState(false);
@@ -59,97 +75,113 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
     const [showEditModal, setShowEditModal] = useState(false);
 
-    // Audit Log View State (Director Only)
-    const [showAuditModal, setShowAuditModal] = useState(false);
+    // Edit Account Name State
+    const [showEditAccountModal, setShowEditAccountModal] = useState(false);
+    const [editingAccount, setEditingAccount] = useState<FinanceAccount | null>(null);
+    const [newAccountName, setNewAccountName] = useState('');
+
+    // Import State
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isImporting, setIsImporting] = useState(false);
 
     // Form Data
     const [newTrans, setNewTrans] = useState({ date: new Date().toISOString().split('T')[0], desc: '', amount: '', type: 'Income' });
     const [newAccount, setNewAccount] = useState({ name: '' });
 
-    // --- Data Synchronization ---
+    // --- HYBRID DATA LOADING ---
+    // Budget -> Firebase (Disabled, now Mock)
+    // NonBudget -> LocalStorage
     useEffect(() => {
-        let unsubAccounts: () => void;
-        let unsubTrans: () => void;
-        let unsubLogs: () => void;
-        let timeoutId: ReturnType<typeof setTimeout>;
+        const loadData = async () => {
+            setIsLoadingData(true);
+            
+            // 1. Fetch NON-BUDGET from LocalStorage
+            let localNonBudgetAccounts: FinanceAccount[] = [];
+            let localNonBudgetTrans: Transaction[] = [];
+            try {
+                const savedAcc = localStorage.getItem('schoolos_finance_accounts');
+                const savedTx = localStorage.getItem('schoolos_finance_transactions');
+                
+                const allLocalAcc = savedAcc ? JSON.parse(savedAcc) : [];
+                const allLocalTx = savedTx ? JSON.parse(savedTx) : [];
 
-        if (isConfigured && db) {
-            // SAFETY TIMEOUT: Fallback if Firestore takes too long (3s)
-            timeoutId = setTimeout(() => {
-                if(isLoadingData) {
-                    console.warn("Firestore Finance timeout. Switching to Mock Data.");
-                    setAccounts(MOCK_ACCOUNTS);
-                    setTransactions(MOCK_TRANSACTIONS);
-                    setIsLoadingData(false);
-                }
-            }, 3000);
-
-            // Sync Accounts
-            const qAccounts = query(collection(db, "finance_accounts"), where("schoolId", "==", currentUser.schoolId));
-            unsubAccounts = onSnapshot(qAccounts, (snapshot: QuerySnapshot<DocumentData>) => {
-                const fetched: FinanceAccount[] = [];
-                snapshot.forEach((doc) => {
-                    fetched.push({ id: doc.id, ...doc.data() } as FinanceAccount);
-                });
-                setAccounts(fetched);
-            });
-
-            // Sync Transactions
-            const qTransactions = query(collection(db, "finance_transactions"), where("schoolId", "==", currentUser.schoolId));
-            unsubTrans = onSnapshot(qTransactions, (snapshot: QuerySnapshot<DocumentData>) => {
-                clearTimeout(timeoutId);
-                const fetched: Transaction[] = [];
-                snapshot.forEach((doc) => {
-                    fetched.push({ id: doc.id, ...doc.data() } as Transaction);
-                });
-                setTransactions(fetched);
-                setIsLoadingData(false);
-            }, (error) => {
-                 clearTimeout(timeoutId);
-                 console.error(error);
-                 setAccounts(MOCK_ACCOUNTS);
-                 setTransactions(MOCK_TRANSACTIONS);
-                 setIsLoadingData(false);
-            });
-
-            // Sync Audit Logs (ONLY IF DIRECTOR)
-            if (isDirector) {
-                const qLogs = query(collection(db, "finance_audit_logs"), where("schoolId", "==", currentUser.schoolId), orderBy("timestamp", "desc"));
-                unsubLogs = onSnapshot(qLogs, (snapshot: QuerySnapshot<DocumentData>) => {
-                    const fetchedLogs: FinanceAuditLog[] = [];
-                    snapshot.forEach((doc) => {
-                        fetchedLogs.push({ id: doc.id, ...doc.data() } as FinanceAuditLog);
-                    });
-                    setAuditLogs(fetchedLogs);
-                });
+                // Filter only NonBudget items from local storage
+                localNonBudgetAccounts = allLocalAcc.filter((a: FinanceAccount) => a.type === 'NonBudget');
+                const localAccIds = localNonBudgetAccounts.map(a => a.id);
+                localNonBudgetTrans = allLocalTx.filter((t: Transaction) => localAccIds.includes(t.accountId));
+            } catch (e) {
+                console.error("Local Load Error", e);
             }
 
-            // Fetch Config
-            const fetchConfig = async () => {
-                try {
-                    const docRef = doc(db, "system_config", "settings");
-                    const docSnap = await getDoc(docRef);
-                    if (docSnap.exists()) {
-                        setSysConfig(docSnap.data() as SystemConfig);
-                    }
-                } catch (e) {}
-            };
-            fetchConfig();
+            // 2. Fetch BUDGET from Firebase (Disabled) -> Use Mock
+            let firebaseBudgetAccounts: FinanceAccount[] = [];
+            let firebaseBudgetTrans: Transaction[] = [];
 
-        } else {
-            // Offline Mode
-            setAccounts(MOCK_ACCOUNTS);
-            setTransactions(MOCK_TRANSACTIONS);
+            // if (isConfigured && db) {
+            //     // Logic removed to fix build error
+            // } else {
+                // Not Configured -> Use Mock for Budget to visualize UI
+                firebaseBudgetAccounts = MOCK_ACCOUNTS.filter(a => a.type === 'Budget');
+                const budgetAccIds = firebaseBudgetAccounts.map(a => a.id);
+                firebaseBudgetTrans = MOCK_TRANSACTIONS.filter(t => budgetAccIds.includes(t.accountId));
+            // }
+
+            // 3. Merge Data
+            setAccounts([...firebaseBudgetAccounts, ...localNonBudgetAccounts]);
+            setTransactions([...firebaseBudgetTrans, ...localNonBudgetTrans]);
             setIsLoadingData(false);
-        }
-        
-        return () => {
-            if (timeoutId) clearTimeout(timeoutId);
-            if (unsubAccounts) unsubAccounts();
-            if (unsubTrans) unsubTrans();
-            if (unsubLogs) unsubLogs();
         };
-    }, [currentUser.schoolId, isDirector]);
+
+        loadData();
+    }, [currentUser.schoolId]);
+
+    // Helper to Save Data (Router: Local vs Firebase)
+    const handleSaveTransaction = async (transactionData: any, accountType: 'Budget' | 'NonBudget') => {
+        if (accountType === 'Budget' && isConfigured && db) {
+            // Firebase logic removed
+            return false;
+        } else {
+            // Save to LocalStorage (Non-Budget OR Offline Budget)
+            const currentAllTrans = JSON.parse(localStorage.getItem('schoolos_finance_transactions') || '[]');
+            const updatedAllTrans = [...currentAllTrans, transactionData];
+            localStorage.setItem('schoolos_finance_transactions', JSON.stringify(updatedAllTrans));
+            return true;
+        }
+    };
+
+    const handleSaveAccount = async (accountData: any) => {
+        if (accountData.type === 'Budget' && isConfigured && db) {
+            // Firebase logic removed
+            return false;
+        } else {
+            // LocalStorage
+            const currentAllAcc = JSON.parse(localStorage.getItem('schoolos_finance_accounts') || '[]');
+            const updatedAllAcc = [...currentAllAcc, accountData];
+            localStorage.setItem('schoolos_finance_accounts', JSON.stringify(updatedAllAcc));
+            return true;
+        }
+    }
+
+    const handleUpdateAccountName = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingAccount || !newAccountName) return;
+
+        // Optimistic Update
+        const updatedAccounts = accounts.map(a => a.id === editingAccount.id ? { ...a, name: newAccountName } : a);
+        setAccounts(updatedAccounts);
+
+        if (editingAccount.type === 'Budget' && isConfigured && db) {
+            // Firebase logic removed
+        } else {
+            // LocalStorage
+            const allLocal = JSON.parse(localStorage.getItem('schoolos_finance_accounts') || '[]');
+            const updatedLocal = allLocal.map((a:any) => a.id === editingAccount.id ? { ...a, name: newAccountName } : a);
+            localStorage.setItem('schoolos_finance_accounts', JSON.stringify(updatedLocal));
+        }
+        setShowEditAccountModal(false);
+        setEditingAccount(null);
+    };
+
 
     // Update active tab logic based on permissions
     useEffect(() => {
@@ -161,10 +193,9 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             }
         }
         
-        // Auto-select "General Account" logic for NonBudget to bypass Account selection screen
+        // Auto-select logic
         if (activeTab === 'NonBudget') {
-            // We don't force select here, we handle it in rendering to show DetailView immediately
-            setSelectedAccount(null); // Clear selected account so we can handle "All NonBudget" logic
+            setSelectedAccount(null); 
             if (viewMode === 'DASHBOARD') setViewMode('DETAIL');
         } else {
              setSelectedAccount(null);
@@ -173,14 +204,18 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
     }, [currentUser, isBudgetOfficer, isNonBudgetOfficer, isDirector, activeTab]);
 
+    // Reset pagination when account changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [selectedAccount, activeTab]);
+
     // --- Permissions Helpers ---
-    // Strict visibility check: If teacher doesn't have role, don't show specific tabs
     const canSeeBudget = isDirector || isBudgetOfficer;
     const canSeeNonBudget = isDirector || isNonBudgetOfficer;
     
-    // Officers can edit/delete in their respective tabs. Directors can view audits.
     const canEditBudget = isBudgetOfficer;
     const canEditNonBudget = isNonBudgetOfficer;
+    const canEdit = (activeTab === 'Budget' && canEditBudget) || (activeTab === 'NonBudget' && canEditNonBudget);
 
     // --- Logic ---
 
@@ -194,21 +229,22 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        const created: any = { // ID generated by firestore
+        const created: any = { 
+            id: `acc_${Date.now()}`,
             schoolId: currentUser.schoolId,
             name: newAccount.name,
             type: activeTab
         };
 
-        if (isConfigured && db) {
-            try {
-                await addDoc(collection(db, "finance_accounts"), created);
-            } catch(e) {
-                console.error(e);
-                alert("บันทึกข้อมูลไม่สำเร็จ");
+        const success = await handleSaveAccount(created);
+        if (success) {
+            // Force reload or optimistically update
+            if (activeTab === 'Budget' && isConfigured && db) {
+                 // Reload to get real ID? For now optimistic append
+                 setAccounts([...accounts, created]); 
+            } else {
+                 setAccounts([...accounts, created]);
             }
-        } else {
-            setAccounts([...accounts, { ...created, id: `acc_${Date.now()}` }]);
         }
 
         setNewAccount({ name: '' });
@@ -219,40 +255,35 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         e.preventDefault();
         
         let targetAccountId = '';
-        
+        let targetAccountType: 'Budget' | 'NonBudget' = activeTab;
+
+        // If an account is explicitly selected, use it.
         if (selectedAccount) {
             targetAccountId = selectedAccount.id;
+            targetAccountType = selectedAccount.type;
         } else if (activeTab === 'NonBudget') {
-            // Find existing NonBudget account or Create a default one
+            // Find NonBudget Account
             const nbAcc = accounts.find(a => a.type === 'NonBudget');
             if (nbAcc) {
                 targetAccountId = nbAcc.id;
             } else {
-                // Auto-create a default account for NonBudget if none exists
+                // Create Default NonBudget Account
                 const defaultName = 'เงินรายได้สถานศึกษา (ทั่วไป)';
+                const newId = `acc_nb_${Date.now()}`;
                 const createdAcc: any = {
+                    id: newId,
                     schoolId: currentUser.schoolId,
                     name: defaultName,
                     type: 'NonBudget'
                 };
-                
-                if (isConfigured && db) {
-                    try {
-                        const docRef = await addDoc(collection(db, "finance_accounts"), createdAcc);
-                        targetAccountId = docRef.id;
-                    } catch(e) {
-                         alert("ไม่สามารถสร้างบัญชีเริ่มต้นได้");
-                         return;
-                    }
-                } else {
-                     const newId = `acc_nb_${Date.now()}`;
-                     setAccounts([...accounts, { ...createdAcc, id: newId }]);
-                     targetAccountId = newId;
-                }
+                await handleSaveAccount(createdAcc);
+                setAccounts([...accounts, createdAcc]);
+                targetAccountId = newId;
             }
         }
 
         const created: any = {
+            id: `trans_${Date.now()}`,
             schoolId: currentUser.schoolId,
             accountId: targetAccountId,
             date: newTrans.date,
@@ -261,19 +292,103 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             type: newTrans.type
         };
 
-        if (isConfigured && db) {
-            try {
-                await addDoc(collection(db, "finance_transactions"), created);
-            } catch(e) {
-                console.error(e);
-                alert("บันทึกข้อมูลไม่สำเร็จ");
-            }
+        const success = await handleSaveTransaction(created, targetAccountType);
+        if (success) {
+            setTransactions([...transactions, created]);
+            alert("บันทึกรายการเรียบร้อยแล้ว");
+            setNewTrans({ date: new Date().toISOString().split('T')[0], desc: '', amount: '', type: 'Income' });
+            setShowTransForm(false);
+        }
+    };
+
+    // --- Excel Import Logic ---
+    const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files || !e.target.files[0]) return;
+        const file = e.target.files[0];
+
+        // Determine Target Account
+        let targetAccountId = '';
+        let targetAccountType: 'Budget' | 'NonBudget' = activeTab;
+
+        if (selectedAccount) {
+            targetAccountId = selectedAccount.id;
+            targetAccountType = selectedAccount.type;
+        } else if (activeTab === 'NonBudget') {
+             const nbAcc = accounts.find(a => a.type === 'NonBudget');
+             if (nbAcc) targetAccountId = nbAcc.id;
+             else {
+                 alert("ไม่พบบัญชีปลายทางสำหรับนำเข้าข้อมูล");
+                 return;
+             }
         } else {
-            setTransactions([...transactions, { ...created, id: `trans_${Date.now()}` }]);
+             alert("กรุณาเลือกบัญชีที่ต้องการนำเข้าข้อมูลก่อน");
+             return;
         }
 
-        setNewTrans({ date: new Date().toISOString().split('T')[0], desc: '', amount: '', type: 'Income' });
-        setShowTransForm(false);
+        setIsImporting(true);
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                
+                const rawData = XLSX.utils.sheet_to_json(ws);
+                const batchTransactions: any[] = [];
+                let successCount = 0;
+
+                rawData.forEach((row: any) => {
+                    const normalizedRow: any = {};
+                    Object.keys(row).forEach(key => normalizedRow[key.trim()] = row[key]);
+
+                    const dateRaw = normalizedRow['Date'] || normalizedRow['date'] || normalizedRow['วันที่'];
+                    const descRaw = normalizedRow['Description'] || normalizedRow['description'] || normalizedRow['รายการ'];
+                    const amountRaw = normalizedRow['Amount'] || normalizedRow['amount'] || normalizedRow['จำนวนเงิน'];
+                    const typeRaw = normalizedRow['Type'] || normalizedRow['type'] || normalizedRow['ประเภท'];
+
+                    if (!descRaw || !amountRaw) return;
+
+                    let amountValue = parseFloat(amountRaw.toString().replace(/,/g, ''));
+                    if (isNaN(amountValue)) return;
+
+                    let finalType = 'Income';
+                    if (typeRaw && typeRaw.toString().toLowerCase().includes('จ่าย')) finalType = 'Expense';
+
+                    batchTransactions.push({
+                        id: `imp_${Date.now()}_${successCount}`,
+                        schoolId: currentUser.schoolId,
+                        accountId: targetAccountId,
+                        date: new Date().toISOString().split('T')[0], // Simplify date parsing for demo
+                        description: descRaw.toString().trim(),
+                        amount: amountValue,
+                        type: finalType
+                    });
+                    successCount++;
+                });
+
+                if (batchTransactions.length > 0) {
+                    // Batch Save
+                    if (targetAccountType === 'Budget' && isConfigured && db) {
+                        // Firebase logic removed
+                    } else {
+                         const currentAllTrans = JSON.parse(localStorage.getItem('schoolos_finance_transactions') || '[]');
+                         localStorage.setItem('schoolos_finance_transactions', JSON.stringify([...currentAllTrans, ...batchTransactions]));
+                    }
+                    
+                    setTransactions([...transactions, ...batchTransactions]);
+                    alert(`นำเข้าข้อมูลสำเร็จจำนวน ${successCount} รายการ`);
+                }
+
+            } catch (error) {
+                console.error("Import Error", error);
+                alert("เกิดข้อผิดพลาดในการอ่านไฟล์");
+            } finally {
+                setIsImporting(false);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+            }
+        };
+        reader.readAsBinaryString(file);
     };
     
     // --- Edit / Delete Transaction ---
@@ -283,407 +398,580 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         setShowEditModal(true);
     };
 
-    const canEdit = (activeTab === 'Budget' && canEditBudget) || (activeTab === 'NonBudget' && canEditNonBudget);
-
     const handleUpdateTransaction = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingTransaction) return;
 
-        // Log the change if configured
-        if (isConfigured && db) {
-            try {
-                // 1. Log Audit
-                const original = transactions.find(t => t.id === editingTransaction.id);
-                if (original) {
-                     const auditLog: any = {
-                        schoolId: currentUser.schoolId,
-                        timestamp: new Date().toISOString(),
-                        actorName: currentUser.name,
-                        actionType: 'EDIT',
-                        transactionDescription: original.description,
-                        details: `Changed amount from ${original.amount} to ${editingTransaction.amount}, desc: ${editingTransaction.description}`,
-                        amountInvolved: original.amount
-                    };
-                    await addDoc(collection(db, "finance_audit_logs"), auditLog);
-                }
+        // Check if transaction belongs to a Budget Account
+        const acc = accounts.find(a => a.id === editingTransaction.accountId);
+        const isBudget = acc?.type === 'Budget';
 
-                // 2. Update
-                const docRef = doc(db, "finance_transactions", editingTransaction.id);
-                await updateDoc(docRef, {
-                    date: editingTransaction.date,
-                    description: editingTransaction.description,
-                    amount: editingTransaction.amount,
-                    type: editingTransaction.type
-                });
-                
-                setShowEditModal(false);
-                setEditingTransaction(null);
-            } catch(e) {
-                alert("เกิดข้อผิดพลาดในการแก้ไข");
-            }
+        if (isBudget && isConfigured && db) {
+            // Firebase logic removed
         } else {
-            // Mock Update
-            setTransactions(transactions.map(t => t.id === editingTransaction.id ? editingTransaction : t));
-            setShowEditModal(false);
-            setEditingTransaction(null);
+            // Local
+            const currentAllTrans = JSON.parse(localStorage.getItem('schoolos_finance_transactions') || '[]');
+            const updated = currentAllTrans.map((t:any) => t.id === editingTransaction.id ? editingTransaction : t);
+            localStorage.setItem('schoolos_finance_transactions', JSON.stringify(updated));
         }
+
+        const updatedTrans = transactions.map(t => t.id === editingTransaction.id ? editingTransaction : t);
+        setTransactions(updatedTrans);
+        setShowEditModal(false);
+        setEditingTransaction(null);
     };
 
     const handleDeleteTransaction = async () => {
         if (!editingTransaction) return;
-        if (!confirm("ยืนยันการลบรายการนี้? (การกระทำนี้จะถูกบันทึกใน Audit Log)")) return;
+        if (!confirm("ยืนยันการลบรายการนี้?")) return;
 
-         if (isConfigured && db) {
-            try {
-                 // 1. Log Audit
-                 const auditLog: any = {
-                    schoolId: currentUser.schoolId,
-                    timestamp: new Date().toISOString(),
-                    actorName: currentUser.name,
-                    actionType: 'DELETE',
-                    transactionDescription: editingTransaction.description,
-                    details: `Deleted transaction of ${editingTransaction.amount} baht`,
-                    amountInvolved: editingTransaction.amount
-                };
-                await addDoc(collection(db, "finance_audit_logs"), auditLog);
+         // Check if transaction belongs to a Budget Account
+        const acc = accounts.find(a => a.id === editingTransaction.accountId);
+        const isBudget = acc?.type === 'Budget';
 
-                // 2. Delete
-                await deleteDoc(doc(db, "finance_transactions", editingTransaction.id));
-                setShowEditModal(false);
-                setEditingTransaction(null);
-            } catch(e) {
-                alert("ลบข้อมูลไม่สำเร็จ");
-            }
+        if (isBudget && isConfigured && db) {
+            // Firebase logic removed
         } else {
-             setTransactions(transactions.filter(t => t.id !== editingTransaction.id));
-             setShowEditModal(false);
-             setEditingTransaction(null);
+            // Local
+            const currentAllTrans = JSON.parse(localStorage.getItem('schoolos_finance_transactions') || '[]');
+            const updated = currentAllTrans.filter((t:any) => t.id !== editingTransaction.id);
+            localStorage.setItem('schoolos_finance_transactions', JSON.stringify(updated));
         }
-    };
-    
-    // Director Signature Logic
-    const getDirectorName = () => {
-        const director = allTeachers.find(t => t.roles.includes('DIRECTOR'));
-        return director ? director.name : '...........................................................';
+
+         const updatedTrans = transactions.filter(t => t.id !== editingTransaction.id);
+         setTransactions(updatedTrans);
+         setShowEditModal(false);
+         setEditingTransaction(null);
     };
 
-    if (isLoadingData) {
+    // --- Renderers ---
+
+    const renderDashboard = () => (
+        <div className="animate-fade-in space-y-6 pb-20">
+            {/* Header / Tabs */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    <Wallet className="text-orange-500"/>
+                    ระบบการเงินและงบประมาณ
+                </h2>
+                
+                <div className="flex bg-slate-100 p-1 rounded-lg">
+                    {canSeeBudget && (
+                        <button 
+                            onClick={() => { setActiveTab('Budget'); setViewMode('DASHBOARD'); }}
+                            className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'Budget' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            <DollarSign size={16}/> เงินงบประมาณ
+                        </button>
+                    )}
+                    {canSeeNonBudget && (
+                        <button 
+                            onClick={() => { setActiveTab('NonBudget'); setViewMode('DASHBOARD'); }}
+                            className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'NonBudget' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            <Wallet size={16}/> เงินนอกงบประมาณ
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Content based on Tab */}
+            {activeTab === 'Budget' && canSeeBudget && (
+                <div className="space-y-4">
+                     <div className="flex items-center gap-2 text-sm text-slate-500 bg-orange-50 p-2 rounded-lg w-fit">
+                        {isConfigured ? <Cloud size={14} className="text-orange-600"/> : <ServerOff size={14} className="text-red-500"/>}
+                        {isConfigured ? 'เชื่อมต่อฐานข้อมูล Firebase (Budget)' : 'Offline Mock Data (Budget)'}
+                     </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {accounts.filter(a => a.type === 'Budget').map(acc => {
+                            const balance = getAccountBalance(acc.id);
+                            return (
+                                <div 
+                                    key={acc.id} 
+                                    className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md hover:border-orange-300 transition-all cursor-pointer group relative"
+                                    onClick={() => { setSelectedAccount(acc); setViewMode('DETAIL'); }}
+                                >
+                                    {/* Edit Button for Budget Accounts */}
+                                    {canEditBudget && (
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); setEditingAccount(acc); setNewAccountName(acc.name); setShowEditAccountModal(true); }}
+                                            className="absolute top-4 right-4 p-2 bg-white text-slate-400 hover:text-blue-600 rounded-full hover:bg-slate-100 z-10"
+                                            title="แก้ไขชื่อบัญชี"
+                                        >
+                                            <Edit2 size={16}/>
+                                        </button>
+                                    )}
+
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="p-3 bg-orange-50 rounded-lg group-hover:bg-orange-500 group-hover:text-white transition-colors">
+                                            <FileText size={24}/>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-xs text-slate-500">ยอดคงเหลือ</p>
+                                            <p className={`text-xl font-bold ${balance >= 0 ? 'text-slate-800' : 'text-red-600'}`}>
+                                                ฿{balance.toLocaleString()}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <h3 className="font-bold text-lg text-slate-800 mb-2 group-hover:text-orange-600 pr-8">{acc.name}</h3>
+                                    <div className="text-xs text-slate-400 flex items-center gap-1">
+                                        แตะเพื่อดูรายละเอียด <ArrowRight size={12}/>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        
+                        {/* Add Account Button (Only Officer) */}
+                        {canEditBudget && (
+                            <button 
+                                onClick={() => setShowAccountForm(true)}
+                                className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center text-slate-400 hover:text-orange-600 hover:border-orange-300 hover:bg-orange-50 transition-all gap-2"
+                            >
+                                <PlusCircle size={32}/>
+                                <span className="font-bold">เปิดบัญชีใหม่</span>
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+            
+            {!canSeeBudget && !canSeeNonBudget && (
+                <div className="text-center py-20 text-slate-400">ท่านไม่มีสิทธิ์เข้าถึงข้อมูลส่วนนี้</div>
+            )}
+        </div>
+    );
+
+    const renderDetail = () => {
+        let targetAcc = selectedAccount;
+        if (!targetAcc && activeTab === 'NonBudget') {
+            targetAcc = accounts.find(a => a.type === 'NonBudget') || null;
+        }
+
+        if (!targetAcc && activeTab === 'NonBudget') {
+            return (
+                <div className="text-center py-20">
+                    <p className="text-slate-500 mb-4">ยังไม่มีบัญชีเงินนอกงบประมาณ</p>
+                    {canEditNonBudget && (
+                         <button onClick={() => setShowAccountForm(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow font-bold">
+                            เปิดบัญชีรายได้สถานศึกษา
+                         </button>
+                    )}
+                </div>
+            )
+        }
+
+        if (!targetAcc) return null;
+
+        const filteredTrans = transactions
+            .filter(t => t.accountId === targetAcc!.id)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        const totalIncome = filteredTrans.filter(t => t.type === 'Income').reduce((s,t) => s + t.amount, 0);
+        const totalExpense = filteredTrans.filter(t => t.type === 'Expense').reduce((s,t) => s + t.amount, 0);
+        const currentBalance = totalIncome - totalExpense;
+
+        // Pagination Logic
+        const totalPages = Math.ceil(filteredTrans.length / ITEMS_PER_PAGE);
+        const displayedTrans = filteredTrans.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+        const goToPage = (p: number) => {
+            if (p >= 1 && p <= totalPages) setCurrentPage(p);
+        };
+
         return (
-             <div className="flex items-center justify-center h-64 text-slate-400 flex-col gap-2">
-                <Loader className="animate-spin" size={32}/>
-                <p>กำลังโหลดข้อมูลการเงิน...</p>
+            <div className="space-y-6 animate-slide-up pb-20">
+                 {/* Header */}
+                 <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+                    <div className="flex items-center gap-4">
+                        {activeTab === 'Budget' && (
+                            <button onClick={() => setViewMode('DASHBOARD')} className="p-2 hover:bg-slate-200 rounded-full text-slate-600">
+                                <ArrowLeft size={24}/>
+                            </button>
+                        )}
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                                {targetAcc.name}
+                                {activeTab === 'Budget' && canEdit && (
+                                     <button 
+                                        onClick={() => { setEditingAccount(targetAcc); setNewAccountName(targetAcc!.name); setShowEditAccountModal(true); }}
+                                        className="text-slate-400 hover:text-blue-600"
+                                    >
+                                        <Edit2 size={16}/>
+                                    </button>
+                                )}
+                            </h2>
+                            <div className="flex items-center gap-2 text-sm text-slate-500">
+                                <span>{activeTab === 'Budget' ? 'บัญชีเงินงบประมาณ' : 'บัญชีเงินรายได้สถานศึกษา'}</span>
+                                <span className="text-slate-300">|</span>
+                                <span className={`flex items-center gap-1 font-bold px-2 rounded-full ${activeTab === 'Budget' && isConfigured ? 'bg-orange-50 text-orange-600' : 'bg-green-50 text-green-600'}`}>
+                                    {activeTab === 'Budget' && isConfigured ? <Cloud size={12}/> : <HardDrive size={12}/>}
+                                    {activeTab === 'Budget' && isConfigured ? 'Firebase DB' : 'Local DB'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+                        {/* IMPORT BUTTON */}
+                        <div className="relative">
+                            <input 
+                                type="file" 
+                                ref={fileInputRef} 
+                                className="hidden" 
+                                accept=".xlsx, .xls"
+                                onChange={handleImportExcel}
+                            />
+                            {canEdit && (
+                                <button 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={isImporting}
+                                    className="bg-green-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-green-700 font-bold flex items-center gap-2 text-sm disabled:opacity-50"
+                                >
+                                    {isImporting ? <Loader className="animate-spin" size={16}/> : <Upload size={16}/>}
+                                    <span className="hidden sm:inline">นำเข้า Excel</span>
+                                </button>
+                            )}
+                        </div>
+                        
+                        {/* PRINT BUTTON */}
+                        <button 
+                            onClick={() => setViewMode('PRINT')}
+                            className="bg-slate-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-slate-700 font-bold flex items-center gap-2 text-sm"
+                        >
+                            <Printer size={16}/> <span className="hidden sm:inline">พิมพ์รายงาน</span>
+                        </button>
+
+                        {canEdit && (
+                            <button 
+                                onClick={() => {
+                                    if (activeTab === 'NonBudget' && !selectedAccount && targetAcc) {
+                                        setSelectedAccount(targetAcc);
+                                    }
+                                    setShowTransForm(true);
+                                }} 
+                                className="bg-orange-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-orange-700 font-bold flex items-center gap-2 text-sm ml-auto"
+                            >
+                                <Plus size={18}/> บันทึกรายการ
+                            </button>
+                        )}
+                    </div>
+                 </div>
+
+                 {/* Stats Cards */}
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                         <p className="text-xs text-slate-500">รับตลอดปี</p>
+                         <p className="text-xl font-bold text-green-600">+{totalIncome.toLocaleString()}</p>
+                     </div>
+                     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                         <p className="text-xs text-slate-500">จ่ายตลอดปี</p>
+                         <p className="text-xl font-bold text-red-600">-{totalExpense.toLocaleString()}</p>
+                     </div>
+                     <div className="bg-slate-800 p-4 rounded-xl border border-slate-900 shadow-sm text-white">
+                         <p className="text-xs text-slate-400">คงเหลือสุทธิ</p>
+                         <p className="text-2xl font-bold">฿{currentBalance.toLocaleString()}</p>
+                     </div>
+                 </div>
+
+                 {/* Transactions Table */}
+                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                     <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                         <h3 className="font-bold text-slate-700">รายการเคลื่อนไหว (ทั้งหมด {filteredTrans.length})</h3>
+                         <span className="text-xs text-slate-500">แสดงหน้า {currentPage} จาก {totalPages || 1}</span>
+                     </div>
+                     <div className="overflow-x-auto flex-1 min-h-[400px]">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-white text-slate-500 border-b border-slate-100 sticky top-0 shadow-sm z-10">
+                                <tr>
+                                    <th className="px-4 py-3 whitespace-nowrap w-32 bg-slate-50">วันที่</th>
+                                    <th className="px-4 py-3 bg-slate-50">รายการ</th>
+                                    <th className="px-4 py-3 text-right bg-slate-50">จำนวนเงิน</th>
+                                    {canEdit && <th className="px-4 py-3 text-center bg-slate-50">จัดการ</th>}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {displayedTrans.map(t => (
+                                    <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-4 py-3 font-medium text-slate-600 whitespace-nowrap">{getThaiDate(t.date)}</td>
+                                        <td className="px-4 py-3 text-slate-800">{t.description}</td>
+                                        <td className={`px-4 py-3 text-right font-bold ${t.type === 'Income' ? 'text-green-600' : 'text-red-600'}`}>
+                                            {t.type === 'Income' ? '+' : '-'}{t.amount.toLocaleString()}
+                                        </td>
+                                        {canEdit && (
+                                            <td className="px-4 py-3 text-center">
+                                                <button onClick={() => handleEditTransaction(t)} className="text-slate-400 hover:text-blue-600 p-1">
+                                                    <Edit2 size={16}/>
+                                                </button>
+                                            </td>
+                                        )}
+                                    </tr>
+                                ))}
+                                {displayedTrans.length === 0 && (
+                                    <tr><td colSpan={4} className="text-center py-8 text-slate-400">ยังไม่มีรายการ</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                     </div>
+
+                     {/* Pagination Controls */}
+                     {totalPages > 1 && (
+                        <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-center items-center gap-4 sticky bottom-0">
+                            <button 
+                                onClick={() => goToPage(currentPage - 1)}
+                                disabled={currentPage === 1}
+                                className="p-2 rounded-lg bg-white border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-50 text-slate-600 shadow-sm"
+                            >
+                                <ChevronLeft size={20}/>
+                            </button>
+                            <span className="text-sm font-bold text-slate-700 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
+                                หน้า {currentPage} / {totalPages}
+                            </span>
+                            <button 
+                                onClick={() => goToPage(currentPage + 1)}
+                                disabled={currentPage === totalPages}
+                                className="p-2 rounded-lg bg-white border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-50 text-slate-600 shadow-sm"
+                            >
+                                <ChevronRight size={20}/>
+                            </button>
+                        </div>
+                     )}
+                 </div>
             </div>
         );
-    }
+    };
 
-    // Filter Transactions for Detail View
-    let filteredTrans: Transaction[] = [];
-    let currentBalance = 0;
-    
-    if (activeTab === 'Budget' && selectedAccount) {
-        filteredTrans = transactions.filter(t => t.accountId === selectedAccount.id);
-        currentBalance = getAccountBalance(selectedAccount.id);
-    } else if (activeTab === 'NonBudget') {
-        // For NonBudget, we aggregate all NonBudget accounts (usually just 1, but scalable)
-        const nbAccountIds = accounts.filter(a => a.type === 'NonBudget').map(a => a.id);
-        filteredTrans = transactions.filter(t => nbAccountIds.includes(t.accountId));
-        currentBalance = nbAccountIds.reduce((sum, accId) => sum + getAccountBalance(accId), 0);
-    }
-    
-    // Sort transactions by date desc
-    filteredTrans.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Print View remains largely same ...
+    const renderPrintView = () => {
+        let targetAcc = selectedAccount;
+        if (!targetAcc && activeTab === 'NonBudget') {
+             targetAcc = accounts.find(a => a.type === 'NonBudget') || null;
+        }
+        if (!targetAcc) return null;
+        
+        const director = allTeachers.find(t => t.roles.includes('DIRECTOR'));
+        const directorName = director ? director.name : "......................................................................";
 
-    // --- VIEW 3: PRINT REPORT ---
-    if (viewMode === 'PRINT') {
+        const officerRole = activeTab === 'Budget' ? 'FINANCE_BUDGET' : 'FINANCE_NONBUDGET';
+        const officer = allTeachers.find(t => t.roles.includes(officerRole));
+        const officerName = currentUser.roles.includes(officerRole) ? currentUser.name : (officer ? officer.name : currentUser.name);
+
+        const filteredTrans = transactions
+            .filter(t => t.accountId === targetAcc!.id)
+            .filter(t => {
+                if (reportConfig.type === 'ALL') return true;
+                if (reportConfig.type === 'MONTH') return t.date.startsWith(reportConfig.month);
+                if (reportConfig.type === 'CUSTOM') return t.date >= reportConfig.customStart && t.date <= reportConfig.customEnd;
+                return true;
+            })
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        const totalIncome = filteredTrans.filter(t => t.type === 'Income').reduce((s,t) => s + t.amount, 0);
+        const totalExpense = filteredTrans.filter(t => t.type === 'Expense').reduce((s,t) => s + t.amount, 0);
+        const balance = totalIncome - totalExpense;
+
         return (
-            <div className="bg-slate-100 min-h-screen animate-fade-in">
-                <div className="bg-white p-4 shadow-sm mb-6 print:hidden">
-                     <div className="max-w-4xl mx-auto flex justify-between items-center">
-                        <button onClick={() => setViewMode('DETAIL')} className="flex items-center gap-2 text-slate-600 hover:text-slate-900">
-                            <ArrowLeft size={20}/> ย้อนกลับ
-                        </button>
-                        <button onClick={() => window.print()} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
-                            <Printer size={18}/> พิมพ์รายงาน
-                        </button>
-                     </div>
+            <div className="absolute inset-0 z-50 bg-slate-100 min-h-screen animate-fade-in">
+                {/* Print Controls Toolbar */}
+                <div className="bg-white p-4 shadow-sm mb-6 print:hidden sticky top-0 z-40 border-b border-slate-200">
+                    <div className="max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+                         <div className="flex items-center gap-4 w-full md:w-auto flex-wrap">
+                             <button onClick={() => setViewMode('DETAIL')} className="flex items-center gap-2 text-slate-600 hover:text-slate-900 font-bold bg-slate-100 p-2 rounded-lg">
+                                <ArrowLeft size={20}/> <span className="hidden sm:inline">ย้อนกลับ</span>
+                             </button>
+                             
+                             <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                                <button 
+                                    onClick={() => setReportConfig({ ...reportConfig, type: 'MONTH' })}
+                                    className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'MONTH' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                >
+                                    รายเดือน
+                                </button>
+                                <button 
+                                    onClick={() => setReportConfig({ ...reportConfig, type: 'CUSTOM' })}
+                                    className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'CUSTOM' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                >
+                                    กำหนดเอง
+                                </button>
+                                <button 
+                                    onClick={() => setReportConfig({ ...reportConfig, type: 'ALL' })}
+                                    className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'ALL' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
+                                >
+                                    ทั้งหมด
+                                </button>
+                             </div>
+
+                             {reportConfig.type === 'MONTH' && (
+                                 <input 
+                                    type="month" 
+                                    value={reportConfig.month}
+                                    onChange={(e) => setReportConfig({ ...reportConfig, month: e.target.value })}
+                                    className="border rounded px-2 py-1 text-sm text-slate-700"
+                                 />
+                             )}
+                             {reportConfig.type === 'CUSTOM' && (
+                                 <div className="flex items-center gap-1">
+                                     <input 
+                                        type="date" 
+                                        value={reportConfig.customStart}
+                                        onChange={(e) => setReportConfig({ ...reportConfig, customStart: e.target.value })}
+                                        className="border rounded px-2 py-1 text-xs text-slate-700 w-32"
+                                     />
+                                     <span className="text-slate-400">-</span>
+                                     <input 
+                                        type="date" 
+                                        value={reportConfig.customEnd}
+                                        onChange={(e) => setReportConfig({ ...reportConfig, customEnd: e.target.value })}
+                                        className="border rounded px-2 py-1 text-xs text-slate-700 w-32"
+                                     />
+                                 </div>
+                             )}
+                         </div>
+
+                         <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-400 font-mono hidden md:inline">
+                                Found {filteredTrans.length} records
+                            </span>
+                            <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2 shadow-sm">
+                                <Printer size={20}/> สั่งพิมพ์
+                            </button>
+                         </div>
+                    </div>
                 </div>
 
-                <div className="bg-white shadow-lg p-10 mx-auto max-w-[800px] min-h-[1000px] font-sarabun text-slate-900 print:shadow-none print:border-none print:p-0 print:w-full">
-                     <div className="text-center mb-8">
-                         {sysConfig?.officialGarudaBase64 ? (
-                            <img src={sysConfig.officialGarudaBase64} alt="Garuda" className="h-16 mx-auto mb-2" />
-                         ) : (
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Emblem_of_the_Ministry_of_Education_of_Thailand.svg/1200px-Emblem_of_the_Ministry_of_Education_of_Thailand.svg.png" alt="Garuda" className="h-16 mx-auto mb-2 grayscale opacity-80" />
-                         )}
-                         <h2 className="text-xl font-bold">รายงาน{activeTab === 'Budget' ? 'เงินงบประมาณ' : 'เงินรายได้สถานศึกษา'}</h2>
-                         <p className="text-base">{sysConfig?.schoolName || 'โรงเรียน.......................'}</p>
-                         <p className="text-sm text-slate-600 mt-2">
-                             บัญชี: {selectedAccount ? selectedAccount.name : 'เงินรายได้สถานศึกษา (ทั่วไป)'} <br/>
-                             ข้อมูล ณ วันที่ {getThaiDate(new Date().toISOString().split('T')[0])}
-                         </p>
+                <div className="bg-white shadow-lg p-10 mx-auto max-w-[210mm] min-h-[297mm] print:shadow-none print:w-full print:p-0 print:m-0 text-slate-900">
+                    <div className="text-center mb-6">
+                        <h2 className="text-xl font-bold mb-1">รายงานการรับ - จ่ายเงิน</h2>
+                        <h3 className="text-lg font-bold text-slate-700">{targetAcc.name}</h3>
+                        <p className="text-sm text-slate-600 mt-2 font-bold">
+                            {reportConfig.type === 'ALL' && "ข้อมูลทั้งหมด"}
+                            {reportConfig.type === 'MONTH' && `ประจำเดือน ${formatMonthYearInput(reportConfig.month)}`}
+                            {reportConfig.type === 'CUSTOM' && `ตั้งแต่วันที่ ${getThaiDate(reportConfig.customStart)} ถึง ${getThaiDate(reportConfig.customEnd)}`}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">พิมพ์เมื่อ: {new Date().toLocaleDateString('th-TH', { dateStyle: 'long' })}</p>
                     </div>
 
-                    <table className="w-full border-collapse border border-black mb-8 text-sm">
+                    <table className="w-full border-collapse border border-slate-400 text-sm">
                         <thead>
                             <tr className="bg-slate-50">
-                                <th className="border border-black p-2 text-center w-24">วัน/เดือน/ปี</th>
-                                <th className="border border-black p-2 text-left">รายการ</th>
-                                <th className="border border-black p-2 text-right w-24">รายรับ</th>
-                                <th className="border border-black p-2 text-right w-24">รายจ่าย</th>
-                                <th className="border border-black p-2 text-right w-24">คงเหลือ</th>
+                                <th className="border border-slate-400 p-2 text-center w-16">ลำดับ</th>
+                                <th className="border border-slate-400 p-2 text-center whitespace-nowrap w-28">วัน/เดือน/ปี</th>
+                                <th className="border border-slate-400 p-2 text-left">รายการ</th>
+                                <th className="border border-slate-400 p-2 text-right w-24">รายรับ</th>
+                                <th className="border border-slate-400 p-2 text-right w-24">รายจ่าย</th>
+                                <th className="border border-slate-400 p-2 text-right w-28">คงเหลือ</th>
                             </tr>
                         </thead>
                         <tbody>
                             {(() => {
-                                // Calculate running balance logic for print (Chronological Ascending)
-                                const sortedForCalc = [...filteredTrans].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-                                let runningBal = 0;
-                                const rowsWithBal = sortedForCalc.map(t => {
-                                    if (t.type === 'Income') runningBal += t.amount;
-                                    else runningBal -= t.amount;
-                                    return { ...t, balance: runningBal };
+                                let runBal = 0;
+                                if (filteredTrans.length === 0) return <tr><td colSpan={6} className="p-4 text-center">ไม่มีรายการในช่วงเวลาที่เลือก</td></tr>;
+                                return filteredTrans.map((t, idx) => {
+                                    if(t.type === 'Income') runBal += t.amount;
+                                    else runBal -= t.amount;
+                                    return (
+                                        <tr key={t.id}>
+                                            <td className="border border-slate-400 p-2 text-center">{idx + 1}</td>
+                                            <td className="border border-slate-400 p-2 text-center whitespace-nowrap">{getThaiDate(t.date)}</td>
+                                            <td className="border border-slate-400 p-2">{t.description}</td>
+                                            <td className="border border-slate-400 p-2 text-right text-green-700">{t.type === 'Income' ? t.amount.toLocaleString() : '-'}</td>
+                                            <td className="border border-slate-400 p-2 text-right text-red-700">{t.type === 'Expense' ? t.amount.toLocaleString() : '-'}</td>
+                                            <td className="border border-slate-400 p-2 text-right font-bold">{runBal.toLocaleString()}</td>
+                                        </tr>
+                                    );
                                 });
-
-                                return rowsWithBal.map((t, idx) => (
-                                    <tr key={idx}>
-                                        <td className="border border-black p-2 text-center">{getThaiDate(t.date)}</td>
-                                        <td className="border border-black p-2">{t.description}</td>
-                                        <td className="border border-black p-2 text-right">{t.type === 'Income' ? t.amount.toLocaleString() : '-'}</td>
-                                        <td className="border border-black p-2 text-right">{t.type === 'Expense' ? t.amount.toLocaleString() : '-'}</td>
-                                        <td className="border border-black p-2 text-right font-bold">{t.balance.toLocaleString()}</td>
-                                    </tr>
-                                ));
                             })()}
                         </tbody>
                         <tfoot>
-                             <tr className="bg-slate-100 font-bold">
-                                <td className="border border-black p-2 text-center" colSpan={2}>รวมทั้งสิ้น</td>
-                                <td className="border border-black p-2 text-right text-green-700">
-                                    {filteredTrans.filter(t => t.type === 'Income').reduce((s,t) => s+t.amount, 0).toLocaleString()}
-                                </td>
-                                <td className="border border-black p-2 text-right text-red-700">
-                                    {filteredTrans.filter(t => t.type === 'Expense').reduce((s,t) => s+t.amount, 0).toLocaleString()}
-                                </td>
-                                <td className="border border-black p-2 text-right">
-                                    {currentBalance.toLocaleString()}
-                                </td>
-                             </tr>
+                            <tr className="bg-slate-100 font-bold">
+                                <td colSpan={3} className="border border-slate-400 p-2 text-center">รวมทั้งสิ้น</td>
+                                <td className="border border-slate-400 p-2 text-right text-green-700">{totalIncome.toLocaleString()}</td>
+                                <td className="border border-slate-400 p-2 text-right text-red-700">{totalExpense.toLocaleString()}</td>
+                                <td className="border border-slate-400 p-2 text-right text-blue-700">{balance.toLocaleString()}</td>
+                            </tr>
                         </tfoot>
                     </table>
 
-                    <div className="flex justify-between items-start mt-16 px-10 page-break-inside-avoid">
-                        <div className="text-center">
-                            <p className="mb-8">ลงชื่อ.......................................................เจ้าหน้าที่การเงิน</p>
-                            <p>({currentUser.name})</p>
-                            <p>ตำแหน่ง {currentUser.position}</p>
+                    <div className="mt-16 flex justify-around page-break-inside-avoid">
+                        <div className="text-center w-1/3">
+                            <p className="mb-8">ลงชื่อ..........................................................ผู้ทำรายการ</p>
+                            <p className="font-bold">({officerName})</p>
+                            <p className="mt-1">ตำแหน่ง เจ้าหน้าที่การเงิน</p>
                         </div>
-                        <div className="text-center">
-                            <p className="mb-8">ลงชื่อ.......................................................ผู้อำนวยการ</p>
-                            <p>({getDirectorName()})</p>
-                            <p>ตำแหน่ง ผู้อำนวยการโรงเรียน</p>
+                        <div className="text-center w-1/3">
+                            <p className="mb-8">ลงชื่อ..........................................................ผู้ตรวจสอบ</p>
+                            <p className="font-bold">({directorName})</p>
+                            <p className="mt-1">ตำแหน่ง ผู้อำนวยการโรงเรียน</p>
                         </div>
                     </div>
                 </div>
             </div>
         );
+    };
+
+    if (isLoadingData) {
+        return (
+            <div className="flex items-center justify-center h-64 text-slate-400 flex-col gap-2">
+                <Loader className="animate-spin" size={32}/>
+                <p>กำลังเชื่อมต่อฐานข้อมูล...</p>
+            </div>
+        );
     }
 
-    // --- MAIN RENDER ---
     return (
-        <div className="space-y-6 animate-fade-in pb-10">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                     <h2 className="text-2xl font-bold text-slate-800">ระบบบริหารการเงิน</h2>
-                     <p className="text-slate-500 text-sm">ผู้ใช้งาน: {currentUser.name} ({currentUser.position})</p>
-                </div>
-                
-                {/* Director Audit Log Button */}
-                {isDirector && (
-                    <button 
-                        onClick={() => setShowAuditModal(true)}
-                        className="text-xs bg-slate-800 text-white px-3 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2"
-                    >
-                        <ShieldAlert size={14}/> Audit Logs (ประวัติการแก้ไข)
-                    </button>
-                )}
-            </div>
+        <div className="max-w-6xl mx-auto">
+            {viewMode === 'DASHBOARD' && renderDashboard()}
+            {viewMode === 'DETAIL' && renderDetail()}
+            {viewMode === 'PRINT' && renderPrintView()}
 
-            {/* Tabs */}
-            <div className="flex border-b border-slate-200 mb-6">
-                {canSeeBudget && (
-                    <button 
-                        onClick={() => { setActiveTab('Budget'); setViewMode('DASHBOARD'); }}
-                        className={`px-6 py-3 font-bold text-sm transition-colors relative ${activeTab === 'Budget' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        เงินงบประมาณ
-                        {activeTab === 'Budget' && <div className="absolute bottom-0 left-0 w-full h-1 bg-blue-600 rounded-t-full"></div>}
-                    </button>
-                )}
-                {canSeeNonBudget && (
-                    <button 
-                        onClick={() => { setActiveTab('NonBudget'); setViewMode('DETAIL'); }} // NonBudget goes straight to detail usually
-                        className={`px-6 py-3 font-bold text-sm transition-colors relative ${activeTab === 'NonBudget' ? 'text-orange-600' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        เงินรายได้สถานศึกษา (นอกงบ)
-                        {activeTab === 'NonBudget' && <div className="absolute bottom-0 left-0 w-full h-1 bg-orange-600 rounded-t-full"></div>}
-                    </button>
-                )}
-            </div>
-
-            {/* --- VIEW 1: DASHBOARD (BUDGET ACCOUNTS LIST) --- */}
-            {viewMode === 'DASHBOARD' && activeTab === 'Budget' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-slide-up">
-                    {/* Add Account Card */}
-                    {canEditBudget && (
-                        <button 
-                            onClick={() => setShowAccountForm(true)}
-                            className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-400 hover:bg-blue-50 transition-all min-h-[200px]"
-                        >
-                            <div className="bg-white p-4 rounded-full shadow-sm mb-3">
-                                <Plus size={32}/>
-                            </div>
-                            <span className="font-bold">เพิ่มบัญชีงบประมาณ</span>
-                        </button>
-                    )}
-
-                    {/* Account Cards */}
-                    {accounts.filter(a => a.type === 'Budget').map(acc => {
-                        const balance = getAccountBalance(acc.id);
-                        return (
-                            <div 
-                                key={acc.id}
-                                onClick={() => { setSelectedAccount(acc); setViewMode('DETAIL'); }}
-                                className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-lg hover:border-blue-300 transition-all group"
-                            >
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="p-3 bg-blue-50 text-blue-600 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                        <Wallet size={24}/>
-                                    </div>
-                                    <ArrowRight className="text-slate-300 group-hover:text-blue-500 transform group-hover:translate-x-1 transition-all"/>
-                                </div>
-                                <h3 className="font-bold text-lg text-slate-800 mb-1">{acc.name}</h3>
-                                <p className="text-slate-400 text-xs mb-4">อัปเดตล่าสุด: วันนี้</p>
-                                <div className="text-2xl font-bold text-slate-800">฿{balance.toLocaleString()}</div>
-                                <div className="text-xs text-slate-500 mt-1">คงเหลือสุทธิ</div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* --- VIEW 2: DETAIL (TRANSACTIONS) --- */}
-            {viewMode === 'DETAIL' && (
-                <div className="animate-slide-up">
-                    {/* Header Detail */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <div>
-                                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                                    {activeTab === 'Budget' ? selectedAccount?.name : 'เงินรายได้สถานศึกษา (ภาพรวม)'}
-                                </h3>
-                                <p className="text-slate-500 text-sm">
-                                    {activeTab === 'Budget' ? 'บัญชีงบประมาณ' : 'บัญชีเงินนอกงบประมาณ'}
-                                </p>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-sm text-slate-500">ยอดคงเหลือสุทธิ</div>
-                                <div className={`text-3xl font-bold ${currentBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                    ฿{currentBalance.toLocaleString()}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Action Bar */}
-                        <div className="flex gap-3 mt-6 pt-6 border-t border-slate-100">
-                             {canEdit && (
-                                <button 
-                                    onClick={() => setShowTransForm(true)}
-                                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-bold shadow-sm flex items-center gap-2"
-                                >
-                                    <PlusCircle size={18}/> บันทึกรายรับ/รายจ่าย
-                                </button>
-                             )}
-                             <button 
-                                onClick={() => setViewMode('PRINT')}
-                                className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-lg hover:bg-slate-50 font-bold shadow-sm flex items-center gap-2"
-                            >
-                                <Printer size={18}/> รายงาน
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Transactions Table */}
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
-                                <tr>
-                                    <th className="px-6 py-4">วันที่</th>
-                                    <th className="px-6 py-4">รายการ</th>
-                                    <th className="px-6 py-4 text-right">จำนวนเงิน</th>
-                                    <th className="px-6 py-4 text-center">ประเภท</th>
-                                    {canEdit && <th className="px-6 py-4 text-right">จัดการ</th>}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {filteredTrans.length === 0 ? (
-                                    <tr><td colSpan={5} className="text-center py-8 text-slate-400">ยังไม่มีรายการเคลื่อนไหว</td></tr>
-                                ) : (
-                                    filteredTrans.map((t) => (
-                                        <tr key={t.id} className="hover:bg-slate-50 transition-colors group">
-                                            <td className="px-6 py-4 text-slate-600 font-medium">
-                                                {getThaiDate(t.date)}
-                                            </td>
-                                            <td className="px-6 py-4 font-medium text-slate-800">{t.description}</td>
-                                            <td className={`px-6 py-4 text-right font-mono font-bold ${t.type === 'Income' ? 'text-green-600' : 'text-red-600'}`}>
-                                                {t.type === 'Income' ? '+' : '-'}{t.amount.toLocaleString()}
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${t.type === 'Income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                    {t.type === 'Income' ? 'รายรับ' : 'รายจ่าย'}
-                                                </span>
-                                            </td>
-                                            {canEdit && (
-                                                <td className="px-6 py-4 text-right">
-                                                    <button 
-                                                        onClick={() => handleEditTransaction(t)}
-                                                        className="text-slate-300 hover:text-blue-600 transition-colors p-1"
-                                                    >
-                                                        <Edit2 size={16}/>
-                                                    </button>
-                                                </td>
-                                            )}
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            )}
-
-            {/* --- MODALS --- */}
-            
-            {/* Create Account Modal */}
+            {/* Account Form Modal */}
             {showAccountForm && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-scale-up">
-                        <h3 className="text-lg font-bold text-slate-800 mb-4">เพิ่มบัญชีงบประมาณใหม่</h3>
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 animate-scale-up">
+                        <h3 className="text-lg font-bold text-slate-800 mb-4">เปิดบัญชีใหม่</h3>
                         <form onSubmit={handleAddAccount} className="space-y-4">
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อบัญชี / โครงการ</label>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อบัญชี</label>
                                 <input 
                                     autoFocus
                                     type="text" 
                                     required
-                                    value={newAccount.name} 
-                                    onChange={e => setNewAccount({...newAccount, name: e.target.value})} 
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    placeholder="เช่น เงินอุดหนุนรายหัว, อาหารกลางวัน"
+                                    placeholder="เช่น ค่าอาหารกลางวัน, เงินอุดหนุน..."
+                                    value={newAccount.name}
+                                    onChange={e => setNewAccount({...newAccount, name: e.target.value})}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
                                 />
                             </div>
                             <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => setShowAccountForm(false)} className="flex-1 py-2 text-slate-600 bg-slate-100 rounded-lg font-bold">ยกเลิก</button>
+                                <button type="button" onClick={() => setShowAccountForm(false)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold">ยกเลิก</button>
+                                <button type="submit" className="flex-1 py-2 bg-orange-600 text-white rounded-lg font-bold shadow-md">บันทึก</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Account Name Modal */}
+            {showEditAccountModal && editingAccount && (
+                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 animate-scale-up">
+                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <Edit2 size={20} className="text-blue-600"/> แก้ไขชื่อบัญชี
+                        </h3>
+                        <form onSubmit={handleUpdateAccountName} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อบัญชี</label>
+                                <input 
+                                    autoFocus
+                                    type="text" 
+                                    required
+                                    value={newAccountName}
+                                    onChange={e => setNewAccountName(e.target.value)}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button type="button" onClick={() => setShowEditAccountModal(false)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold">ยกเลิก</button>
                                 <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-md">บันทึก</button>
                             </div>
                         </form>
@@ -691,27 +979,18 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 </div>
             )}
 
-            {/* Create Transaction Modal */}
+            {/* Transaction Form Modal */}
             {showTransForm && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-scale-up">
-                        <h3 className="text-lg font-bold text-slate-800 mb-4">บันทึกรายรับ / รายจ่าย</h3>
+                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <PlusCircle className="text-orange-500"/> บันทึกรายการใหม่
+                        </h3>
                         <form onSubmit={handleAddTransaction} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <button 
-                                    type="button" 
-                                    onClick={() => setNewTrans({...newTrans, type: 'Income'})}
-                                    className={`py-2 rounded-lg font-bold border ${newTrans.type === 'Income' ? 'bg-green-600 text-white border-green-600' : 'bg-white text-slate-500 border-slate-200'}`}
-                                >
-                                    รายรับ
-                                </button>
-                                <button 
-                                    type="button" 
-                                    onClick={() => setNewTrans({...newTrans, type: 'Expense'})}
-                                    className={`py-2 rounded-lg font-bold border ${newTrans.type === 'Expense' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-500 border-slate-200'}`}
-                                >
-                                    รายจ่าย
-                                </button>
+                            {/* Type Selector */}
+                            <div className="flex bg-slate-100 p-1 rounded-lg mb-2">
+                                <button type="button" onClick={() => setNewTrans({...newTrans, type: 'Income'})} className={`flex-1 py-2 rounded-md font-bold text-sm transition-all ${newTrans.type === 'Income' ? 'bg-white text-green-600 shadow' : 'text-slate-500'}`}>รายรับ</button>
+                                <button type="button" onClick={() => setNewTrans({...newTrans, type: 'Expense'})} className={`flex-1 py-2 rounded-md font-bold text-sm transition-all ${newTrans.type === 'Expense' ? 'bg-white text-red-600 shadow' : 'text-slate-500'}`}>รายจ่าย</button>
                             </div>
 
                             <div>
@@ -719,71 +998,65 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                                 <input 
                                     type="date" 
                                     required
-                                    value={newTrans.date} 
-                                    onChange={e => setNewTrans({...newTrans, date: e.target.value})} 
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                    value={newTrans.date}
+                                    onChange={e => setNewTrans({...newTrans, date: e.target.value})}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">รายละเอียดรายการ</label>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">รายการ</label>
                                 <input 
                                     type="text" 
                                     required
-                                    value={newTrans.desc} 
-                                    onChange={e => setNewTrans({...newTrans, desc: e.target.value})} 
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    placeholder="เช่น ได้รับจัดสรร, ค่าวัสดุอุปกรณ์"
+                                    placeholder="ระบุรายละเอียด..."
+                                    value={newTrans.desc}
+                                    onChange={e => setNewTrans({...newTrans, desc: e.target.value})}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
                                 />
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">จำนวนเงิน (บาท)</label>
                                 <input 
                                     type="number" 
-                                    required
                                     step="0.01"
-                                    value={newTrans.amount} 
-                                    onChange={e => setNewTrans({...newTrans, amount: e.target.value})} 
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xl font-bold text-right"
-                                    placeholder="0.00"
+                                    required
+                                    value={newTrans.amount}
+                                    onChange={e => setNewTrans({...newTrans, amount: e.target.value})}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 outline-none text-xl font-bold text-slate-800"
                                 />
                             </div>
-
                             <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => setShowTransForm(false)} className="flex-1 py-2 text-slate-600 bg-slate-100 rounded-lg font-bold">ยกเลิก</button>
-                                <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-md">บันทึก</button>
+                                <button type="button" onClick={() => setShowTransForm(false)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold">ยกเลิก</button>
+                                <button type="submit" className="flex-1 py-2 bg-orange-600 text-white rounded-lg font-bold shadow-md">บันทึก</button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
 
-            {/* Edit Transaction Modal */}
+            {/* EDIT Transaction Modal */}
             {showEditModal && editingTransaction && (
-                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-scale-up">
                         <div className="flex justify-between items-center mb-4">
-                             <h3 className="text-lg font-bold text-slate-800">แก้ไขรายการ</h3>
-                             <button type="button" onClick={handleDeleteTransaction} className="text-red-500 hover:text-red-700 p-2 bg-red-50 rounded-lg">
-                                 <Trash2 size={18}/>
-                             </button>
+                            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <Edit2 className="text-blue-500"/> แก้ไขรายการ
+                            </h3>
+                            <button 
+                                type="button" 
+                                onClick={handleDeleteTransaction}
+                                className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                                title="ลบรายการ"
+                            >
+                                <Trash2 size={20}/>
+                            </button>
                         </div>
-                       
+
                         <form onSubmit={handleUpdateTransaction} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <button 
-                                    type="button" 
-                                    onClick={() => setEditingTransaction({...editingTransaction, type: 'Income'})}
-                                    className={`py-2 rounded-lg font-bold border ${editingTransaction.type === 'Income' ? 'bg-green-600 text-white border-green-600' : 'bg-white text-slate-500 border-slate-200'}`}
-                                >
-                                    รายรับ
-                                </button>
-                                <button 
-                                    type="button" 
-                                    onClick={() => setEditingTransaction({...editingTransaction, type: 'Expense'})}
-                                    className={`py-2 rounded-lg font-bold border ${editingTransaction.type === 'Expense' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-500 border-slate-200'}`}
-                                >
-                                    รายจ่าย
-                                </button>
+                             {/* Type Selector */}
+                             <div className="flex bg-slate-100 p-1 rounded-lg mb-2">
+                                <button type="button" onClick={() => setEditingTransaction({...editingTransaction, type: 'Income'})} className={`flex-1 py-2 rounded-md font-bold text-sm transition-all ${editingTransaction.type === 'Income' ? 'bg-white text-green-600 shadow' : 'text-slate-500'}`}>รายรับ</button>
+                                <button type="button" onClick={() => setEditingTransaction({...editingTransaction, type: 'Expense'})} className={`flex-1 py-2 rounded-md font-bold text-sm transition-all ${editingTransaction.type === 'Expense' ? 'bg-white text-red-600 shadow' : 'text-slate-500'}`}>รายจ่าย</button>
                             </div>
 
                             <div>
@@ -791,98 +1064,48 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                                 <input 
                                     type="date" 
                                     required
-                                    value={editingTransaction.date} 
-                                    onChange={e => setEditingTransaction({...editingTransaction, date: e.target.value})} 
+                                    value={editingTransaction.date}
+                                    onChange={e => setEditingTransaction({...editingTransaction, date: e.target.value})}
                                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">รายละเอียดรายการ</label>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">รายการ</label>
                                 <input 
                                     type="text" 
                                     required
-                                    value={editingTransaction.description} 
-                                    onChange={e => setEditingTransaction({...editingTransaction, description: e.target.value})} 
+                                    value={editingTransaction.description}
+                                    onChange={e => setEditingTransaction({...editingTransaction, description: e.target.value})}
                                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">จำนวนเงิน (บาท)</label>
+                                <label className="block text-sm font-bold text-slate-700 mb-1">จำนวนเงิน</label>
                                 <input 
                                     type="number" 
-                                    required
                                     step="0.01"
-                                    value={editingTransaction.amount} 
-                                    onChange={e => setEditingTransaction({...editingTransaction, amount: parseFloat(e.target.value)})} 
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-xl font-bold text-right"
+                                    required
+                                    value={editingTransaction.amount}
+                                    onChange={e => setEditingTransaction({...editingTransaction, amount: parseFloat(e.target.value)})}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-bold"
                                 />
                             </div>
 
+                            <div className="bg-yellow-50 p-3 rounded-lg text-xs text-yellow-800 border border-yellow-200 flex items-start gap-2">
+                                <ShieldAlert size={16} className="shrink-0 mt-0.5"/>
+                                <span>การแก้ไขหรือลบรายการจะถูกบันทึกในระบบตรวจสอบ (Audit Log)</span>
+                            </div>
+
                             <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => {setShowEditModal(false); setEditingTransaction(null);}} className="flex-1 py-2 text-slate-600 bg-slate-100 rounded-lg font-bold">ยกเลิก</button>
+                                <button type="button" onClick={() => setShowEditModal(false)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold">ยกเลิก</button>
                                 <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-md">บันทึกการแก้ไข</button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
-
-            {/* Audit Log Modal (Director Only) */}
-            {showAuditModal && (
-                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col animate-scale-up">
-                        <div className="p-6 border-b flex justify-between items-center">
-                            <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                                <ShieldAlert size={24} className="text-slate-600"/> Audit Logs (ประวัติการแก้ไขข้อมูล)
-                            </h3>
-                            <button onClick={() => setShowAuditModal(false)} className="p-2 hover:bg-slate-100 rounded-full">
-                                <X size={24}/>
-                            </button>
-                        </div>
-                        
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                            {auditLogs.length === 0 ? (
-                                <div className="text-center text-slate-400 py-10">ไม่พบประวัติการแก้ไข</div>
-                            ) : (
-                                <table className="w-full text-sm text-left">
-                                    <thead className="bg-slate-50 text-slate-500">
-                                        <tr>
-                                            <th className="px-4 py-2">เวลา</th>
-                                            <th className="px-4 py-2">ผู้ทำรายการ</th>
-                                            <th className="px-4 py-2">การกระทำ</th>
-                                            <th className="px-4 py-2">รายการที่เกี่ยวข้อง</th>
-                                            <th className="px-4 py-2">รายละเอียด</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {auditLogs.map(log => (
-                                            <tr key={log.id} className="hover:bg-slate-50">
-                                                <td className="px-4 py-2 whitespace-nowrap text-xs text-slate-500">
-                                                    {new Date(log.timestamp).toLocaleString('th-TH')}
-                                                </td>
-                                                <td className="px-4 py-2 font-bold text-slate-700">{log.actorName}</td>
-                                                <td className="px-4 py-2">
-                                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${log.actionType === 'DELETE' ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-600'}`}>
-                                                        {log.actionType}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-2">{log.transactionDescription}</td>
-                                                <td className="px-4 py-2 text-xs text-slate-500 max-w-xs truncate" title={log.details}>
-                                                    {log.details}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
         </div>
     );
 };
 
 export default FinanceSystem;
- 

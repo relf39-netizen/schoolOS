@@ -439,7 +439,7 @@ const App: React.FC = () => {
             icon: Activity,
             color: 'from-amber-500 to-orange-400',
             shadow: 'shadow-amber-200',
-            visible: true
+            visible: currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('FINANCE_BUDGET') || currentUser.roles.includes('FINANCE_NONBUDGET')
         },
         {
             id: SystemView.ATTENDANCE,

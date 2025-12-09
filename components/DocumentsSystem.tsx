@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DocumentItem, Teacher, Attachment, SystemConfig } from '../types';
 import { MOCK_DOCUMENTS, CURRENT_SCHOOL_YEAR } from '../constants';
-import { Search, FileText, Users, PenTool, CheckCircle, FilePlus, Eye, CheckSquare, Loader, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, Plus, UploadCloud, AlertTriangle, Monitor, FileCheck, ArrowLeft, Send, MousePointerClick, ChevronLeft, ChevronRight, Settings, FileBadge, Megaphone, Save } from 'lucide-react';
+import { Search, FileText, Users, PenTool, CheckCircle, FilePlus, Eye, CheckSquare, Loader, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, Plus, UploadCloud, AlertTriangle, Monitor, FileCheck, ArrowLeft, Send, MousePointerClick, ChevronLeft, ChevronRight, Settings, FileBadge, Megaphone, Save, FileSpreadsheet, FileArchive, Image as ImageIcon } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
 import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, where, doc, getDoc, deleteDoc, getDocs, QuerySnapshot, DocumentData } from 'firebase/firestore';
 import { stampPdfDocument, stampReceiveNumber } from '../utils/pdfStamper';
@@ -73,6 +73,38 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             reader.onload = () => resolve(reader.result as string);
             reader.onerror = error => reject(error);
         });
+    };
+
+    // Helper to determine file icon
+    const getFileIcon = (fileName: string, type: 'FILE' | 'LINK', size: number = 20, colored: boolean = true) => {
+        const lower = fileName.toLowerCase();
+        let Icon = FileIcon;
+        let colorClass = "text-slate-500";
+
+        if (type === 'LINK') {
+            Icon = ExternalLink;
+            colorClass = "text-blue-500";
+        } else if (lower.endsWith('.xls') || lower.endsWith('.xlsx') || lower.endsWith('.csv')) {
+            Icon = FileSpreadsheet;
+            colorClass = "text-green-600";
+        } else if (lower.endsWith('.doc') || lower.endsWith('.docx')) {
+            Icon = FileText;
+            colorClass = "text-blue-600";
+        } else if (lower.endsWith('.ppt') || lower.endsWith('.pptx')) {
+            Icon = Monitor;
+            colorClass = "text-orange-600";
+        } else if (lower.endsWith('.zip') || lower.endsWith('.rar') || lower.endsWith('.7z')) {
+            Icon = FileArchive;
+            colorClass = "text-yellow-600";
+        } else if (lower.match(/\.(jpg|jpeg|png|gif|webp)$/)) {
+            Icon = ImageIcon;
+            colorClass = "text-purple-600";
+        } else if (lower.endsWith('.pdf')) {
+            Icon = FileIcon;
+            colorClass = "text-red-500";
+        }
+        
+        return <Icon size={size} className={colored ? colorClass : ''} />;
     };
 
     // Generate Next Book Number Logic
@@ -244,7 +276,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 // ----------------------------------------------------
                 const isFirstFile = tempAttachments.length === 0;
                 
-                // FIX: Only stamp if it is INCOMING category
+                // FIX: Only stamp if it is INCOMING category and PDF
                 if (file.type === 'application/pdf' && isFirstFile && docCategory === 'INCOMING') {
                     setUploadProgress('กำลังอัปโหลดไฟล์ไปที่ Google Drive และลงเลขที่รับ...');
                     
@@ -280,7 +312,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 const payload = {
                     folderId: sysConfig.driveFolderId,
                     filename: file.name,
-                    mimeType: file.type,
+                    mimeType: file.type || 'application/octet-stream',
                     base64: base64Content
                 };
 
@@ -299,7 +331,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                         name: file.name,
                         type: 'LINK', // Treat as LINK because it's on Drive now
                         url: result.viewUrl || result.url,
-                        fileType: file.type
+                        fileType: file.type || 'application/octet-stream'
                     };
                     setTempAttachments([...tempAttachments, newAtt]);
                 } else {
@@ -896,8 +928,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                                             className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg group transition-all"
                                                         >
                                                             <div className="flex items-center gap-3">
-                                                                <div className="bg-white p-2 rounded-full text-slate-500 shadow-sm">
-                                                                    {att.type === 'LINK' ? <ExternalLink size={20}/> : <FileIcon size={20}/>}
+                                                                <div className="bg-white p-2 rounded-full shadow-sm">
+                                                                     {getFileIcon(att.name, att.type as 'FILE'|'LINK', 20)}
                                                                 </div>
                                                                 <div className="text-left">
                                                                     <div className="font-bold text-slate-700 text-sm">
@@ -1061,7 +1093,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                             {tempAttachments.map(att => (
                                                 <div key={att.id} className="p-2 flex justify-between items-center text-sm">
                                                     <div className="flex items-center gap-2 overflow-hidden">
-                                                        {att.type === 'LINK' ? <ExternalLink size={16} className="text-blue-500 shrink-0"/> : <FileIcon size={16} className="text-orange-500 shrink-0"/>}
+                                                        {getFileIcon(att.name, att.type as 'FILE'|'LINK', 16)}
                                                         <span className="truncate">{att.name}</span>
                                                     </div>
                                                     <button type="button" onClick={() => handleRemoveAttachment(att.id)} className="text-red-400 hover:text-red-600 p-1">
@@ -1079,11 +1111,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                         </label>
                                         <input 
                                             type="file" 
-                                            accept=".pdf,image/*" 
+                                            accept=".pdf,image/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar" 
                                             onChange={handleAddFile}
                                             disabled={!sysConfig?.scriptUrl}
                                             className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
                                         />
+                                        <p className="text-[10px] text-slate-400 mt-1">รองรับไฟล์: PDF, Excel, Word, PowerPoint, Zip, รูปภาพ</p>
                                         {docCategory === 'INCOMING' && (
                                             <p className="text-[10px] text-slate-400 mt-1">* ระบบจะประทับตราเลขรับอัตโนมัติเฉพาะไฟล์ PDF ไฟล์แรกที่อัปโหลด</p>
                                         )}
@@ -1225,7 +1258,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                     >
                                         <div className="flex items-center gap-4">
                                             <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-                                                {showSigned ? <CheckCircle size={28}/> : (att.type === 'LINK' ? <ExternalLink size={28}/> : <FileIcon size={28}/>)}
+                                                {showSigned ? <CheckCircle size={28}/> : getFileIcon(att.name, att.type as 'FILE'|'LINK', 28, false)}
                                             </div>
                                             <div className="text-left">
                                                 <div className="font-bold text-lg">

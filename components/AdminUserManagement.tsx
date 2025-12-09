@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
-import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, Calendar, RefreshCw, UserCheck } from 'lucide-react';
+import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, Calendar, RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc } from 'firebase/firestore';
 import { ACADEMIC_POSITIONS } from '../constants';
 
 interface AdminUserManagementProps {
@@ -51,55 +50,88 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
 
     // Load Config
     useEffect(() => {
-        const loadConfig = async () => {
+        const fetchConfig = async () => {
             if (isConfigured && db) {
                 try {
                     const docRef = doc(db, "system_config", "settings");
                     const docSnap = await getDoc(docRef);
                     if (docSnap.exists()) {
-                        const data = docSnap.data() as SystemConfig;
-                        setConfig({
-                            ...data,
-                            directorSignatureScale: data.directorSignatureScale || 1,
-                            directorSignatureYOffset: data.directorSignatureYOffset || 0
-                        });
+                        setConfig(docSnap.data() as SystemConfig);
                     }
                 } catch (e) {
-                    console.error("Error loading config", e);
+                    console.error("Error fetching config", e);
                 }
             }
         };
-        loadConfig();
+        fetchConfig();
     }, []);
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: keyof SystemConfig) => {
+    // Helper: Resize Image
+    const resizeImage = (file: File, maxWidth: number = 300): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > maxWidth) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/png', 0.8)); // Compress
+                    } else {
+                        reject(new Error("Canvas context error"));
+                    }
+                };
+                img.onerror = () => reject(new Error("Image load error"));
+                img.src = event.target?.result as string;
+            };
+            reader.onerror = error => reject(error);
+            reader.readAsDataURL(file);
+        });
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, field: keyof SystemConfig) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
-            const reader = new FileReader();
-            reader.onload = () => {
-                if (reader.result) {
-                    const base64 = reader.result as string;
-                    setConfig(prev => ({ ...prev, [field]: base64 }));
-                }
-            };
-            reader.readAsDataURL(file);
+            try {
+                // Resize image to prevent large payload issues
+                const base64 = await resizeImage(file, 400); 
+                setConfig(prev => ({ ...prev, [field]: base64 }));
+            } catch (error) {
+                console.error("Error resizing image", error);
+                alert("เกิดข้อผิดพลาดในการประมวลผลรูปภาพ");
+            }
         }
     };
 
     const handleSaveConfig = async () => {
         setIsLoadingConfig(true);
-        if (isConfigured && db) {
-            try {
+        try {
+            if (isConfigured && db) {
                 await setDoc(doc(db, "system_config", "settings"), config);
-                alert("บันทึกการตั้งค่าระบบเรียบร้อยแล้ว");
-            } catch (e) {
-                console.error("Save config error", e);
-                alert("เกิดข้อผิดพลาดในการบันทึก");
+                alert("บันทึกการตั้งค่าลงฐานข้อมูลเรียบร้อยแล้ว");
+            } else {
+                // Mock Save
+                setTimeout(() => {
+                    alert("บันทึกการตั้งค่าเรียบร้อย (Offline Mode)");
+                }, 500);
             }
-        } else {
-            alert("บันทึกการตั้งค่าเรียบร้อย (Offline Mode)");
+        } catch (error) {
+            console.error("Save config error", error);
+            alert("เกิดข้อผิดพลาดในการบันทึก: " + (error as Error).message);
+        } finally {
+            setIsLoadingConfig(false);
         }
-        setIsLoadingConfig(false);
     };
 
     const handleSaveSchool = async (e: React.FormEvent) => {
@@ -524,6 +556,10 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                             <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                                 <ImageIcon size={20}/> ตั้งค่าลายเซ็นและตราสัญลักษณ์ (สำหรับออกเอกสาร PDF)
                             </h4>
+                            <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg mb-4 text-xs flex items-start gap-2 border border-yellow-200">
+                                <AlertCircle size={16} className="shrink-0 mt-0.5"/>
+                                <span>ระบบจะย่อขนาดรูปภาพอัตโนมัติ (ไม่เกิน 400px) เพื่อประหยัดพื้นที่จัดเก็บและลดข้อผิดพลาดในการบันทึก</span>
+                            </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 {/* School Logo */}
