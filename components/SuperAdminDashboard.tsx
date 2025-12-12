@@ -1,7 +1,9 @@
 
-import React, { useState } from 'react';
-import { School, Teacher } from '../types';
-import { Building, Plus, LogOut, MapPin, Users, X, User, ChevronRight, Edit, Trash2, Save, ShieldCheck, ShieldAlert } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { School, Teacher, SystemConfig } from '../types';
+import { Building, Plus, LogOut, MapPin, Users, X, User, ChevronRight, Edit, Trash2, Save, ShieldCheck, ShieldAlert, Settings, Globe, Database } from 'lucide-react';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db, isConfigured } from '../firebaseConfig';
 
 interface SuperAdminDashboardProps {
     schools: School[];
@@ -21,6 +23,65 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
 
     // Teacher List Modal
     const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(null);
+
+    // Config Modal
+    const [showConfigModal, setShowConfigModal] = useState(false);
+    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '', officialGarudaBase64: '', telegramBotToken: '', appBaseUrl: '' });
+    const [isLoadingConfig, setIsLoadingConfig] = useState(false);
+
+    // Fetch Config on Mount
+    useEffect(() => {
+        const fetchConfig = async () => {
+             // 1. Try LocalStorage first (Fastest/Offline)
+             try {
+                 const localConfig = localStorage.getItem('schoolos_system_config');
+                 if (localConfig) {
+                     setConfig(JSON.parse(localConfig));
+                 }
+             } catch(e) { console.error("Local config load error", e); }
+
+             // 2. Try Firestore (Source of Truth)
+             if (isConfigured && db) {
+                 try {
+                     const docRef = doc(db, "system_config", "settings");
+                     const docSnap = await getDoc(docRef);
+                     if (docSnap.exists()) {
+                         setConfig(docSnap.data() as SystemConfig);
+                     }
+                 } catch (e) {
+                     console.error("Config fetch error", e);
+                 }
+             }
+        };
+        fetchConfig();
+    }, []);
+
+    const handleSaveConfig = async () => {
+        setIsLoadingConfig(true);
+        let cleanUrl = config.appBaseUrl || '';
+        if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+        const newConfig = { ...config, appBaseUrl: cleanUrl };
+
+        // Save to LocalStorage immediately (Ensures offline support and fast access)
+        localStorage.setItem('schoolos_system_config', JSON.stringify(newConfig));
+
+        try {
+            if (isConfigured && db) {
+                await setDoc(doc(db, "system_config", "settings"), newConfig);
+                alert("บันทึกการตั้งค่าระบบเรียบร้อย (Online)");
+            } else {
+                setTimeout(() => {
+                    alert("บันทึกการตั้งค่าเรียบร้อย (Offline/Local Mode)");
+                }, 500);
+            }
+            setConfig(newConfig);
+            setShowConfigModal(false);
+        } catch (error) {
+            alert("เกิดข้อผิดพลาดในการบันทึกออนไลน์: " + (error as Error).message + "\n(บันทึกในเครื่องเรียบร้อยแล้ว)");
+        } finally {
+            setIsLoadingConfig(false);
+        }
+    };
 
     const handleStartCreate = () => {
         setFormMode('CREATE');
@@ -103,9 +164,17 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                         <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center font-bold">S</div>
                         Super Admin Dashboard
                     </h1>
-                    <button onClick={onLogout} className="flex items-center gap-2 text-slate-300 hover:text-white">
-                        <LogOut size={18}/> ออกจากระบบ
-                    </button>
+                    <div className="flex items-center gap-4">
+                        <button 
+                            onClick={() => setShowConfigModal(true)}
+                            className="flex items-center gap-2 text-slate-300 hover:text-white bg-slate-800 px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                            <Settings size={18}/> ตั้งค่าระบบ
+                        </button>
+                        <button onClick={onLogout} className="flex items-center gap-2 text-slate-300 hover:text-white">
+                            <LogOut size={18}/> ออกจากระบบ
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -122,6 +191,64 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ schools, teac
                         <Plus size={20}/> สร้างโรงเรียนใหม่
                     </button>
                 </div>
+
+                {/* System Config Modal */}
+                {showConfigModal && (
+                    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 animate-slide-down">
+                            <div className="flex justify-between items-center mb-4 border-b pb-2">
+                                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                    <Settings className="text-slate-600"/> ตั้งค่าระบบกลาง (Global Config)
+                                </h3>
+                                <button onClick={() => setShowConfigModal(false)} className="text-slate-400 hover:text-slate-600">
+                                    <X size={24}/>
+                                </button>
+                            </div>
+                            
+                            <div className="space-y-4">
+                                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                    <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1">
+                                        <Globe size={14}/> App Domain URL (เว็บไซต์ที่ใช้งานจริง)
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        value={config.appBaseUrl || ''}
+                                        onChange={e => setConfig({...config, appBaseUrl: e.target.value})}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm"
+                                        placeholder="เช่น https://schoolos.vercel.app"
+                                    />
+                                    <p className="text-xs text-blue-600 mt-2 leading-relaxed">
+                                        <strong>สำคัญ:</strong> ระบุ URL ของเว็บไซต์เพื่อให้ลิงก์ใน Telegram Notification ทำงานได้อย่างถูกต้อง (หากไม่ระบุ ลิงก์อาจจะเป็น localhost ซึ่งเปิดจากภายนอกไม่ได้)
+                                    </p>
+                                </div>
+
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 opacity-75">
+                                    <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1">
+                                        <Database size={14}/> Telegram Bot Token
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        value={config.telegramBotToken || ''}
+                                        onChange={e => setConfig({...config, telegramBotToken: e.target.value})}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-slate-400 outline-none font-mono text-sm"
+                                        placeholder="Token..."
+                                    />
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        สามารถแก้ไข Token ได้ที่นี่ (ส่งผลทั้งระบบ)
+                                    </p>
+                                </div>
+
+                                <button 
+                                    onClick={handleSaveConfig} 
+                                    disabled={isLoadingConfig}
+                                    className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-md flex items-center justify-center gap-2 mt-4"
+                                >
+                                    {isLoadingConfig ? "กำลังบันทึก..." : <><Save size={18}/> บันทึกการตั้งค่า</>}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Create/Edit Form Modal */}
                 {showForm && (

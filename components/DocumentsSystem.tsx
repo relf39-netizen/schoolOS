@@ -162,11 +162,40 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     };
 
     // Helper for Telegram Notification
-    const triggerTelegramNotification = (teachers: Teacher[], docId: string, title: string, isOrder: boolean) => {
-        if (!sysConfig?.telegramBotToken) return;
+    // Updated to fetch Fresh Config
+    const triggerTelegramNotification = async (teachers: Teacher[], docId: string, title: string, isOrder: boolean) => {
+        let currentBotToken = sysConfig?.telegramBotToken;
+        let currentBaseUrl = sysConfig?.appBaseUrl;
+
+        // 1. Try LocalStorage FIRST (Fast & Offline support)
+        try {
+            const local = localStorage.getItem('schoolos_system_config');
+            if (local) {
+                const parsed = JSON.parse(local);
+                if (parsed.telegramBotToken) currentBotToken = parsed.telegramBotToken;
+                if (parsed.appBaseUrl) currentBaseUrl = parsed.appBaseUrl;
+            }
+        } catch (e) {}
+
+        // 2. Try Firestore (Latest source of truth if available)
+        if (isConfigured && db) {
+            try {
+                const configDoc = await getDoc(doc(db, "system_config", "settings"));
+                if (configDoc.exists()) {
+                    const freshConfig = configDoc.data() as SystemConfig;
+                    currentBotToken = freshConfig.telegramBotToken;
+                    currentBaseUrl = freshConfig.appBaseUrl;
+                }
+            } catch (e) {
+                console.error("Failed to fetch fresh config for notification", e);
+            }
+        }
+
+        if (!currentBotToken) return;
         
-        const origin = window.location.origin;
-        const deepLink = `${origin}?view=DOCUMENTS&id=${docId}`;
+        // Fallback to window location ONLY if all configs are empty
+        const baseUrl = currentBaseUrl || window.location.origin;
+        const deepLink = `${baseUrl}?view=DOCUMENTS&id=${docId}`;
         
         const message = isOrder 
             ? `📣 <b>มีคำสั่งปฏิบัติราชการใหม่</b>\nเรื่อง: ${title}\n`
@@ -174,7 +203,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             
         teachers.forEach(t => {
             if (t.telegramChatId) {
-                sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId, message, deepLink);
+                sendTelegramMessage(currentBotToken!, t.telegramChatId, message, deepLink);
             }
         });
     };
@@ -211,6 +240,13 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 });
                 
                 const fetchConfig = async () => {
+                    // Try Local first
+                    try {
+                        const local = localStorage.getItem('schoolos_system_config');
+                        if (local) setSysConfig(JSON.parse(local));
+                    } catch(e) {}
+
+                    // Then Firebase
                     try {
                         const docRef = doc(db, "system_config", "settings");
                         const docSnap = await getDoc(docRef);
@@ -229,6 +265,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 setIsLoading(false);
             }
         } else {
+            // Offline Mode - Init config from LocalStorage
+            try {
+                const local = localStorage.getItem('schoolos_system_config');
+                if (local) setSysConfig(JSON.parse(local));
+            } catch(e) {}
+
             setTimeout(() => {
                 setDocs(MOCK_DOCUMENTS);
                 setIsLoading(false);
@@ -372,7 +414,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             } else { setDocs([created, ...docs]); }
             if (isOrder && selectedTeachers.length > 0) {
                 const targetUsers = allTeachers.filter(t => selectedTeachers.includes(t.id));
-                triggerTelegramNotification(targetUsers, docId, created.title, true);
+                // Await here to ensure config fetch inside trigger works
+                await triggerTelegramNotification(targetUsers, docId, created.title, true);
             }
             setIsUploading(false); setUploadProgress('');
             setNewDoc({ bookNumber: '', title: '', from: '', priority: 'Normal', description: '' });
@@ -499,7 +542,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                     await updateDoc(docRef, updateData);
                     if (selectedTeachers.length > 0) {
                         const targetUsers = allTeachers.filter(t => selectedTeachers.includes(t.id));
-                        triggerTelegramNotification(targetUsers, selectedDoc.id, selectedDoc.title, false);
+                        // Fetch config fresh here too
+                        await triggerTelegramNotification(targetUsers, selectedDoc.id, selectedDoc.title, false);
                     }
                     cleanupAfterSign();
                     setTimeout(() => alert("ลงนามและสั่งการเรียบร้อยแล้ว"), 100);

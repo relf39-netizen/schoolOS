@@ -67,6 +67,13 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     useEffect(() => {
         // Load System Config
         const fetchConfig = async () => {
+             // 1. Try LocalStorage
+             try {
+                 const local = localStorage.getItem('schoolos_system_config');
+                 if (local) setSysConfig(JSON.parse(local));
+             } catch(e) {}
+
+             // 2. Try Firestore
              if (isConfigured && db) {
                  try {
                      const docRef = doc(db, "system_config", "settings");
@@ -297,11 +304,40 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             setRequests([newReq, ...requests]);
         }
 
-        // --- NOTIFICATION TO DIRECTOR ---
-        if (sysConfig?.telegramBotToken) {
+        // --- NOTIFICATION TO DIRECTOR (FETCH FRESH CONFIG) ---
+        let currentBotToken = sysConfig?.telegramBotToken;
+        let currentBaseUrl = sysConfig?.appBaseUrl;
+
+        // 1. Try LocalStorage
+        try {
+            const local = localStorage.getItem('schoolos_system_config');
+            if (local) {
+                const parsed = JSON.parse(local);
+                if (parsed.telegramBotToken) currentBotToken = parsed.telegramBotToken;
+                if (parsed.appBaseUrl) currentBaseUrl = parsed.appBaseUrl;
+            }
+        } catch(e) {}
+
+        // 2. Try Firestore
+        if (isConfigured && db) {
+            try {
+                const configDoc = await getDoc(doc(db, "system_config", "settings"));
+                if (configDoc.exists()) {
+                    const freshConfig = configDoc.data() as SystemConfig;
+                    currentBotToken = freshConfig.telegramBotToken;
+                    currentBaseUrl = freshConfig.appBaseUrl;
+                }
+            } catch (e) {
+                console.error("Failed to fetch fresh config for notification", e);
+            }
+        }
+
+        if (currentBotToken) {
             const directors = allTeachers.filter(t => t.roles.includes('DIRECTOR'));
-            const origin = window.location.origin;
-            const deepLink = `${origin}?view=LEAVE&id=${reqId}`;
+            
+            // Use configured Base URL if available
+            const baseUrl = currentBaseUrl || window.location.origin;
+            const deepLink = `${baseUrl}?view=LEAVE&id=${reqId}`;
             
             const message = `📢 <b>มีใบลาใหม่รอการอนุมัติ</b>\n` +
                             `จาก: ${currentUser.name}\n` +
@@ -312,7 +348,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
 
             directors.forEach(dir => {
                 if (dir.telegramChatId) {
-                    sendTelegramMessage(sysConfig.telegramBotToken!, dir.telegramChatId, message, deepLink);
+                    sendTelegramMessage(currentBotToken!, dir.telegramChatId, message, deepLink);
                 }
             });
         }
@@ -371,10 +407,38 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         }
 
         // --- NOTIFICATION TO TEACHER (Updated) ---
+        // FETCH FRESH CONFIG
+        let currentBotToken = sysConfig?.telegramBotToken;
+        let currentBaseUrl = sysConfig?.appBaseUrl;
+
+        // 1. LocalStorage
+        try {
+            const local = localStorage.getItem('schoolos_system_config');
+            if (local) {
+                const parsed = JSON.parse(local);
+                if (parsed.telegramBotToken) currentBotToken = parsed.telegramBotToken;
+                if (parsed.appBaseUrl) currentBaseUrl = parsed.appBaseUrl;
+            }
+        } catch(e) {}
+
+        // 2. Firestore
+        if (isConfigured && db) {
+            try {
+                const configDoc = await getDoc(doc(db, "system_config", "settings"));
+                if (configDoc.exists()) {
+                    const freshConfig = configDoc.data() as SystemConfig;
+                    currentBotToken = freshConfig.telegramBotToken;
+                    currentBaseUrl = freshConfig.appBaseUrl;
+                }
+            } catch (e) {
+                console.error("Failed to fetch fresh config for notification", e);
+            }
+        }
+
         // Find the owner of the request to get their Chat ID
         const targetTeacher = allTeachers.find(t => t.id === req.teacherId);
         
-        if (targetTeacher?.telegramChatId && sysConfig?.telegramBotToken) {
+        if (targetTeacher?.telegramChatId && currentBotToken) {
             const statusIcon = isApproved ? '✅' : '❌';
             const statusText = isApproved ? 'อนุมัติ' : 'ไม่อนุมัติ';
             
@@ -387,10 +451,10 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                             `โดย: ${currentUser.name} (ผู้อำนวยการ)`;
 
             // Deep link back to the request
-            const origin = window.location.origin;
-            const deepLink = `${origin}?view=LEAVE&id=${req.id}`;
+            const baseUrl = currentBaseUrl || window.location.origin;
+            const deepLink = `${baseUrl}?view=LEAVE&id=${req.id}`;
 
-            sendTelegramMessage(sysConfig.telegramBotToken, targetTeacher.telegramChatId, message, deepLink);
+            sendTelegramMessage(currentBotToken, targetTeacher.telegramChatId, message, deepLink);
         }
 
         setIsProcessingApproval(false);

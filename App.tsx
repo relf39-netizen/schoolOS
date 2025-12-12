@@ -165,11 +165,22 @@ const App: React.FC = () => {
             if (!currentUser || !isConfigured || !db) return;
 
             try {
-                // Get Config for Token
-                const configDoc = await getDoc(doc(db, "system_config", "settings"));
-                if (!configDoc.exists()) return;
-                const config = configDoc.data() as SystemConfig;
-                if (!config.telegramBotToken) return;
+                // Fetch Config: Try LocalStorage first, then Firestore
+                let config: SystemConfig | null = null;
+                
+                try {
+                    const local = localStorage.getItem('schoolos_system_config');
+                    if (local) config = JSON.parse(local);
+                } catch(e) {}
+
+                try {
+                    const configDoc = await getDoc(doc(db, "system_config", "settings"));
+                    if (configDoc.exists()) {
+                        config = configDoc.data() as SystemConfig;
+                    }
+                } catch(e) {}
+
+                if (!config || !config.telegramBotToken) return;
 
                 // Find Director(s)
                 const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DIRECTOR') && t.telegramChatId);
@@ -205,7 +216,7 @@ const App: React.FC = () => {
                         shouldUpdate = true;
                     }
 
-                    if (shouldUpdate && notifType) {
+                    if (shouldUpdate && notifType && config) {
                         // 1. Send Telegram
                         const title = notifType === 'TOMORROW' ? "แจ้งเตือนภารกิจวันพรุ่งนี้" : "แจ้งเตือนภารกิจวันนี้";
                         const icon = notifType === 'TOMORROW' ? "⏰" : "🔔";
@@ -215,8 +226,14 @@ const App: React.FC = () => {
                                         `เวลา: ${evt.startTime}\n` +
                                         `สถานที่: ${evt.location}`;
                         
+                        const baseUrl = config.appBaseUrl || window.location.origin;
+                        const deepLink = `${baseUrl}?view=DIRECTOR_CALENDAR`;
+
                         directors.forEach(d => {
-                            sendTelegramMessage(config.telegramBotToken!, d.telegramChatId!, message);
+                            // Ensure config is not null before accessing token
+                            if (config && config.telegramBotToken && d.telegramChatId) {
+                                sendTelegramMessage(config.telegramBotToken, d.telegramChatId, message, deepLink);
+                            }
                         });
 
                         // 2. Mark as Notified in DB to prevent spam
@@ -775,7 +792,7 @@ const App: React.FC = () => {
                         <span className="font-bold text-sm md:text-base">{currentSchool?.name || 'SchoolOS System'}</span>
                     </div>
                     <div className="text-[10px] md:text-xs text-slate-400">
-                        © 2024 SchoolOS
+                        © Mr AI & Mr Siam 
                     </div>
                 </div>
             </footer>

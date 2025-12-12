@@ -217,4 +217,5 @@ export interface SystemConfig {
 
   // Telegram Notification
   telegramBotToken?: string; // Token from @BotFather
+  appBaseUrl?: string; // The deployed URL of this app (e.g., https://myschool.vercel.app)
 }

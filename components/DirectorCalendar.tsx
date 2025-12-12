@@ -44,6 +44,13 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
     useEffect(() => {
         // Load Config
         const fetchConfig = async () => {
+            // 1. Try LocalStorage
+            try {
+                const local = localStorage.getItem('schoolos_system_config');
+                if (local) setSysConfig(JSON.parse(local));
+            } catch(e) {}
+
+            // 2. Try Firestore
             if (isConfigured && db) {
                 try {
                     const docRef = doc(db, "system_config", "settings");
@@ -89,7 +96,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
         if (isConfigured && db) {
             try {
                 const docRef = await addDoc(collection(db, "director_events"), eventData);
-                // Trigger Telegram
+                // Trigger Telegram (Wait for result implicitly but non-blocking)
                 notifyDirector(eventData, 'NEW');
             } catch (e) {
                 alert('เกิดข้อผิดพลาดในการบันทึก');
@@ -113,8 +120,36 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
     };
 
     // --- Notifications Logic ---
-    const notifyDirector = (event: any, type: 'NEW' | 'TOMORROW' | 'TODAY') => {
-        if (!sysConfig?.telegramBotToken) return;
+    // Updated to fetch Fresh Config
+    const notifyDirector = async (event: any, type: 'NEW' | 'TOMORROW' | 'TODAY') => {
+        let currentBotToken = sysConfig?.telegramBotToken;
+        let currentBaseUrl = sysConfig?.appBaseUrl;
+
+        // 1. Try LocalStorage
+        try {
+            const local = localStorage.getItem('schoolos_system_config');
+            if (local) {
+                const parsed = JSON.parse(local);
+                if (parsed.telegramBotToken) currentBotToken = parsed.telegramBotToken;
+                if (parsed.appBaseUrl) currentBaseUrl = parsed.appBaseUrl;
+            }
+        } catch(e) {}
+
+        // 2. Try Firestore
+        if (isConfigured && db) {
+            try {
+                const configDoc = await getDoc(doc(db, "system_config", "settings"));
+                if (configDoc.exists()) {
+                    const freshConfig = configDoc.data() as SystemConfig;
+                    currentBotToken = freshConfig.telegramBotToken;
+                    currentBaseUrl = freshConfig.appBaseUrl;
+                }
+            } catch (e) {
+                console.error("Failed to fetch fresh config for notification", e);
+            }
+        }
+
+        if (!currentBotToken) return;
         
         const directors = allTeachers.filter(t => t.roles.includes('DIRECTOR'));
         if (directors.length === 0) return;
@@ -135,9 +170,13 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                         `สถานที่: ${event.location || '-'}\n` +
                         `${event.description ? `รายละเอียด: ${event.description}` : ''}`;
 
+        // Link to Calendar View
+        const baseUrl = currentBaseUrl || window.location.origin;
+        const deepLink = `${baseUrl}?view=DIRECTOR_CALENDAR`;
+
         directors.forEach(d => {
             if (d.telegramChatId) {
-                sendTelegramMessage(sysConfig.telegramBotToken!, d.telegramChatId, message);
+                sendTelegramMessage(currentBotToken!, d.telegramChatId, message, deepLink);
             }
         });
     };

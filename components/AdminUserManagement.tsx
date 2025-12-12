@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
-import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, Calendar, RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut, Send } from 'lucide-react';
+import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, Calendar, RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut, Send, Globe } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
 import { ACADEMIC_POSITIONS } from '../constants';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -35,7 +35,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     const [isAdding, setIsAdding] = useState(false);
 
     // System Settings State
-    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '', officialGarudaBase64: '', telegramBotToken: '' });
+    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '', officialGarudaBase64: '', telegramBotToken: '', appBaseUrl: '' });
     const [isLoadingConfig, setIsLoadingConfig] = useState(false);
     
     // School Settings State (Local)
@@ -117,9 +117,14 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
 
     const handleSaveConfig = async () => {
         setIsLoadingConfig(true);
+        // Ensure no trailing slash
+        let cleanUrl = config.appBaseUrl || '';
+        if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+        const newConfig = { ...config, appBaseUrl: cleanUrl };
+
         try {
             if (isConfigured && db) {
-                await setDoc(doc(db, "system_config", "settings"), config);
+                await setDoc(doc(db, "system_config", "settings"), newConfig);
                 alert("บันทึกการตั้งค่าเรียบร้อย");
             } else {
                 // Mock Save
@@ -127,6 +132,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                     alert("บันทึกการตั้งค่าเรียบร้อย (Offline Mode)");
                 }, 500);
             }
+            setConfig(newConfig);
         } catch (error) {
             console.error("Save config error", error);
             alert("เกิดข้อผิดพลาดในการบันทึก: " + (error as Error).message);
@@ -547,18 +553,20 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                             <h4 className="font-bold text-blue-800 mb-4 flex items-center gap-2">
                                 <Send size={20}/> การตั้งค่า Telegram Notification
                             </h4>
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">Telegram Bot Token (จาก @BotFather)</label>
-                                <input 
-                                    type="text" 
-                                    value={config.telegramBotToken || ''}
-                                    onChange={e => setConfig({...config, telegramBotToken: e.target.value})}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
-                                    placeholder="123456789:ABCDefGhIJKlmNoPQRstUvwxyz..."
-                                />
-                                <p className="text-xs text-blue-500 mt-2">
-                                    ใช้สำหรับส่งการแจ้งเตือนหนังสือราชการไปยังบุคลากรผ่าน Telegram
-                                </p>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">Telegram Bot Token (จาก @BotFather)</label>
+                                    <input 
+                                        type="text" 
+                                        value={config.telegramBotToken || ''}
+                                        onChange={e => setConfig({...config, telegramBotToken: e.target.value})}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
+                                        placeholder="123456789:ABCDefGhIJKlmNoPQRstUvwxyz..."
+                                    />
+                                    <p className="text-xs text-blue-500 mt-1">
+                                        ใช้สำหรับส่งการแจ้งเตือนหนังสือราชการไปยังบุคลากรผ่าน Telegram
+                                    </p>
+                                </div>
                             </div>
                         </div>
 

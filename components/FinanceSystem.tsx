@@ -23,6 +23,50 @@ const formatMonthYearInput = (ym: string) => {
     return date.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
 }
 
+// Helper to parse dates from Excel (Handles Text DD/MM/YYYY, YYYY-MM-DD, and Excel Serial Numbers)
+const parseExcelDate = (raw: any): string => {
+    if (!raw) return new Date().toISOString().split('T')[0];
+
+    // Case 1: Excel Serial Number (e.g., 45302)
+    if (typeof raw === 'number') {
+        // Excel base date is Dec 30, 1899. 
+        // 25569 is the diff between Unix epoch and Excel epoch in days.
+        // 86400 * 1000 is milliseconds per day.
+        const date = new Date(Math.round((raw - 25569) * 86400 * 1000));
+        return date.toISOString().split('T')[0];
+    }
+
+    // Case 2: String
+    const str = String(raw).trim();
+
+    // Try DD/MM/YYYY (Thai style e.g., 12/05/2567 or 12/05/2024)
+    if (str.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+        const parts = str.split('/');
+        const d = parts[0].padStart(2, '0');
+        const m = parts[1].padStart(2, '0');
+        let y = parseInt(parts[2]);
+        
+        // Convert Thai Year if > 2400 (Simple heuristic)
+        if (y > 2400) y -= 543;
+        
+        return `${y}-${m}-${d}`;
+    }
+
+    // Try YYYY-MM-DD
+    if (str.match(/^\d{4}-\d{1,2}-\d{1,2}$/)) {
+        return str;
+    }
+
+    // Fallback: Try JS Date parse
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+        return parsed.toISOString().split('T')[0];
+    }
+
+    // Final fallback: Today
+    return new Date().toISOString().split('T')[0];
+};
+
 interface FinanceSystemProps {
     currentUser: Teacher;
     allTeachers: Teacher[];
@@ -31,6 +75,7 @@ interface FinanceSystemProps {
 const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers }) => {
     // Permissions
     const isDirector = currentUser.roles.includes('DIRECTOR');
+    const isSystemAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
     const isBudgetOfficer = currentUser.roles.includes('FINANCE_BUDGET');
     const isNonBudgetOfficer = currentUser.roles.includes('FINANCE_NONBUDGET');
 
@@ -198,20 +243,37 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         const updatedAccounts = accounts.map(a => a.id === editingAccount.id ? { ...a, name: newAccountName } : a);
         setAccounts(updatedAccounts);
 
+        const updatedAccountObj = { ...editingAccount, name: newAccountName };
+
         if (isConfigured && db) {
             try {
+                // Use setDoc with merge: true. 
+                // This prevents "Document not found" errors if editing a Mock Account that hasn't been synced to DB yet.
                 const accRef = doc(db, "finance_accounts", editingAccount.id);
-                await updateDoc(accRef, { name: newAccountName });
+                await setDoc(accRef, { name: newAccountName }, { merge: true });
             } catch (e) {
                 console.error("Firebase Update Error", e);
-                alert("การบันทึกแก้ไขล้มเหลว");
+                alert("การบันทึกออนไลน์มีปัญหาเล็กน้อย แต่ระบบได้บันทึกข้อมูลในเครื่องให้แล้ว");
             }
-        } else {
-            // LocalStorage
+        } 
+        
+        // Always update LocalStorage as backup/offline persistence
+        try {
             const allLocal = JSON.parse(localStorage.getItem('schoolos_finance_accounts') || '[]');
-            const updatedLocal = allLocal.map((a:any) => a.id === editingAccount.id ? { ...a, name: newAccountName } : a);
+            const existingIndex = allLocal.findIndex((a: any) => a.id === editingAccount.id);
+            let updatedLocal;
+            
+            if (existingIndex >= 0) {
+                updatedLocal = allLocal.map((a:any) => a.id === editingAccount.id ? updatedAccountObj : a);
+            } else {
+                // If editing a Mock account for the first time, it won't be in LS yet, so add it.
+                updatedLocal = [...allLocal, updatedAccountObj];
+            }
             localStorage.setItem('schoolos_finance_accounts', JSON.stringify(updatedLocal));
+        } catch (err) {
+            console.error("Local Storage Error", err);
         }
+
         setShowEditAccountModal(false);
         setEditingAccount(null);
     };
@@ -219,7 +281,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
     // Update active tab logic based on permissions
     useEffect(() => {
-        if (!isDirector) {
+        if (!isDirector && !isSystemAdmin) {
             if (activeTab === 'Budget' && !isBudgetOfficer && isNonBudgetOfficer) {
                 setActiveTab('NonBudget');
             } else if (activeTab === 'NonBudget' && !isNonBudgetOfficer && isBudgetOfficer) {
@@ -236,7 +298,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
              if (viewMode === 'DETAIL') setViewMode('DASHBOARD');
         }
 
-    }, [currentUser, isBudgetOfficer, isNonBudgetOfficer, isDirector, activeTab]);
+    }, [currentUser, isBudgetOfficer, isNonBudgetOfficer, isDirector, isSystemAdmin, activeTab]);
 
     // Reset pagination when account changes
     useEffect(() => {
@@ -244,11 +306,13 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     }, [selectedAccount, activeTab]);
 
     // --- Permissions Helpers ---
-    const canSeeBudget = isDirector || isBudgetOfficer;
-    const canSeeNonBudget = isDirector || isNonBudgetOfficer;
+    const canSeeBudget = isDirector || isSystemAdmin || isBudgetOfficer;
+    const canSeeNonBudget = isDirector || isSystemAdmin || isNonBudgetOfficer;
     
-    const canEditBudget = isBudgetOfficer;
-    const canEditNonBudget = isNonBudgetOfficer;
+    // Updated: Director and Admin should also be able to edit/fix data
+    const canEditBudget = isBudgetOfficer || isDirector || isSystemAdmin;
+    const canEditNonBudget = isNonBudgetOfficer || isDirector || isSystemAdmin;
+    
     const canEdit = (activeTab === 'Budget' && canEditBudget) || (activeTab === 'NonBudget' && canEditNonBudget);
 
     // --- Logic ---
@@ -379,11 +443,14 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     let finalType = 'Income';
                     if (typeRaw && typeRaw.toString().toLowerCase().includes('จ่าย')) finalType = 'Expense';
 
+                    // Parse Date correctly
+                    const finalDate = parseExcelDate(dateRaw);
+
                     batchTransactions.push({
                         id: `imp_${Date.now()}_${successCount}`,
                         schoolId: currentUser.schoolId,
                         accountId: targetAccountId,
-                        date: new Date().toISOString().split('T')[0], // Simplify date parsing for demo
+                        date: finalDate, 
                         description: descRaw.toString().trim(),
                         amount: amountValue,
                         type: finalType
@@ -410,6 +477,8 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     
                     setTransactions([...transactions, ...batchTransactions]);
                     alert(`นำเข้าข้อมูลสำเร็จจำนวน ${successCount} รายการ`);
+                } else {
+                    alert("ไม่พบข้อมูลที่สามารถนำเข้าได้ กรุณาตรวจสอบไฟล์ Excel (ต้องมีคอลัมน์: วันที่, รายการ, จำนวนเงิน)");
                 }
 
             } catch (error) {
