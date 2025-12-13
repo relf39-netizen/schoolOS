@@ -6,7 +6,8 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, L
 import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft, Loader, Database, ServerOff, Edit2, Trash2, X, Save, ShieldAlert, Eye, Printer, Upload, Calendar, Search, ChevronLeft, ChevronRight, HardDrive, Cloud, RefreshCw, AlertTriangle, HelpCircle, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db, isConfigured } from '../firebaseConfig';
-import { collection, query, where, getDocs, setDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, setDoc, updateDoc, doc, deleteDoc, getDoc } from 'firebase/firestore';
+import { sendTelegramMessage } from '../utils/telegram';
 
 // Thai Date Helper
 const getThaiDate = (dateStr: string) => {
@@ -84,6 +85,9 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [isLoadingData, setIsLoadingData] = useState(true);
     
+    // Config State for Notifications
+    const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
+
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
     const ITEMS_PER_PAGE = 15;
@@ -128,7 +132,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     // Import State
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isImporting, setIsImporting] = useState(false);
-    const [isResetting, setIsResetting] = useState(false);
     const [showImportHelp, setShowImportHelp] = useState(false);
 
     // Form Data
@@ -146,8 +149,11 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             try {
                 const savedAcc = localStorage.getItem('schoolos_finance_accounts');
                 const savedTx = localStorage.getItem('schoolos_finance_transactions');
+                const localConfig = localStorage.getItem('schoolos_system_config');
+                
                 if (savedAcc) localAccounts = JSON.parse(savedAcc);
                 if (savedTx) localTrans = JSON.parse(savedTx);
+                if (localConfig) setSysConfig(JSON.parse(localConfig));
             } catch (e) {
                 console.error("Local Load Error", e);
             }
@@ -181,6 +187,14 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                              setTransactions(MOCK_TRANSACTIONS.filter(t => t.schoolId === currentUser.schoolId));
                         }
                     }
+
+                    // Fetch System Config for Telegram
+                    const configRef = doc(db, "system_config", "settings");
+                    const configSnap = await getDoc(configRef);
+                    if (configSnap.exists()) {
+                        setSysConfig(configSnap.data() as SystemConfig);
+                    }
+
                 } catch (err) {
                     console.error("Firebase Finance Fetch Error:", err);
                     setAccounts(localAccounts.length ? localAccounts : MOCK_ACCOUNTS);
@@ -345,64 +359,22 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         setShowAccountForm(false);
     };
 
-    // --- RESET DATA FUNCTION ---
-    const handleResetData = async () => {
-        if (!confirm("⚠️ คำเตือน: คุณต้องการลบข้อมูลการเงินทั้งหมด (บัญชีและรายการรับ-จ่าย) ของโรงเรียนนี้ใช่หรือไม่?\n\nการกระทำนี้จะลบข้อมูลออกจากฐานข้อมูลถาวร และไม่สามารถกู้คืนได้\n\n(แนะนำให้ทำเมื่อข้อมูลผิดพลาดหรือต้องการเริ่มระบบใหม่)")) return;
-        
-        setIsResetting(true);
-
-        // 1. Delete from Firestore (Only for this school)
-        if (isConfigured && db) {
-            try {
-                // Delete Accounts
-                const accQ = query(collection(db, "finance_accounts"), where("schoolId", "==", currentUser.schoolId));
-                const accSnap = await getDocs(accQ);
-                const deleteAccPromises = accSnap.docs.map(d => deleteDoc(d.ref));
-                await Promise.all(deleteAccPromises);
-
-                // Delete Transactions
-                const transQ = query(collection(db, "finance_transactions"), where("schoolId", "==", currentUser.schoolId));
-                const transSnap = await getDocs(transQ);
-                const deleteTransPromises = transSnap.docs.map(d => deleteDoc(d.ref));
-                await Promise.all(deleteTransPromises);
-            } catch(e) {
-                console.error("Reset Error", e);
-                alert("เกิดข้อผิดพลาดในการลบข้อมูลบน Cloud");
-            }
-        }
-
-        // 2. Clear LocalStorage
-        localStorage.removeItem('schoolos_finance_accounts');
-        localStorage.removeItem('schoolos_finance_transactions');
-
-        // 3. Reset State
-        setAccounts([]);
-        setTransactions([]);
-        
-        setIsResetting(false);
-        alert("ล้างข้อมูลเรียบร้อยแล้ว ท่านสามารถเริ่มบันทึกข้อมูลใหม่ได้ทันที");
-        
-        // Reset View
-        if (activeTab === 'NonBudget') {
-            setViewMode('DETAIL'); // Stay in detail to show empty state
-        } else {
-            setViewMode('DASHBOARD');
-        }
-    };
-
     const handleAddTransaction = async (e: React.FormEvent) => {
         e.preventDefault();
         
         let targetAccountId = '';
+        let targetAccountName = '';
 
         // If an account is explicitly selected, use it.
         if (selectedAccount) {
             targetAccountId = selectedAccount.id;
+            targetAccountName = selectedAccount.name;
         } else if (activeTab === 'NonBudget') {
             // Find NonBudget Account
             const nbAcc = accounts.find(a => a.type === 'NonBudget');
             if (nbAcc) {
                 targetAccountId = nbAcc.id;
+                targetAccountName = nbAcc.name;
             } else {
                 // Create Default NonBudget Account
                 const defaultName = 'เงินรายได้สถานศึกษา (ทั่วไป)';
@@ -416,16 +388,18 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 await handleSaveAccount(createdAcc);
                 setAccounts([...accounts, createdAcc]);
                 targetAccountId = newId;
+                targetAccountName = defaultName;
             }
         }
 
+        const transactionAmount = parseFloat(newTrans.amount);
         const created: any = {
             id: `trans_${Date.now()}`,
             schoolId: currentUser.schoolId,
             accountId: targetAccountId,
             date: newTrans.date,
             description: newTrans.desc,
-            amount: parseFloat(newTrans.amount),
+            amount: transactionAmount,
             type: newTrans.type
         };
 
@@ -435,6 +409,53 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             alert("บันทึกรายการเรียบร้อยแล้ว");
             setNewTrans({ date: new Date().toISOString().split('T')[0], desc: '', amount: '', type: 'Income' });
             setShowTransForm(false);
+
+            // --- TELEGRAM NOTIFICATION ---
+            if (sysConfig?.telegramBotToken) {
+                // 1. Calculate New Balance (Current + New Transaction)
+                const currentTrans = transactions.filter(t => t.accountId === targetAccountId);
+                const prevIncome = currentTrans.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0);
+                const prevExpense = currentTrans.filter(t => t.type === 'Expense').reduce((s, t) => s + t.amount, 0);
+                const prevBalance = prevIncome - prevExpense;
+                
+                const newBalance = newTrans.type === 'Income' 
+                    ? prevBalance + transactionAmount 
+                    : prevBalance - transactionAmount;
+
+                // 2. Identify Recipients
+                // - Director (Always)
+                // - Finance Officer (Based on Tab)
+                const recipients = allTeachers.filter(t => {
+                    const isDirector = t.roles.includes('DIRECTOR');
+                    const isRelevantOfficer = activeTab === 'Budget' 
+                        ? t.roles.includes('FINANCE_BUDGET') 
+                        : t.roles.includes('FINANCE_NONBUDGET');
+                    
+                    // Filter by school and role, must have chat ID
+                    return t.schoolId === currentUser.schoolId && t.telegramChatId && (isDirector || isRelevantOfficer);
+                });
+
+                // 3. Construct Message
+                const icon = newTrans.type === 'Income' ? '🟢' : '🔴';
+                const typeLabel = newTrans.type === 'Income' ? 'รายรับ' : 'รายจ่าย';
+                const message = `${icon} <b>แจ้งเตือนการเงิน (${activeTab === 'Budget' ? 'งบประมาณ' : 'นอกงบประมาณ'})</b>\n` +
+                                `บัญชี: ${targetAccountName}\n` +
+                                `--------------------------------\n` +
+                                `รายการ: ${newTrans.desc}\n` +
+                                `ประเภท: ${typeLabel}\n` +
+                                `จำนวนเงิน: <b>${transactionAmount.toLocaleString()}</b> บาท\n` +
+                                `--------------------------------\n` +
+                                `💰 <b>ยอดคงเหลือสุทธิ: ${newBalance.toLocaleString()} บาท</b>\n` +
+                                `(บันทึกโดย: ${currentUser.name})`;
+
+                const baseUrl = sysConfig.appBaseUrl || window.location.origin;
+                const deepLink = `${baseUrl}?view=FINANCE`;
+
+                // 4. Send
+                recipients.forEach(t => {
+                    sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId!, message, deepLink);
+                });
+            }
         }
     };
 
@@ -636,17 +657,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                             </button>
                         )}
                     </div>
-                    {/* RESET DATA BUTTON (ADMIN/DIRECTOR/OFFICER) */}
-                    {canEdit && (
-                        <button 
-                            onClick={handleResetData}
-                            disabled={isResetting}
-                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200 transition-all"
-                            title="ล้างข้อมูลการเงินทั้งหมด (Reset Data)"
-                        >
-                            {isResetting ? <RefreshCw className="animate-spin" size={20}/> : <Trash2 size={20}/>}
-                        </button>
-                    )}
                 </div>
             </div>
 
@@ -728,15 +738,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                             </h2>
                             <p className="text-sm text-slate-500">บัญชีรายได้สถานศึกษา / เงินบริจาค / อื่นๆ</p>
                         </div>
-                        {canEdit && (
-                            <button 
-                                onClick={handleResetData}
-                                disabled={isResetting}
-                                className="text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg border border-red-200 text-sm font-bold flex items-center gap-2"
-                            >
-                                {isResetting ? <RefreshCw className="animate-spin" size={16}/> : <Trash2 size={16}/>} ล้างข้อมูลทั้งหมด
-                            </button>
-                        )}
                     </div>
 
                     <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-300">
@@ -744,7 +745,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                         <p className="text-slate-500 font-bold mb-2">ยังไม่มีบัญชีเงินนอกงบประมาณ</p>
                         <p className="text-xs text-slate-400 mb-6 max-w-md mx-auto">
                             หากท่านพบว่ามีข้อมูลในฐานข้อมูล แต่ไม่แสดงในหน้านี้ อาจเกิดจากข้อมูลบัญชี (Account) สูญหายหรือไม่ตรงกัน 
-                            <br/>ท่านสามารถกดปุ่ม "ล้างข้อมูลทั้งหมด" ด้านบนเพื่อเคลียร์ข้อมูลเก่า แล้วเริ่มสร้างบัญชีใหม่
                         </p>
                         {canEditNonBudget && (
                              <button onClick={() => setShowAccountForm(true)} className="bg-blue-600 text-white px-6 py-2 rounded-lg shadow font-bold hover:bg-blue-700 transition-colors">
@@ -808,18 +808,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     </div>
                     
                     <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-                         {/* RESET BUTTON */}
-                         {canEdit && (
-                             <button 
-                                onClick={handleResetData}
-                                disabled={isResetting}
-                                className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200 transition-all mr-2"
-                                title="ล้างข้อมูลการเงินทั้งหมด (Reset)"
-                            >
-                                {isResetting ? <RefreshCw className="animate-spin" size={20}/> : <Trash2 size={20}/>}
-                            </button>
-                         )}
-
                         {/* IMPORT BUTTON & HELP */}
                         <div className="relative flex items-center gap-1">
                             <input 
