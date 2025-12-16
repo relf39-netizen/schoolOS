@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { Teacher, DirectorEvent, SystemConfig } from '../types';
 import { MOCK_DIRECTOR_EVENTS } from '../constants';
-import { Calendar, Clock, MapPin, Plus, Save, Trash2, Bell, AlertCircle, CheckCircle, Database, ServerOff } from 'lucide-react';
+import { Calendar, Clock, MapPin, Plus, Trash2, Bell, ServerOff, ListFilter, History, CheckCircle } from 'lucide-react';
 import { db, isConfigured } from '../firebaseConfig';
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, getDoc } from 'firebase/firestore';
 import { sendTelegramMessage } from '../utils/telegram';
 
 interface DirectorCalendarProps {
@@ -17,6 +17,9 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
     const [events, setEvents] = useState<DirectorEvent[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
+    
+    // Tab State: 'UPCOMING' = งานที่ต้องปฏิบัติ, 'PAST' = ปฏิบัติเรียบร้อย
+    const [activeTab, setActiveTab] = useState<'UPCOMING' | 'PAST'>('UPCOMING');
 
     // Form State
     const [showForm, setShowForm] = useState(false);
@@ -36,7 +39,6 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
     // --- Helpers: Thai Date Formatting ---
     
-    // Format: วันจันทร์ที่ 1 มกราคม 2567
     const getThaiFullDate = (dateStr: string) => {
         if (!dateStr) return '';
         const d = new Date(dateStr);
@@ -48,14 +50,12 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
         return `วัน${days[d.getDay()]}ที่ ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`;
     };
 
-    // Format: ม.ค. (Short Month)
     const getThaiMonthShort = (dateStr: string) => {
         const d = new Date(dateStr);
         const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
         return months[d.getMonth()];
     };
 
-    // Format: จันทร์ (Short Day)
     const getThaiDayShort = (dateStr: string) => {
         const d = new Date(dateStr);
         const days = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
@@ -64,15 +64,12 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
     // --- Data & Config Loading ---
     useEffect(() => {
-        // Load Config
         const fetchConfig = async () => {
-            // 1. Try LocalStorage
             try {
                 const local = localStorage.getItem('schoolos_system_config');
                 if (local) setSysConfig(JSON.parse(local));
             } catch(e) {}
 
-            // 2. Try Firestore
             if (isConfigured && db) {
                 try {
                     const docRef = doc(db, "system_config", "settings");
@@ -83,13 +80,10 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
         };
         fetchConfig();
 
-        // Load Events
         if (isConfigured && db) {
             const q = query(collection(db, "director_events"), where("schoolId", "==", currentUser.schoolId));
             const unsubscribe = onSnapshot(q, (snapshot) => {
                 const fetchedEvents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DirectorEvent));
-                // Sort by date desc
-                fetchedEvents.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
                 setEvents(fetchedEvents);
                 setIsLoading(false);
             });
@@ -99,6 +93,26 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
             setIsLoading(false);
         }
     }, [currentUser.schoolId]);
+
+    // --- Filter Logic ---
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Filter Upcoming (Today and Future)
+    const upcomingEvents = events.filter(event => {
+        const evtDate = new Date(event.date);
+        evtDate.setHours(0, 0, 0, 0);
+        return evtDate >= today;
+    }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Ascending
+
+    // Filter Past (Before Today)
+    const pastEvents = events.filter(event => {
+        const evtDate = new Date(event.date);
+        evtDate.setHours(0, 0, 0, 0);
+        return evtDate < today;
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Descending (Newest past first)
+
+    const displayedEvents = activeTab === 'UPCOMING' ? upcomingEvents : pastEvents;
 
     // --- Handlers ---
 
@@ -110,15 +124,13 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
             ...newEvent,
             schoolId: currentUser.schoolId,
             createdBy: currentUser.id,
-            // Init notify status
             notifiedOneDayBefore: false,
             notifiedOnDay: false
         };
 
         if (isConfigured && db) {
             try {
-                const docRef = await addDoc(collection(db, "director_events"), eventData);
-                // Trigger Telegram (Wait for result implicitly but non-blocking)
+                await addDoc(collection(db, "director_events"), eventData);
                 notifyDirector(eventData, 'NEW');
             } catch (e) {
                 alert('เกิดข้อผิดพลาดในการบันทึก');
@@ -142,12 +154,10 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
     };
 
     // --- Notifications Logic ---
-    // Updated to fetch Fresh Config
     const notifyDirector = async (event: any, type: 'NEW' | 'TOMORROW' | 'TODAY') => {
         let currentBotToken = sysConfig?.telegramBotToken;
         let currentBaseUrl = sysConfig?.appBaseUrl;
 
-        // 1. Try LocalStorage
         try {
             const local = localStorage.getItem('schoolos_system_config');
             if (local) {
@@ -157,7 +167,6 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
             }
         } catch(e) {}
 
-        // 2. Try Firestore
         if (isConfigured && db) {
             try {
                 const configDoc = await getDoc(doc(db, "system_config", "settings"));
@@ -166,9 +175,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                     currentBotToken = freshConfig.telegramBotToken;
                     currentBaseUrl = freshConfig.appBaseUrl;
                 }
-            } catch (e) {
-                console.error("Failed to fetch fresh config for notification", e);
-            }
+            } catch (e) { console.error(e); }
         }
 
         if (!currentBotToken) return;
@@ -178,8 +185,6 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
         let title = "";
         let icon = "";
-        
-        // Define Thai Date for Message
         const thaiDateStr = getThaiFullDate(event.date);
 
         switch (type) {
@@ -196,7 +201,6 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                         `${event.description ? `รายละเอียด: ${event.description}\n` : ''}` + 
                         `(บันทึกโดย: ${currentUser.name})`;
 
-        // Link to Calendar View
         const baseUrl = currentBaseUrl || window.location.origin;
         const deepLink = `${baseUrl}?view=DIRECTOR_CALENDAR`;
 
@@ -217,7 +221,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                     </h2>
                     <p className="text-slate-500 text-sm">จัดการและแจ้งเตือนภารกิจงาน (สำหรับเจ้าหน้าที่ธุรการและผู้อำนวยการ)</p>
                 </div>
-                {canEdit && (
+                {canEdit && activeTab === 'UPCOMING' && (
                     <button 
                         onClick={() => setShowForm(true)}
                         className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-bold flex items-center gap-2 shadow-md transition-transform hover:scale-105"
@@ -227,10 +231,34 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                 )}
             </div>
 
+            {/* Tabs Navigation */}
+            <div className="flex bg-slate-100 p-1 rounded-xl w-fit border border-slate-200">
+                <button 
+                    onClick={() => setActiveTab('UPCOMING')}
+                    className={`px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${
+                        activeTab === 'UPCOMING' 
+                            ? 'bg-white text-purple-600 shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                >
+                    <ListFilter size={16}/> งานที่ต้องปฏิบัติ ({upcomingEvents.length})
+                </button>
+                <button 
+                    onClick={() => setActiveTab('PAST')}
+                    className={`px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${
+                        activeTab === 'PAST' 
+                            ? 'bg-white text-slate-700 shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                >
+                    <History size={16}/> ปฏิบัติเรียบร้อย ({pastEvents.length})
+                </button>
+            </div>
+
             {/* Offline Indicator */}
             {!isConfigured && (
                 <div className="bg-orange-50 border border-orange-200 text-orange-700 p-3 rounded-lg flex items-center gap-2 text-sm">
-                    <ServerOff size={16}/> ระบบทำงานแบบ Offline ข้อมูลจะไม่ถูกบันทึกถาวร และการแจ้งเตือนอัตโนมัติอาจไม่ทำงานสมบูรณ์
+                    <ServerOff size={16}/> ระบบทำงานแบบ Offline ข้อมูลจะไม่ถูกบันทึกถาวร
                 </div>
             )}
 
@@ -290,24 +318,34 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
             {/* Events List */}
             <div className="space-y-4">
-                {events.length === 0 ? (
-                    <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300 text-slate-400">
-                        ไม่มีรายการนัดหมายเร็วๆ นี้
+                {displayedEvents.length === 0 ? (
+                    <div className="text-center py-16 bg-white rounded-xl border border-dashed border-slate-300 text-slate-400 flex flex-col items-center gap-2">
+                        {activeTab === 'UPCOMING' ? (
+                            <>
+                                <Calendar size={48} className="text-slate-200"/>
+                                <p>ไม่มีรายการนัดหมายเร็วๆ นี้</p>
+                            </>
+                        ) : (
+                            <>
+                                <History size={48} className="text-slate-200"/>
+                                <p>ยังไม่มีประวัติการปฏิบัติงานที่ผ่านมา</p>
+                            </>
+                        )}
                     </div>
                 ) : (
-                    events.map((event) => {
+                    displayedEvents.map((event) => {
                         const evtDate = new Date(event.date);
-                        const today = new Date();
-                        today.setHours(0,0,0,0);
+                        const todayRef = new Date();
+                        todayRef.setHours(0,0,0,0);
                         evtDate.setHours(0,0,0,0);
                         
-                        const isPast = evtDate < today;
-                        const isToday = evtDate.getTime() === today.getTime();
+                        const isPast = evtDate < todayRef;
+                        const isToday = evtDate.getTime() === todayRef.getTime();
 
                         return (
-                            <div key={event.id} className={`bg-white rounded-xl p-6 shadow-sm border transition-all ${isToday ? 'border-purple-500 ring-1 ring-purple-100' : 'border-slate-200'} ${isPast ? 'opacity-60 grayscale' : ''}`}>
+                            <div key={event.id} className={`bg-white rounded-xl p-6 shadow-sm border transition-all ${isToday ? 'border-purple-500 ring-1 ring-purple-100' : 'border-slate-200'} ${isPast ? 'opacity-80 bg-slate-50' : ''}`}>
                                 <div className="flex flex-col md:flex-row justify-between items-start gap-4">
-                                    <div className="flex gap-4">
+                                    <div className="flex gap-4 w-full">
                                         {/* Date Box (Thai Format) */}
                                         <div className={`flex flex-col items-center justify-center w-24 h-24 rounded-xl shrink-0 ${isToday ? 'bg-purple-600 text-white' : (isPast ? 'bg-slate-200 text-slate-500' : 'bg-purple-50 text-purple-700')}`}>
                                             <span className="text-xs font-bold">{getThaiMonthShort(event.date)}</span>
@@ -316,9 +354,10 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                                         </div>
 
                                         {/* Content */}
-                                        <div>
+                                        <div className="flex-1">
                                             <div className="flex items-center gap-2 mb-1">
                                                 {isToday && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">วันนี้</span>}
+                                                {isPast && <span className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><CheckCircle size={10}/> เสร็จสิ้น</span>}
                                                 <h3 className={`text-lg font-bold ${isPast ? 'text-slate-600' : 'text-slate-800'}`}>{event.title}</h3>
                                             </div>
                                             
@@ -329,18 +368,18 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
                                             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600 mt-2">
                                                 <div className="flex items-center gap-1">
-                                                    <Clock size={16} className="text-purple-500"/> 
+                                                    <Clock size={16} className={isPast ? "text-slate-400" : "text-purple-500"}/> 
                                                     {event.startTime} {event.endTime ? `- ${event.endTime}` : ''} น.
                                                 </div>
                                                 {event.location && (
                                                     <div className="flex items-center gap-1">
-                                                        <MapPin size={16} className="text-red-500"/> {event.location}
+                                                        <MapPin size={16} className={isPast ? "text-slate-400" : "text-red-500"}/> {event.location}
                                                     </div>
                                                 )}
                                             </div>
                                             
                                             {event.description && (
-                                                <p className="text-sm text-slate-500 mt-2 bg-slate-50 p-2 rounded border border-slate-100 inline-block">
+                                                <p className="text-sm text-slate-500 mt-2 bg-white/50 p-2 rounded border border-slate-100 inline-block">
                                                     {event.description}
                                                 </p>
                                             )}
@@ -349,7 +388,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
                                     {/* Actions */}
                                     <div className="flex flex-col items-end gap-2">
-                                        {canEdit && !isPast && (
+                                        {canEdit && (
                                             <button 
                                                 onClick={() => handleDeleteEvent(event.id)}
                                                 className="text-slate-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
@@ -358,11 +397,13 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                                                 <Trash2 size={18}/>
                                             </button>
                                         )}
-                                        {/* Notification Status Badges */}
-                                        <div className="flex gap-1">
-                                            {event.notifiedOneDayBefore && <span title="แจ้งเตือนล่วงหน้าแล้ว" className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded border border-green-200">1-Day Sent</span>}
-                                            {event.notifiedOnDay && <span title="แจ้งเตือนวันงานแล้ว" className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">Today Sent</span>}
-                                        </div>
+                                        {/* Notification Status Badges (Only show on upcoming or today) */}
+                                        {!isPast && (
+                                            <div className="flex gap-1">
+                                                {event.notifiedOneDayBefore && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded border border-green-200">แจ้งล่วงหน้าแล้ว</span>}
+                                                {event.notifiedOnDay && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">แจ้งวันนี้แล้ว</span>}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
