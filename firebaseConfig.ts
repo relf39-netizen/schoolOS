@@ -1,5 +1,6 @@
+
 import { initializeApp, getApps, getApp } from 'firebase/app';
-// Fix: Use proper modular imports for Firestore functions and types.
+// Fix: Consolidated Firestore imports and combined type/value imports to ensure proper member resolution.
 import { 
   getFirestore, 
   collection, 
@@ -14,9 +15,10 @@ import {
   deleteDoc, 
   getDocs, 
   setDoc,
-  Timestamp
+  Timestamp,
+  type QuerySnapshot,
+  type DocumentData
 } from 'firebase/firestore';
-import type { QuerySnapshot, DocumentData } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
@@ -33,7 +35,6 @@ const firebaseConfig = {
     appId: "1:821652200196:web:5d6e2fe19a365603f64e51",
     measurementId: "G-DPHF36ZLKK"
    };
-   
 
 // Check if Firebase should be enabled (API Key must exist)
 export const isConfigured = !!firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_API_KEY';

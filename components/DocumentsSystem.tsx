@@ -11,6 +11,7 @@ interface BackgroundTask {
     title: string;
     status: 'processing' | 'uploading' | 'done' | 'error';
     message: string;
+    notified?: boolean; // New flag to track if sound/notif was played
 }
 
 interface DocumentsSystemProps {
@@ -27,6 +28,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     const [isUploading, setIsUploading] = useState(false);
     const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTask[]>([]);
     const [showTaskQueue, setShowTaskQueue] = useState(false);
+    const [lastCompletedTaskId, setLastCompletedTaskId] = useState<string | null>(null);
     
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -64,8 +66,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     const [teacherSearchTerm, setTeacherSearchTerm] = useState(''); 
 
     // --- Roles Checking ---
-    // Fix: Define isAcknowledged at the component level for Detail View usage.
-    // It will be correctly shadowed by local variables in the list view map.
     const isAcknowledged = selectedDoc?.acknowledgedBy?.includes(currentUser.id) || false;
     const isDirector = currentUser.roles.includes('DIRECTOR');
     const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
@@ -87,8 +87,36 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     const autoRemoveDoneTask = (id: string) => {
         setTimeout(() => {
             setBackgroundTasks(prev => prev.filter(t => t.id !== id));
-        }, 5000); // Keep done tasks for 5s
+        }, 8000); // Keep done tasks for 8s
     };
+
+    // SOUND & NOTIFICATION EFFECT
+    useEffect(() => {
+        const newlyDoneTask = backgroundTasks.find(t => t.status === 'done' && !t.notified);
+        if (newlyDoneTask) {
+            // 1. Mark as notified immediately to prevent loop
+            updateTask(newlyDoneTask.id, { notified: true });
+            setLastCompletedTaskId(newlyDoneTask.id);
+            setTimeout(() => setLastCompletedTaskId(null), 3000); // Pulse effect for 3s
+
+            // 2. Play Sound (Subtle Success Chime)
+            try {
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.volume = 0.3;
+                audio.play().catch(e => console.debug("Auto-play blocked"));
+            } catch(e) {}
+
+            // 3. Browser Native Notification (If window is not focused)
+            if (document.visibilityState === 'hidden' && 'Notification' in window && Notification.permission === 'granted') {
+                new Notification('ดำเนินการสำเร็จ!', {
+                    body: `หนังสือเรื่อง: ${newlyDoneTask.title} ได้รับการสั่งการและอัปโหลดเรียบร้อยแล้ว`,
+                    icon: '/vite.svg'
+                });
+            }
+            
+            autoRemoveDoneTask(newlyDoneTask.id);
+        }
+    }, [backgroundTasks]);
 
     // Browser closure warning
     useEffect(() => {
@@ -473,7 +501,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             id: taskId,
             title: taskTitle,
             status: 'processing',
-            message: 'กำลังเตรียมไฟล์เพื่อประทับตรา...'
+            message: 'กำลังเตรียมไฟล์เพื่อประทับตรา...',
+            notified: false
          };
          
          setBackgroundTasks(prev => [...prev, newTask]);
@@ -590,7 +619,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             }
 
             updateTask(taskId, { status: 'done', message: 'ดำเนินการสั่งการสำเร็จ' });
-            autoRemoveDoneTask(taskId);
 
         } catch (error) {
             console.error("Background PDF Error", error);
@@ -767,9 +795,13 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                         <div className="relative">
                             <button 
                                 onClick={() => setShowTaskQueue(!showTaskQueue)}
-                                className={`p-2 rounded-full transition-all hover:bg-slate-700 ${activeTasks.length > 0 ? 'bg-blue-600 shadow-lg shadow-blue-900/20' : 'bg-slate-700'}`}
+                                className={`p-2 rounded-full transition-all hover:bg-slate-700 relative ${activeTasks.length > 0 ? 'bg-blue-600 shadow-lg shadow-blue-900/20' : 'bg-slate-700'}`}
                             >
                                 <Bell size={20} className={activeTasks.length > 0 ? 'animate-bounce' : ''}/>
+                                {/* Dynamic Glow for completed task */}
+                                {lastCompletedTaskId && (
+                                    <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-75"></span>
+                                )}
                             </button>
                             {(activeTasks.length > 0 || doneTasksCount > 0) && (
                                 <span className={`absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] text-[10px] font-bold rounded-full border-2 border-slate-800 ${activeTasks.length > 0 ? 'bg-blue-500 text-white animate-pulse' : 'bg-emerald-500 text-white'}`}>
