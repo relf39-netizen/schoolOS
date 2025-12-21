@@ -3,8 +3,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LeaveRequest, Teacher, School, SystemConfig } from '../types';
 import { Clock, CheckCircle, XCircle, FilePlus, UserCheck, Printer, ArrowLeft, Loader, Database, Calendar, User, ChevronRight, Trash2, AlertCircle, Eye, Filter, X, Calculator, FileText } from 'lucide-react';
 import { db, isConfigured, doc, getDoc, getDocs, addDoc, collection, updateDoc, deleteDoc, query, where, onSnapshot, QuerySnapshot, DocumentData } from '../firebaseConfig';
-import { generateOfficialLeavePdf, generateLeaveSummaryPdf } from '../utils/pdfStamper';
+import { generateOfficialLeavePdf, generateLeaveSummaryPdf, toThaiDigits } from '../utils/pdfStamper';
 import { sendTelegramMessage } from '../utils/telegram';
+import { ACADEMIC_POSITIONS } from '../constants';
 
 interface LeaveSystemProps {
     currentUser: Teacher;
@@ -20,13 +21,12 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     const [isLoading, setIsLoading] = useState(true);
     const [dbError, setDbError] = useState<string | null>(null);
     
-    // View Modes: LIST | FORM | PDF | SUMMARY_PREVIEW
-    const [viewMode, setViewMode] = useState<'LIST' | 'FORM' | 'PDF' | 'SUMMARY_PREVIEW'>('LIST');
+    // View Modes: LIST | FORM | PDF | SUMMARY_PREVIEW | STATS
+    const [viewMode, setViewMode] = useState<'LIST' | 'FORM' | 'PDF' | 'SUMMARY_PREVIEW' | 'STATS'>('LIST');
     const [selectedRequest, setSelectedRequest] = useState<LeaveRequest | null>(null);
     const [isHighlighted, setIsHighlighted] = useState(false);
 
-    // Statistics States
-    const [showStatModal, setShowStatModal] = useState(false);
+    // Statistics States (Full Page View)
     const [statTeacher, setStatTeacher] = useState<Teacher | null>(null);
     const [statStartDate, setStatStartDate] = useState<string>(() => {
         const d = new Date();
@@ -57,12 +57,35 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     const [pdfUrl, setPdfUrl] = useState<string>('');
     const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-    // Permissions
-    const isDirector = currentUser.roles.includes('DIRECTOR');
+    // Permissions & Helpers
+    const isDirectorRole = currentUser.roles.includes('DIRECTOR');
     const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
     const isSystemAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
-    const canApprove = isDirector;
-    const canViewAll = isDirector || isSystemAdmin || isDocOfficer;
+    const canApprove = isDirectorRole;
+    const canViewAll = isDirectorRole || isSystemAdmin || isDocOfficer;
+
+    // ฟังก์ชันตรวจสอบว่าบุคคลนั้นเป็นผู้อำนวยการหรือไม่ (เช็คจาก Role หรือ ตำแหน่ง)
+    const checkIfDirector = (teacher: Teacher) => {
+        return teacher.roles.includes('DIRECTOR') || 
+               teacher.position.includes('ผู้อำนวยการ');
+    };
+
+    // Helper: Convert Date String to Thai Format with BE Year and Thai Digits
+    const getThaiFullDateUI = (dateStr: string) => {
+        if (!dateStr) return '';
+        const d = new Date(dateStr);
+        const months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+        const day = d.getDate();
+        const month = months[d.getMonth()];
+        const year = d.getFullYear() + 543;
+        return toThaiDigits(`${day} ${month} ${year}`);
+    };
+
+    // Helper: Get BE Year from date string
+    const getBEYear = (dateStr: string) => {
+        if (!dateStr) return '';
+        return toThaiDigits(new Date(dateStr).getFullYear() + 543);
+    };
 
     // --- Real-time Data Subscription ---
     useEffect(() => {
@@ -144,7 +167,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                     };
 
                     const teacher = allTeachers.find(t => t.id === selectedRequest.teacherId) || currentUser;
-                    const director = allTeachers.find(t => t.roles.includes('DIRECTOR'));
+                    const director = allTeachers.find(t => checkIfDirector(t));
 
                     const base64Pdf = await generateOfficialLeavePdf({
                         req: selectedRequest, stats, teacher,
@@ -214,7 +237,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         try {
             await addDoc(collection(db, "leave_requests"), newReq);
             if (sysConfig?.telegramBotToken) {
-                const directors = allTeachers.filter(t => t.roles.includes('DIRECTOR'));
+                const directors = allTeachers.filter(t => checkIfDirector(t));
                 const message = `📢 <b>มีใบลาใหม่รอการอนุมัติ</b>\nจาก: ${currentUser.name}\nประเภท: ${getLeaveTypeName(leaveType)}\nเหตุผล: ${reason}`;
                 directors.forEach(dir => dir.telegramChatId && sendTelegramMessage(sysConfig.telegramBotToken!, dir.telegramChatId, message, `${sysConfig.appBaseUrl}?view=LEAVE&id=${reqId}`));
             }
@@ -282,8 +305,16 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     const handleGenerateSummaryReport = async () => {
         setIsGeneratingSummary(true);
         try {
-            const director = allTeachers.find(t => t.roles.includes('DIRECTOR'));
-            const schoolTeachers = allTeachers.filter(t => t.schoolId === currentUser.schoolId);
+            const director = allTeachers.find(t => checkIfDirector(t));
+            
+            // กรองผู้อำนวยการออกก่อนส่งให้ฟังก์ชันทำ PDF
+            const schoolTeachers = allTeachers
+                .filter(t => t.schoolId === currentUser.schoolId && !checkIfDirector(t))
+                .sort((a, b) => {
+                    const indexA = ACADEMIC_POSITIONS.indexOf(a.position);
+                    const indexB = ACADEMIC_POSITIONS.indexOf(b.position);
+                    return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB);
+                });
             
             const base64Pdf = await generateLeaveSummaryPdf({
                 schoolName: currentSchool?.name || sysConfig?.schoolName || '...',
@@ -300,7 +331,6 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             
             setSummaryPdfUrl(base64Pdf);
             setViewMode('SUMMARY_PREVIEW');
-            setShowStatModal(false);
         } catch (e) {
             console.error(e);
             alert("เกิดข้อผิดพลาดในการสร้างรายงาน");
@@ -324,7 +354,6 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                     <div>
                         <h2 className="text-xl font-bold leading-tight">ระบบการลาอิเล็กทรอนิกส์</h2>
                         <p className="text-[10px] opacity-80 flex items-center gap-1 uppercase tracking-wider">
-                            {/* Fix: Correct typo size(10} to size={10} */}
                             {dbError ? <AlertCircle size={10}/> : <Database size={10}/>}
                             {dbError ? dbError : `SchoolID: ${currentUser.schoolId}`}
                         </p>
@@ -339,7 +368,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                         <div className="flex gap-2">
                              {canViewAll && (
                                 <button 
-                                    onClick={() => { setStatTeacher(null); setShowStatModal(true); }}
+                                    onClick={() => { setStatTeacher(null); setViewMode('STATS'); }}
                                     className="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-lg text-xs font-bold border border-indigo-100 flex items-center gap-2 hover:bg-indigo-600 hover:text-white transition-all"
                                 >
                                     <Calculator size={16}/> สรุปยอดวันลา
@@ -367,7 +396,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                                     <div className="text-[10px] text-slate-400 font-normal">{req.teacherPosition}</div>
                                                 </div>
                                             </div>
-                                            {(isDirector || isSystemAdmin) && <button onClick={(e) => handleDelete(e, req.id)} className="text-red-300 hover:text-red-600 p-1"><Trash2 size={16}/></button>}
+                                            {(isDirectorRole || isSystemAdmin) && <button onClick={(e) => handleDelete(e, req.id)} className="text-red-300 hover:text-red-600 p-1"><Trash2 size={16}/></button>}
                                         </div>
                                         <div className="space-y-1 mb-4 text-sm">
                                             <div className="flex justify-between border-b border-dashed border-slate-100 pb-1"><span className="text-slate-500">ประเภท:</span><span className="font-bold text-indigo-600">{getLeaveTypeName(req.type)}</span></div>
@@ -409,16 +438,19 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                                         {canViewAll && (
                                                             <button 
                                                                 onClick={() => { 
-                                                                    setStatTeacher(allTeachers.find(t => t.id === req.teacherId) || { id: req.teacherId, name: req.teacherName, position: req.teacherPosition } as any); 
-                                                                    setShowStatModal(true); 
+                                                                    const teacher = allTeachers.find(t => t.id === req.teacherId);
+                                                                    // กรองผู้อำนวยการออกตรงนี้ด้วย
+                                                                    if (teacher && checkIfDirector(teacher)) return;
+                                                                    setStatTeacher(teacher || { id: req.teacherId, name: req.teacherName, position: req.teacherPosition } as any); 
+                                                                    setViewMode('STATS'); 
                                                                 }} 
-                                                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" 
+                                                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-20" 
                                                                 title="ดูสถิติบุคคล"
                                                             >
                                                                 <Eye size={16}/>
                                                             </button>
                                                         )}
-                                                        {(isDirector || isSystemAdmin) && <button onClick={(e) => handleDelete(e, req.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ลบ"><Trash2 size={16}/></button>}
+                                                        {(isDirectorRole || isSystemAdmin) && <button onClick={(e) => handleDelete(e, req.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ลบ"><Trash2 size={16}/></button>}
                                                     </div>
                                                 </td>
                                             </tr>
@@ -511,7 +543,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                          <iframe src={summaryPdfUrl} className="w-full h-full border-none" title="Summary Report PDF"/>
                     </div>
                     <div className="w-full lg:w-80 space-y-4">
-                        <button onClick={() => setViewMode('LIST')} className="w-full py-3 bg-white text-slate-600 rounded-xl border font-bold flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm"><ArrowLeft size={18}/> ย้อนกลับ</button>
+                        <button onClick={() => setViewMode('STATS')} className="w-full py-3 bg-white text-slate-600 rounded-xl border font-bold flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm"><ArrowLeft size={18}/> ย้อนกลับ</button>
                         <div className="bg-blue-50 p-5 rounded-2xl border border-blue-200 shadow-sm">
                             <h4 className="font-bold text-blue-800 mb-2 flex items-center gap-2 text-sm"><FileText size={16}/> บันทึกข้อความสรุปการลา</h4>
                             <p className="text-xs text-blue-600 leading-relaxed mb-4">
@@ -525,184 +557,207 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                 </div>
             )}
 
-            {/* Statistics Modal */}
-            {showStatModal && (
-                <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-scale-up">
-                        <div className="p-6 bg-blue-600 text-white flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                                <div className="bg-white/20 p-2 rounded-full"><Eye size={24}/></div>
-                                <div>
-                                    <h3 className="text-xl font-bold leading-none">{statTeacher ? statTeacher.name : 'สรุปสถิติการลาบุคลากรทั้งหมด'}</h3>
-                                    <p className="text-xs opacity-80 mt-1">{statTeacher ? `ตำแหน่ง: ${statTeacher.position}` : 'ภาพรวมทั้งโรงเรียน'}</p>
+            {viewMode === 'STATS' && (
+                <div className="space-y-6 animate-slide-up">
+                    <div className="flex items-center gap-4 mb-4">
+                        <button onClick={() => setViewMode('LIST')} className="p-2 hover:bg-slate-200 rounded-full text-slate-600 transition-colors">
+                            <ArrowLeft size={24}/>
+                        </button>
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-800">{statTeacher ? statTeacher.name : 'สรุปสถิติการลาบุคลากร'}</h2>
+                            <p className="text-xs text-slate-500">{statTeacher ? `ตำแหน่ง: ${statTeacher.position}` : 'ภาพรวมทั้งโรงเรียน'}</p>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 items-center justify-between">
+                        <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
+                            <div className="flex items-center gap-2 text-slate-400">
+                                <Filter size={20}/>
+                                <span className="text-sm font-bold text-slate-500 whitespace-nowrap">เลือกช่วงวันลา:</span>
+                            </div>
+                            
+                            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] font-bold text-blue-600 ml-1 mb-0.5 uppercase tracking-wider">เริ่ม (พ.ศ. {getBEYear(statStartDate)})</span>
+                                    <input 
+                                        type="date" 
+                                        value={statStartDate} 
+                                        onChange={(e) => setStatStartDate(e.target.value)} 
+                                        className="bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                    />
+                                </div>
+                                <div className="flex flex-col self-end pb-2">
+                                    <span className="text-slate-300">-</span>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] font-bold text-blue-600 ml-1 mb-0.5 uppercase tracking-wider">สิ้นสุด (พ.ศ. {getBEYear(statEndDate)})</span>
+                                    <input 
+                                        type="date" 
+                                        value={statEndDate} 
+                                        onChange={(e) => setStatEndDate(e.target.value)} 
+                                        className="bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                                    />
                                 </div>
                             </div>
-                            <button onClick={() => setShowStatModal(false)} className="bg-white/20 hover:bg-white/40 p-2 rounded-full transition-colors">
-                                <X size={24}/>
-                            </button>
                         </div>
 
-                        <div className="p-4 bg-slate-50 border-b flex flex-col md:flex-row gap-4 items-center justify-between">
-                            <div className="flex items-center gap-3 w-full md:w-auto">
-                                <Filter size={18} className="text-slate-400"/>
-                                <div className="flex flex-wrap items-center gap-2 bg-white border px-3 py-1.5 rounded-xl shadow-sm">
-                                    <span className="text-xs font-bold text-slate-500">สรุปตั้งแต่วันที่:</span>
-                                    <input type="date" value={statStartDate} onChange={(e) => setStatStartDate(e.target.value)} className="text-sm font-bold outline-none text-blue-600"/>
-                                    <span className="text-xs font-bold text-slate-500 mx-1">ถึงวันที่:</span>
-                                    <input type="date" value={statEndDate} onChange={(e) => setStatEndDate(e.target.value)} className="text-sm font-bold outline-none text-blue-600"/>
-                                </div>
+                        <div className="flex flex-col items-center md:items-end gap-2 w-full md:w-auto">
+                            <div className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                กำลังเลือกช่วงวันที่: {getThaiFullDateUI(statStartDate)} ถึง {getThaiFullDateUI(statEndDate)}
                             </div>
                             {!statTeacher && (
                                 <button 
                                     onClick={handleGenerateSummaryReport}
                                     disabled={isGeneratingSummary}
-                                    className="bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-black transition-all shadow-md disabled:opacity-50"
+                                    className="bg-slate-800 text-white w-full md:w-auto px-6 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 hover:bg-black transition-all shadow-md disabled:opacity-50"
                                 >
-                                    {isGeneratingSummary ? <Loader className="animate-spin" size={14}/> : <FileText size={14}/>}
-                                    พิมพ์บันทึกสรุปการลาทั้งหมด
+                                    {isGeneratingSummary ? <Loader className="animate-spin" size={18}/> : <FileText size={18}/>}
+                                    พิมพ์บันทึกสรุปการลา (ตัวเลขไทย)
                                 </button>
                             )}
                         </div>
+                    </div>
 
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-50/50">
-                            {statTeacher ? (
-                                <div className="space-y-6">
-                                     {(() => {
-                                        const s = getTeacherStats(statTeacher.id, statStartDate, statEndDate);
-                                        return (
-                                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                                                <div className="bg-white p-4 rounded-2xl border border-red-100 text-center shadow-sm">
-                                                    <div className="text-[10px] font-bold text-red-400 uppercase mb-1">ลาป่วย (วัน)</div>
-                                                    <div className="text-2xl font-black text-red-600">{s.sick}</div>
-                                                </div>
-                                                <div className="bg-white p-4 rounded-2xl border border-orange-100 text-center shadow-sm">
-                                                    <div className="text-[10px] font-bold text-orange-400 uppercase mb-1">ลากิจ (วัน)</div>
-                                                    <div className="text-2xl font-black text-orange-600">{s.personal}</div>
-                                                </div>
-                                                <div className="bg-white p-4 rounded-2xl border border-purple-100 text-center shadow-sm">
-                                                    <div className="text-[10px] font-bold text-purple-400 uppercase mb-1">ลาคลอด (วัน)</div>
-                                                    <div className="text-2xl font-black text-purple-600">{s.maternity}</div>
-                                                </div>
-                                                <div className="bg-white p-4 rounded-2xl border border-indigo-100 text-center shadow-sm">
-                                                    <div className="text-[10px] font-bold text-indigo-400 uppercase mb-1">มาสาย (ครั้ง)</div>
-                                                    <div className="text-2xl font-black text-indigo-600">{s.late}</div>
-                                                </div>
-                                                <div className="bg-white p-4 rounded-2xl border border-emerald-100 text-center shadow-sm">
-                                                    <div className="text-[10px] font-bold text-emerald-400 uppercase mb-1">ออกนอก (ครั้ง)</div>
-                                                    <div className="text-2xl font-black text-emerald-600">{s.offCampus}</div>
-                                                </div>
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        {statTeacher ? (
+                            <div className="p-6 space-y-6">
+                                {(() => {
+                                    const s = getTeacherStats(statTeacher.id, statStartDate, statEndDate);
+                                    return (
+                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                            <div className="bg-red-50 p-4 rounded-2xl border border-red-100 text-center shadow-sm">
+                                                <div className="text-[10px] font-bold text-red-400 uppercase mb-1">ลาป่วย (วัน)</div>
+                                                <div className="text-2xl font-black text-red-600">{toThaiDigits(s.sick)}</div>
                                             </div>
-                                        );
-                                     })()}
+                                            <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 text-center shadow-sm">
+                                                <div className="text-[10px] font-bold text-orange-400 uppercase mb-1">ลากิจ (วัน)</div>
+                                                <div className="text-2xl font-black text-orange-600">{toThaiDigits(s.personal)}</div>
+                                            </div>
+                                            <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100 text-center shadow-sm">
+                                                <div className="text-[10px] font-bold text-purple-400 uppercase mb-1">ลาคลอด (วัน)</div>
+                                                <div className="text-2xl font-black text-purple-600">{toThaiDigits(s.maternity)}</div>
+                                            </div>
+                                            <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 text-center shadow-sm">
+                                                <div className="text-[10px] font-bold text-indigo-400 uppercase mb-1">มาสาย (ครั้ง)</div>
+                                                <div className="text-2xl font-black text-indigo-600">{toThaiDigits(s.late)}</div>
+                                            </div>
+                                            <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 text-center shadow-sm">
+                                                <div className="text-[10px] font-bold text-emerald-400 uppercase mb-1">ออกนอก (ครั้ง)</div>
+                                                <div className="text-2xl font-black text-emerald-600">{toThaiDigits(s.offCampus)}</div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
 
-                                    <div className="bg-white border rounded-2xl overflow-hidden shadow-sm">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="bg-slate-50 text-slate-500 border-b">
-                                                <tr>
-                                                    <th className="px-6 py-3">วันที่เริ่มลา</th>
-                                                    <th className="px-6 py-3">ประเภท</th>
-                                                    <th className="px-6 py-3">เหตุผลการลา</th>
-                                                    <th className="px-6 py-3 text-center">จำนวนวัน</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {(() => {
-                                                    const filtered = requests.filter(r => 
-                                                        r.teacherId === statTeacher.id && 
-                                                        r.status === 'Approved' && 
-                                                        r.startDate >= statStartDate && 
-                                                        r.startDate <= statEndDate
-                                                    ).sort((a,b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
+                                <div className="border rounded-2xl overflow-hidden shadow-sm overflow-x-auto">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-slate-50 text-slate-500 border-b whitespace-nowrap">
+                                            <tr>
+                                                <th className="px-6 py-3">วันที่เริ่มลา</th>
+                                                <th className="px-6 py-3">ประเภท</th>
+                                                <th className="px-6 py-3">เหตุผลการลา</th>
+                                                <th className="px-6 py-3 text-center">จำนวนวัน</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {(() => {
+                                                const filtered = requests.filter(r => 
+                                                    r.teacherId === statTeacher.id && 
+                                                    r.status === 'Approved' && 
+                                                    r.startDate >= statStartDate && 
+                                                    r.startDate <= statEndDate
+                                                ).sort((a,b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
 
-                                                    return filtered.length === 0 ? (
-                                                        <tr><td colSpan={4} className="text-center py-12 text-slate-400">ไม่พบรายการในช่วงเวลานี้</td></tr>
-                                                    ) : filtered.map(r => (
-                                                        <tr key={r.id} className="hover:bg-slate-50">
-                                                            <td className="px-6 py-4">
-                                                                <div className="font-bold text-slate-800">{getThaiDate(r.startDate)}</div>
-                                                                <div className="text-[10px] text-slate-400">ถึง {getThaiDate(r.endDate)}</div>
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                                                    r.type === 'Sick' ? 'bg-red-50 text-red-600 border-red-100' : 
-                                                                    r.type === 'Personal' ? 'bg-orange-50 text-orange-600 border-orange-100' : 
-                                                                    'bg-blue-50 text-blue-600 border-blue-100'
-                                                                }`}>
-                                                                    {getLeaveTypeName(r.type)}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-slate-500 italic max-w-xs truncate">{r.reason}</td>
-                                                            <td className="px-6 py-4 text-center font-bold text-slate-700">{calculateDays(r.startDate, r.endDate)}</td>
-                                                        </tr>
-                                                    ));
-                                                })()}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                                return filtered.length === 0 ? (
+                                                    <tr><td colSpan={4} className="text-center py-12 text-slate-400">ไม่พบรายการในช่วงเวลานี้</td></tr>
+                                                ) : filtered.map(r => (
+                                                    <tr key={r.id} className="hover:bg-slate-50">
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="font-bold text-slate-800">{getThaiDate(r.startDate)}</div>
+                                                            <div className="text-[10px] text-slate-400">ถึง {getThaiDate(r.endDate)}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                                                r.type === 'Sick' ? 'bg-red-50 text-red-600 border-red-100' : 
+                                                                r.type === 'Personal' ? 'bg-orange-50 text-orange-600 border-orange-100' : 
+                                                                'bg-blue-50 text-blue-600 border-blue-100'
+                                                            }`}>
+                                                                {getLeaveTypeName(r.type)}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-slate-500 italic min-w-[200px]">{r.reason}</td>
+                                                        <td className="px-6 py-4 text-center font-bold text-slate-700">{toThaiDigits(calculateDays(r.startDate, r.endDate))}</td>
+                                                    </tr>
+                                                ));
+                                            })()}
+                                        </tbody>
+                                    </table>
                                 </div>
-                            ) : (
-                                <div className="space-y-4">
-                                     <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="bg-slate-100 text-slate-600 font-bold border-b">
-                                                <tr>
-                                                    <th className="px-6 py-4">ชื่อ - นามสกุล</th>
-                                                    <th className="px-6 py-4 text-center">ป่วย (วัน)</th>
-                                                    <th className="px-6 py-4 text-center">กิจ (วัน)</th>
-                                                    <th className="px-6 py-4 text-center">สาย (ครั้ง)</th>
-                                                    <th className="px-6 py-4 text-right">สถิติละเอียด</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {allTeachers.filter(t => t.schoolId === currentUser.schoolId).map(t => {
-                                                    const s = getTeacherStats(t.id, statStartDate, statEndDate);
-                                                    return (
-                                                        <tr key={t.id} className="hover:bg-slate-50 transition-colors">
-                                                            <td className="px-6 py-4">
-                                                                <div className="font-bold text-slate-800">{t.name}</div>
-                                                                <div className="text-[10px] text-slate-400">{t.position}</div>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-center font-bold text-red-600">{s.sick}</td>
-                                                            <td className="px-6 py-4 text-center font-bold text-orange-600">{s.personal}</td>
-                                                            <td className="px-6 py-4 text-center font-bold text-indigo-600">{s.late}</td>
-                                                            <td className="px-6 py-4 text-right">
-                                                                <button 
-                                                                    onClick={() => setStatTeacher(t)}
-                                                                    className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg font-bold hover:bg-blue-600 hover:text-white transition-all text-xs"
-                                                                >
-                                                                    <Eye size={14}/> ตรวจสอบ
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                <div className="flex justify-end">
+                                    <button onClick={() => setStatTeacher(null)} className="px-6 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
+                                        กลับไปดูรวมทั้งหมด
+                                    </button>
                                 </div>
-                            )}
-                        </div>
-                        
-                        <div className="p-4 bg-slate-50 border-t flex justify-end gap-2">
-                             {statTeacher && (
-                                <button onClick={() => setStatTeacher(null)} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-bold text-sm">
-                                    กลับไปดูรวม
-                                </button>
-                             )}
-                            <button onClick={() => window.print()} className="px-6 py-2 bg-slate-800 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-md text-sm">
-                                <Printer size={18}/> พิมพ์หน้าจอนี้
-                            </button>
-                        </div>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-slate-50 text-slate-600 font-bold border-b whitespace-nowrap">
+                                        <tr>
+                                            <th className="px-6 py-4">ชื่อ - นามสกุล</th>
+                                            <th className="px-6 py-4 text-center">ป่วย (วัน)</th>
+                                            <th className="px-6 py-4 text-center">กิจ (วัน)</th>
+                                            <th className="px-6 py-4 text-center">สาย (ครั้ง)</th>
+                                            <th className="px-6 py-4 text-right">สถิติละเอียด</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {(() => {
+                                            const sortedTeachers = allTeachers
+                                                .filter(t => t.schoolId === currentUser.schoolId && !checkIfDirector(t)) // กรองผู้อำนวยการออกโดยใช้ตำแหน่งและสิทธิ์
+                                                .sort((a, b) => {
+                                                    const idxA = ACADEMIC_POSITIONS.indexOf(a.position);
+                                                    const idxB = ACADEMIC_POSITIONS.indexOf(b.position);
+                                                    return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+                                                });
+
+                                            return sortedTeachers.map(t => {
+                                                const s = getTeacherStats(t.id, statStartDate, statEndDate);
+                                                return (
+                                                    <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                                                        <td className="px-6 py-4">
+                                                            <div className="font-bold text-slate-800 whitespace-nowrap">{t.name}</div>
+                                                            <div className="text-[10px] text-slate-400">{t.position}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-center font-bold text-red-600">{toThaiDigits(s.sick)}</td>
+                                                        <td className="px-6 py-4 text-center font-bold text-orange-600">{toThaiDigits(s.personal)}</td>
+                                                        <td className="px-6 py-4 text-center font-bold text-indigo-600">{toThaiDigits(s.late)}</td>
+                                                        <td className="px-6 py-4 text-right">
+                                                            <button 
+                                                                onClick={() => setStatTeacher(t)}
+                                                                className="inline-flex items-center gap-2 bg-blue-50 text-blue-600 px-3 py-2 md:py-1.5 rounded-lg font-bold hover:bg-blue-600 hover:text-white transition-all text-xs whitespace-nowrap"
+                                                            >
+                                                                <Eye size={14}/> ตรวจสอบ
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            });
+                                        })()}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
 
             {showWarningModal && (
-                 <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
+                 <div className="fixed inset-0 z-[1100] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
                      <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl animate-scale-up text-center">
                          <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-yellow-200"><Clock size={32}/></div>
                          <h3 className="text-xl font-bold text-slate-800">แจ้งเตือนออกนอกบริเวณ</h3>
-                         <p className="text-slate-500 mt-2 text-sm">เดือนนี้ท่านได้ขออนุญาตออกนอกสถานศึกษาไปแล้ว <span className="text-red-600 font-bold text-lg">{offCampusCount}</span> ครั้ง</p>
+                         <p className="text-slate-500 mt-2 text-sm">เดือนนี้ท่านได้ขออนุญาตออกนอกสถานศึกษาไปแล้ว <span className="text-red-600 font-bold text-lg">{toThaiDigits(offCampusCount)}</span> ครั้ง</p>
                          <div className="flex gap-3 mt-8">
                              <button onClick={() => setShowWarningModal(false)} className="flex-1 py-3 text-slate-600 bg-slate-100 rounded-xl font-bold hover:bg-slate-200 transition-colors">ยกเลิก</button>
                              <button onClick={submitRequest} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold shadow-lg hover:bg-emerald-700">ยืนยันส่งใบลา</button>

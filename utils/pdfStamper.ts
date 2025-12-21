@@ -4,6 +4,12 @@ import fontkit from '@pdf-lib/fontkit';
 
 // --- Helpers ---
 
+// Convert Arabic numbers to Thai digits
+export const toThaiDigits = (num: string | number): string => {
+    const thaiDigits = ['๐', '๑', '๒', '๓', '๔', '๕', '๖', '๗', '๘', '๙'];
+    return num.toString().replace(/\d/g, (d) => thaiDigits[parseInt(d)]);
+};
+
 // Convert Base64 DataURI to Uint8Array
 export const dataURItoUint8Array = (dataURI: string) => {
     try {
@@ -39,7 +45,7 @@ const fetchThaiFont = async () => {
 // Split text for word wrapping
 const splitTextIntoLines = (text: string, maxWidth: number, fontSize: number, font: any) => {
     if (!text) return [];
-    const words = text.split(''); // Thai characters don't have spaces like English
+    const words = text.split(''); 
     const lines = [];
     let currentLine = words[0] || "";
 
@@ -57,8 +63,8 @@ const splitTextIntoLines = (text: string, maxWidth: number, fontSize: number, fo
     return lines;
 };
 
-// Format Date to Thai
-const formatDateThai = (dateValue: Date) => {
+// Format Date to Thai (Full Month & Buddhist Year)
+const formatDateThai = (dateValue: Date, useThaiDigits = false) => {
     const months = [
         "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
         "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
@@ -66,12 +72,13 @@ const formatDateThai = (dateValue: Date) => {
     const day = dateValue.getDate();
     const month = months[dateValue.getMonth()];
     const year = dateValue.getFullYear() + 543;
-    return `${day} ${month} ${year}`;
+    const result = `${day} ${month} ${year}`;
+    return useThaiDigits ? toThaiDigits(result) : result;
 };
 
-const formatDateThaiStr = (dateStr: string) => {
+const formatDateThaiStr = (dateStr: string, useThaiDigits = false) => {
     if (!dateStr) return "....................";
-    return formatDateThai(new Date(dateStr));
+    return formatDateThai(new Date(dateStr), useThaiDigits);
 };
 
 // --- STAMP: RECEIVE NUMBER (TOP RIGHT) ---
@@ -270,8 +277,7 @@ export const stampPdfDocument = async ({
     targetPdfPage.drawText(dateText, { x: centerX - (dateWidth / 2), y: footerY, size: fontSize, font: thaiFont, color: rgb(0, 0, 0) });
     footerY += lineHeight;
 
-    // แก้ไข: ใช้คำว่า "ผู้อำนวยการ" และต่อด้วย schoolName ซึ่งมักจะมีคำว่า "โรงเรียน" อยู่แล้ว
-    const posText = `ผู้อำนวยการ${schoolName || 'โรงเรียน...................'}`;
+    const posText = `ผู้อำนวยการ${schoolName || '...................'}`;
     const posWidth = thaiFont.widthOfTextAtSize(posText, fontSize);
     targetPdfPage.drawText(posText, { x: centerX - (posWidth / 2), y: footerY, size: fontSize, font: thaiFont, color: rgb(0, 0, 0) });
     footerY += lineHeight;
@@ -619,19 +625,45 @@ export const generateLeaveSummaryPdf = async (options: SummaryPdfOptions): Promi
     page.drawText(`ส่วนราชการ  ${schoolName}`, { x: 50, y: curY, size: headerFontSize, font: thaiFont });
     curY -= 25;
     page.drawText(`ที่  .................................................................`, { x: 50, y: curY, size: headerFontSize, font: thaiFont });
-    const dateText = `วันที่  ${new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+    const dateText = `วันที่  ${formatDateThai(new Date(), true)}`; 
     page.drawText(dateText, { x: 300, y: curY, size: headerFontSize, font: thaiFont });
     curY -= 25;
-    page.drawText(`เรื่อง  สรุปสถิติการลาของบุคลากร ระหว่างวันที่ ${new Date(startDate).toLocaleDateString('th-TH')} ถึง ${new Date(endDate).toLocaleDateString('th-TH')}`, { x: 50, y: curY, size: headerFontSize, font: thaiFont });
+    
+    const startThai = formatDateThaiStr(startDate, true);
+    const endThai = formatDateThaiStr(endDate, true);
+    page.drawText(`เรื่อง  สรุปสถิติการลาของบุคลากร ระหว่างวันที่ ${startThai} ถึงวันที่ ${endThai}`, { x: 50, y: curY, size: headerFontSize, font: thaiFont });
     curY -= 35;
 
-    page.drawText(`เรียน  บุคลากรทางการศึกษาโรงเรียน${schoolName}`, { x: 50, y: curY, size: 14, font: thaiFont });
-    curY -= 25;
+    page.drawText(`เรียน  บุคลากรทางการศึกษา${schoolName}`, { x: 50, y: curY, size: headerFontSize, font: thaiFont });
+    curY -= 30;
     
-    const intro = `ตามระเบียบว่าด้วยการลาของข้าราชการ พ.ศ. 2555 และนโยบายการบริหารบุคลากรของสถานศึกษา จึงขอแจ้งสรุปสถิติการลาประเภทต่างๆ เพื่อใช้ประกอบการพิจารณาความดีความชอบ และเพื่อให้บุคลากรได้ตรวจสอบความถูกต้องของข้อมูลตนเอง ดังนี้`;
-    const introLines = splitTextIntoLines(intro, width - 100, 14, thaiFont);
-    introLines.forEach(l => {
-        page.drawText(l, { x: 70, y: curY, size: 14, font: thaiFont });
+    const cmToPoints = 28.35;
+    const indentPoints = 2.5 * cmToPoints; // 2.5 cm indentation
+    const margin = 50;
+    const contentWidth = width - (2 * margin);
+
+    // Dynamic Intro Text Construction (No redundant "โรงเรียน")
+    const intro = `ตามที่ ${schoolName} จะดำเนินการประเมินประสิทธิภาพและประสิทธิผลการปฏิบัติงานของข้าราชการครูและบุคลากรทางการศึกษา เพื่อประกอบการพิจารณาเลื่อนเงินเดือน (${startThai} ถึง ${endThai}) ในการนี้ เพื่อให้การดำเนินการเป็นไปด้วยความเรียบร้อยและถูกต้องตามระเบียบ ก.ค.ศ. ว่าด้วยการเลื่อนเงินเดือน นั้น จึงขอแจ้งสรุปสถิติการลาประเภทต่างๆ เพื่อให้บุคลากรได้ตรวจสอบความถูกต้องของข้อมูลตนเอง ดังนี้`;
+    
+    // Manual wrap for the first indented line
+    let wordsArr = intro.split('');
+    let firstLine = "";
+    let i = 0;
+    while(i < wordsArr.length) {
+        const test = firstLine + wordsArr[i];
+        if (thaiFont.widthOfTextAtSize(test, 14) < (contentWidth - indentPoints)) {
+            firstLine += wordsArr[i];
+            i++;
+        } else break;
+    }
+    
+    page.drawText(firstLine, { x: margin + indentPoints, y: curY, size: 14, font: thaiFont });
+    curY -= 20;
+
+    const remainingText = wordsArr.slice(i).join('');
+    const subsequentLines = splitTextIntoLines(remainingText, contentWidth, 14, thaiFont);
+    subsequentLines.forEach(l => {
+        page.drawText(l, { x: margin, y: curY, size: 14, font: thaiFont });
         curY -= 20;
     });
     curY -= 15;
@@ -659,14 +691,15 @@ export const generateLeaveSummaryPdf = async (options: SummaryPdfOptions): Promi
         }
 
         const s = getStatsFn(t.id, startDate, endDate);
+        // แปลงตัวเลขข้อมูลในตารางทั้งหมดเป็นเลขไทย
         const rowData = [
-            (idx + 1).toString(),
+            toThaiDigits(idx + 1),
             t.name,
-            s.sick.toString(),
-            s.personal.toString(),
-            s.maternity.toString(),
-            s.late.toString(),
-            s.offCampus.toString(),
+            toThaiDigits(s.sick),
+            toThaiDigits(s.personal),
+            toThaiDigits(s.maternity),
+            toThaiDigits(s.late),
+            toThaiDigits(s.offCampus),
             ".............................."
         ];
 
@@ -694,8 +727,8 @@ export const generateLeaveSummaryPdf = async (options: SummaryPdfOptions): Promi
     
     page.drawText(`(ลงชื่อ).................................................`, { x: footerX, y: curY - 15, size: 14, font: thaiFont });
     page.drawText(`(${directorName})`, { x: footerX + 40, y: curY - 35, size: 14, font: thaiFont });
-    // แก้ไข: ใช้คำว่า "ผู้อำนวยการ" และต่อด้วย schoolName ซึ่งมักจะมีคำว่า "โรงเรียน" อยู่แล้ว
-    const posTextFooter = `ผู้อำนวยการ${schoolName || 'โรงเรียน...................'}`;
+    // แสดงตำแหน่งผู้อำนวยการตามชื่อโรงเรียนให้ถูกต้อง
+    const posTextFooter = `ผู้อำนวยการ${schoolName || '...................'}`;
     page.drawText(posTextFooter, { x: footerX + 25, y: curY - 55, size: 14, font: thaiFont });
 
     return await pdfDoc.saveAsBase64({ dataUri: true });
