@@ -1,12 +1,17 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { DocumentItem, Teacher, Attachment, SystemConfig } from '../types';
-import { MOCK_DOCUMENTS, CURRENT_SCHOOL_YEAR } from '../constants';
-import { Search, FileText, Users, PenTool, CheckCircle, FilePlus, Eye, CheckSquare, Loader, Link as LinkIcon, Download, Trash2, File as FileIcon, ExternalLink, Plus, UploadCloud, AlertTriangle, Monitor, FileCheck, ArrowLeft, Send, MousePointerClick, ChevronLeft, ChevronRight, Settings, FileBadge, Megaphone, Save, FileSpreadsheet, FileArchive, Image as ImageIcon, Bell } from 'lucide-react';
-import { db, isConfigured } from '../firebaseConfig';
-import { collection, addDoc, onSnapshot, query, orderBy, updateDoc, where, doc, getDoc, deleteDoc, getDocs, QuerySnapshot, DocumentData } from 'firebase/firestore';
+import { MOCK_DOCUMENTS } from '../constants';
+import { Search, FileText, Users, PenTool, CheckCircle, FilePlus, Eye, CheckSquare, Loader, Link as LinkIcon, Trash2, File as FileIcon, ExternalLink, Plus, UploadCloud, AlertTriangle, Monitor, FileCheck, ArrowLeft, Send, MousePointerClick, ChevronLeft, ChevronRight, FileBadge, Megaphone, Save, FileSpreadsheet, FileArchive, Image as ImageIcon, Bell, X, Info } from 'lucide-react';
+import { db, isConfigured, collection, addDoc, onSnapshot, query, orderBy, updateDoc, where, doc, getDoc, deleteDoc, getDocs, type QuerySnapshot, type DocumentData } from '../firebaseConfig';
 import { stampPdfDocument, stampReceiveNumber } from '../utils/pdfStamper';
 import { sendTelegramMessage } from '../utils/telegram';
+
+interface BackgroundTask {
+    id: string;
+    title: string;
+    status: 'processing' | 'uploading' | 'done' | 'error';
+    message: string;
+}
 
 interface DocumentsSystemProps {
     currentUser: Teacher;
@@ -20,8 +25,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     const [docs, setDocs] = useState<DocumentItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
-    const [isSigning, setIsSigning] = useState(false);
-    const [processingMessage, setProcessingMessage] = useState('');
+    const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTask[]>([]);
     
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -37,7 +41,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     // Form State (Admin)
     const [docCategory, setDocCategory] = useState<'INCOMING' | 'ORDER'>('INCOMING');
     const [newDoc, setNewDoc] = useState({ 
-        bookNumber: '', // Added custom book number
+        bookNumber: '', 
         title: '', 
         from: '', 
         priority: 'Normal', 
@@ -56,15 +60,36 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     const [command, setCommand] = useState('');
     const [selectedTeachers, setSelectedTeachers] = useState<string[]>([]);
     const [stampPage, setStampPage] = useState<number>(1);
-    const [teacherSearchTerm, setTeacherSearchTerm] = useState(''); // New search for recipient selection
-    
-    // Ref for capturing the document paper (Preview only now)
-    const paperRef = useRef<HTMLDivElement>(null);
+    const [teacherSearchTerm, setTeacherSearchTerm] = useState(''); 
 
     // --- Roles Checking ---
     const isDirector = currentUser.roles.includes('DIRECTOR');
     const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
     const isSystemAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
+
+    // --- Background Task Manager Logic ---
+    const updateTask = (id: string, updates: Partial<BackgroundTask>) => {
+        setBackgroundTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    };
+
+    const removeTask = (id: string) => {
+        setTimeout(() => {
+            setBackgroundTasks(prev => prev.filter(t => t.id !== id));
+        }, 5000); // Keep done tasks for 5s
+    };
+
+    // Browser closure warning
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            const activeTasks = backgroundTasks.filter(t => t.status === 'processing' || t.status === 'uploading');
+            if (activeTasks.length > 0) {
+                e.preventDefault();
+                e.returnValue = "ระบบกำลังบันทึกข้อมูลและอัปโหลดไฟล์ไปที่ Google Drive กรุณารอสักครู่เพื่อป้องกันข้อมูลสูญหาย";
+            }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [backgroundTasks]);
 
     // --- Helpers ---
     const fileToBase64 = (file: File): Promise<string> => {
@@ -76,7 +101,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
         });
     };
 
-    // Helper to determine file icon
     const getFileIcon = (fileName: string, type: 'FILE' | 'LINK', size: number = 20, colored: boolean = true) => {
         const lower = fileName.toLowerCase();
         let Icon = FileIcon;
@@ -108,7 +132,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
         return <Icon size={size} className={colored ? colorClass : ''} />;
     };
 
-    // Generate Next Book Number Logic
     const generateNextBookNumber = (currentDocs: DocumentItem[]) => {
         const currentThaiYear = String(new Date().getFullYear() + 543);
         let maxNum = 0;
@@ -122,7 +145,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
         return `${String(maxNum + 1).padStart(3, '0')}/${currentThaiYear}`;
     };
 
-    // Init Create Form
     const handleInitCreate = () => {
         const nextNum = generateNextBookNumber(docs);
         setNewDoc({
@@ -132,13 +154,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             priority: 'Normal',
             description: ''
         });
-        setDocCategory('INCOMING'); // Default
+        setDocCategory('INCOMING'); 
         setTempAttachments([]);
-        setSelectedTeachers([]); // Clear previous selections
+        setSelectedTeachers([]); 
         setViewMode('CREATE');
     };
 
-    // Helper to convert Drive View URL to Download URL
     const getGoogleDriveId = (url: string) => {
         const patterns = [
             /drive\.google\.com\/file\/d\/([-_\w]+)/,
@@ -151,7 +172,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
         return null;
     };
 
-    // Helper for Thai Date in Filename
     const formatDateForFilename = (dateStr: string) => {
         if (!dateStr) return '00000000';
         const date = new Date(dateStr);
@@ -161,13 +181,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
         return `${day}${month}${year}`;
     };
 
-    // Helper for Telegram Notification
-    // Updated to fetch Fresh Config
     const triggerTelegramNotification = async (teachers: Teacher[], docId: string, title: string, isOrder: boolean) => {
         let currentBotToken = sysConfig?.telegramBotToken;
         let currentBaseUrl = sysConfig?.appBaseUrl;
 
-        // 1. Try LocalStorage FIRST (Fast & Offline support)
         try {
             const local = localStorage.getItem('schoolos_system_config');
             if (local) {
@@ -177,7 +194,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             }
         } catch (e) {}
 
-        // 2. Try Firestore (Latest source of truth if available)
         if (isConfigured && db) {
             try {
                 const configDoc = await getDoc(doc(db, "system_config", "settings"));
@@ -193,7 +209,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
 
         if (!currentBotToken) return;
         
-        // Fallback to window location ONLY if all configs are empty
         const baseUrl = currentBaseUrl || window.location.origin;
         const deepLink = `${baseUrl}?view=DOCUMENTS&id=${docId}`;
         
@@ -227,8 +242,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 unsubscribe = onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
                     clearTimeout(timeoutId);
                     const fetched: DocumentItem[] = [];
-                    snapshot.forEach((doc) => {
-                        fetched.push({ ...doc.data() } as DocumentItem);
+                    snapshot.forEach((docSnap) => {
+                        fetched.push({ ...docSnap.data() } as DocumentItem);
                     });
                     setDocs(fetched);
                     setIsLoading(false);
@@ -240,13 +255,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 });
                 
                 const fetchConfig = async () => {
-                    // Try Local first
                     try {
                         const local = localStorage.getItem('schoolos_system_config');
                         if (local) setSysConfig(JSON.parse(local));
                     } catch(e) {}
 
-                    // Then Firebase
                     try {
                         const docRef = doc(db, "system_config", "settings");
                         const docSnap = await getDoc(docRef);
@@ -265,7 +278,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 setIsLoading(false);
             }
         } else {
-            // Offline Mode - Init config from LocalStorage
             try {
                 const local = localStorage.getItem('schoolos_system_config');
                 if (local) setSysConfig(JSON.parse(local));
@@ -298,7 +310,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
         }
     }, [focusDocId, docs, onClearFocus]);
 
-    // ... (Keep Attachment Handlers, Create Doc, Delete Doc, Director Action handlers unchanged) ...
     const handleAddFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
@@ -414,7 +425,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
             } else { setDocs([created, ...docs]); }
             if (isOrder && selectedTeachers.length > 0) {
                 const targetUsers = allTeachers.filter(t => selectedTeachers.includes(t.id));
-                // Await here to ensure config fetch inside trigger works
                 await triggerTelegramNotification(targetUsers, docId, created.title, true);
             }
             setIsUploading(false); setUploadProgress('');
@@ -440,30 +450,58 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
 
     const handleDirectorAction = async (isAckOnly: boolean) => {
          if (!selectedDoc) return;
-         const firstAtt = selectedDoc.attachments[0];
-         const canStamp = firstAtt && (firstAtt.fileType === 'application/pdf' || firstAtt.name.toLowerCase().endsWith('.pdf'));
-         setIsSigning(true);
-         setProcessingMessage('กำลังดึงข้อมูลเอกสารเพื่อประทับตรา...');
-         try {
+         
+         const taskId = selectedDoc.id;
+         const taskTitle = selectedDoc.title;
+         const currentCommand = command || 'รับทราบ';
+         const currentTeachers = [...selectedTeachers];
+         const currentStampPage = stampPage;
+
+         // Non-blocking: Add to background task and go back to list immediately
+         const newTask: BackgroundTask = {
+            id: taskId,
+            title: taskTitle,
+            status: 'processing',
+            message: 'กำลังเตรียมไฟล์เพื่อประทับตรา...'
+         };
+         
+         setBackgroundTasks(prev => [...prev, newTask]);
+         setViewMode('LIST'); // Close detail window immediately
+         
+         // Perform async logic in background
+         processDirectorActionInBackground(selectedDoc, isAckOnly, currentCommand, currentTeachers, currentStampPage);
+         
+         // Cleanup input states
+         setCommand('');
+         setSelectedTeachers([]);
+         setStampPage(1);
+    };
+
+    const processDirectorActionInBackground = async (targetDoc: DocumentItem, isAckOnly: boolean, finalCommand: string, targetTeachers: string[], targetPage: number) => {
+        const firstAtt = targetDoc.attachments[0];
+        const canStamp = firstAtt && (firstAtt.fileType === 'application/pdf' || firstAtt.name.toLowerCase().endsWith('.pdf'));
+        const taskId = targetDoc.id;
+
+        try {
             let sigBase64 = sysConfig?.directorSignatureBase64;
             let schoolName = sysConfig?.schoolName;
             let logoBase64 = sysConfig?.schoolLogoBase64;
             let sigScale = sysConfig?.directorSignatureScale || 1;
             let sigYOffset = sysConfig?.directorSignatureYOffset || 0;
             const notifyToText = '';
-            const finalCommand = isAckOnly ? 'รับทราบ' : (command || 'รับทราบ');
+            
             let pdfBase64: string | null = null;
             if (canStamp) {
                  const fileId = getGoogleDriveId(firstAtt.url);
                  const downloadUrl = fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : firstAtt.url;
                  let base64Original = '';
+                 
                  try {
-                     setProcessingMessage('กำลังดึงไฟล์ต้นฉบับผ่าน Proxy (1/2)...');
+                     updateTask(taskId, { message: 'กำลังดึงไฟล์ต้นฉบับผ่าน Proxy (1/2)...' });
                      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(downloadUrl)}`;
                      const resp = await fetch(proxyUrl);
                      if (!resp.ok) throw new Error(`Proxy Fetch failed: ${resp.status}`);
                      const blob = await resp.blob();
-                     if (blob.size < 100) throw new Error("File too small");
                      const reader = new FileReader();
                      base64Original = await new Promise<string>((resolve, reject) => {
                          reader.onload = () => resolve(reader.result as string);
@@ -472,10 +510,9 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                      });
                  } catch (proxyError) {
                      try {
-                         setProcessingMessage('กำลังลองดึงไฟล์ผ่าน Proxy สำรอง (2/2)...');
+                         updateTask(taskId, { message: 'กำลังลองดึงไฟล์ผ่าน Proxy สำรอง (2/2)...' });
                          const backupProxy = `https://corsproxy.io/?${encodeURIComponent(downloadUrl)}`;
                          const resp2 = await fetch(backupProxy);
-                         if (!resp2.ok) throw new Error("Backup Proxy Failed");
                          const blob2 = await resp2.blob();
                          const reader2 = new FileReader();
                          base64Original = await new Promise<string>((resolve) => {
@@ -483,82 +520,71 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                              reader2.readAsDataURL(blob2);
                          });
                      } catch (finalError) {
-                         alert(`ไม่สามารถดึงไฟล์ต้นฉบับได้ (ติด CORS)`);
-                         setIsSigning(false);
-                         return;
+                         throw new Error("ไม่สามารถดึงไฟล์ต้นฉบับได้ (ติด CORS)");
                      }
                  }
-                 setProcessingMessage('กำลังประทับตราลงในไฟล์...');
+
+                 updateTask(taskId, { message: 'กำลังประทับตราและลงนาม...' });
                  pdfBase64 = await stampPdfDocument({
                     fileUrl: base64Original, fileType: 'application/pdf', notifyToText, commandText: finalCommand,
                     directorName: currentUser.name, directorPosition: currentUser.position, signatureImageBase64: sigBase64,
-                    schoolName: schoolName, schoolLogoBase64: logoBase64, targetPage: stampPage,
-                    onStatusChange: setProcessingMessage, signatureScale: sigScale, signatureYOffset: sigYOffset
+                    schoolName: schoolName, schoolLogoBase64: logoBase64, targetPage: targetPage,
+                    onStatusChange: (msg: string) => updateTask(taskId, { message: msg }), 
+                    signatureScale: sigScale, signatureYOffset: sigYOffset
                 });
             } else {
-                 setProcessingMessage('สร้างใบแนบบันทึกข้อสั่งการ...');
+                 updateTask(taskId, { message: 'สร้างใบแนบบันทึกข้อสั่งการ...' });
                  pdfBase64 = await stampPdfDocument({
                     fileUrl: '', fileType: 'new', notifyToText, commandText: finalCommand,
                     directorName: currentUser.name, directorPosition: currentUser.position, signatureImageBase64: sigBase64,
                     schoolName: schoolName, schoolLogoBase64: logoBase64, targetPage: 1,
-                    onStatusChange: (msg) => setProcessingMessage(msg), signatureScale: sigScale, signatureYOffset: sigYOffset
+                    onStatusChange: (msg: string) => updateTask(taskId, { message: msg }), 
+                    signatureScale: sigScale, signatureYOffset: sigYOffset
                 });
             }
-            await finishSigning(pdfBase64, finalCommand);
-         } catch (error) {
-            console.error("PDF Generation Error", error);
-            alert("Error: " + (error as Error).message);
-            setIsSigning(false);
-         }
-    };
 
-    const finishSigning = async (signedBase64: string | null, finalCommand: string) => {
-        if (!selectedDoc) return;
-        let signedUrl = null;
-        if (signedBase64 && sysConfig?.scriptUrl && sysConfig?.driveFolderId) {
-            setProcessingMessage('กำลังอัปโหลดไฟล์ที่ลงนามแล้ว...');
-            try {
-                const bookNumDigits = selectedDoc.bookNumber.replace(/\D/g, '');
-                const dateDigits = formatDateForFilename(selectedDoc.date); 
-                const finalFilename = `stamp${bookNumDigits}${dateDigits}.pdf`;
-                const base64Content = signedBase64.split(',')[1] || signedBase64;
-                const payload = { folderId: sysConfig.driveFolderId, filename: finalFilename, mimeType: 'application/pdf', base64: base64Content };
-                const response = await fetch(sysConfig.scriptUrl, { method: 'POST', body: JSON.stringify(payload) });
-                const result = await response.json();
-                if (result.status === 'success') { signedUrl = result.viewUrl || result.url; }
-            } catch (e) { console.error("Upload signed PDF failed", e); }
-        } else if (signedBase64) { signedUrl = signedBase64; }
+            // Finish Signing
+            updateTask(taskId, { status: 'uploading', message: 'กำลังอัปโหลดไฟล์ที่ลงนามแล้ว...' });
+            
+            let signedUrl = null;
+            if (pdfBase64 && sysConfig?.scriptUrl && sysConfig?.driveFolderId) {
+                try {
+                    const bookNumDigits = targetDoc.bookNumber.replace(/\D/g, '');
+                    const dateDigits = formatDateForFilename(targetDoc.date); 
+                    const finalFilename = `signed_${bookNumDigits}_${dateDigits}.pdf`;
+                    const base64Content = pdfBase64.split(',')[1] || pdfBase64;
+                    const payload = { folderId: sysConfig.driveFolderId, filename: finalFilename, mimeType: 'application/pdf', base64: base64Content };
+                    const response = await fetch(sysConfig.scriptUrl, { method: 'POST', body: JSON.stringify(payload) });
+                    const result = await response.json();
+                    if (result.status === 'success') { signedUrl = result.viewUrl || result.url; }
+                } catch (e) { console.error("Upload signed PDF failed", e); }
+            }
 
-        const nowStr = new Date().toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
-        const updateData: any = { directorCommand: finalCommand || '', directorSignatureDate: nowStr, targetTeachers: selectedTeachers, status: 'Distributed' };
-        if (signedUrl) { updateData.signedFileUrl = signedUrl; }
+            const nowStr = new Date().toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+            const updateData: any = { directorCommand: finalCommand, directorSignatureDate: nowStr, targetTeachers: targetTeachers, status: 'Distributed' };
+            if (signedUrl) { updateData.signedFileUrl = signedUrl; }
 
-        if (isConfigured && db) {
-            try {
-                const qFind = query(collection(db, "documents"), where("id", "==", selectedDoc.id));
+            if (isConfigured && db) {
+                const qFind = query(collection(db, "documents"), where("id", "==", targetDoc.id));
                 const snapshot = await getDocs(qFind);
                 if (!snapshot.empty) {
-                    const docRef = snapshot.docs[0].ref;
-                    await updateDoc(docRef, updateData);
-                    if (selectedTeachers.length > 0) {
-                        const targetUsers = allTeachers.filter(t => selectedTeachers.includes(t.id));
-                        // Fetch config fresh here too
-                        await triggerTelegramNotification(targetUsers, selectedDoc.id, selectedDoc.title, false);
+                    await updateDoc(snapshot.docs[0].ref, updateData);
+                    if (targetTeachers.length > 0) {
+                        const targetUsers = allTeachers.filter(t => targetTeachers.includes(t.id));
+                        await triggerTelegramNotification(targetUsers, targetDoc.id, targetDoc.title, false);
                     }
-                    cleanupAfterSign();
-                    setTimeout(() => alert("ลงนามและสั่งการเรียบร้อยแล้ว"), 100);
                 }
-            } catch (e) { cleanupAfterSign(); alert("เกิดข้อผิดพลาดในการบันทึก (Firebase)"); }
-        } else {
-             const updatedDocs = docs.map(d => d.id === selectedDoc.id ? { ...d, ...updateData } as DocumentItem : d);
-            setDocs(updatedDocs);
-            cleanupAfterSign();
-            setTimeout(() => alert("ลงนามเรียบร้อย (Offline)"), 100);
-        }
-    };
+            } else {
+                setDocs(prev => prev.map(d => d.id === targetDoc.id ? { ...d, ...updateData } as DocumentItem : d));
+            }
 
-    const cleanupAfterSign = () => {
-        setIsSigning(false); setViewMode('LIST'); setCommand(''); setSelectedTeachers([]); setSelectedDoc(null); setStampPage(1); setTeacherSearchTerm('');
+            updateTask(taskId, { status: 'done', message: 'ดำเนินการสั่งการสำเร็จ' });
+            removeTask(taskId);
+
+        } catch (error) {
+            console.error("Background PDF Error", error);
+            updateTask(taskId, { status: 'error', message: (error as Error).message });
+        }
     };
 
     const handleTeacherAcknowledge = async (targetDocId?: string) => {
@@ -589,10 +615,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
         if (!targetDocId) setViewMode('LIST');
     };
     
-    const handleOpenAndAck = async (doc: DocumentItem, url: string) => {
+    const handleOpenAndAck = async (docItem: DocumentItem, url: string) => {
         if (!url) return;
         window.open(url, '_blank');
-        if (!doc.acknowledgedBy.includes(currentUser.id)) { await handleTeacherAcknowledge(doc.id); }
+        if (!docItem.acknowledgedBy.includes(currentUser.id)) { await handleTeacherAcknowledge(docItem.id); }
     };
     
     const handleSelectAllTeachers = (checked: boolean) => {
@@ -626,7 +652,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
 
     const goToPage = (p: number) => { if (p >= 1 && p <= totalPages) setCurrentPage(p); };
 
-    // --- Filter Teachers for Selection ---
     const filteredTeachers = allTeachers.filter(t => 
         t.name.toLowerCase().includes(teacherSearchTerm.toLowerCase()) || 
         t.position.toLowerCase().includes(teacherSearchTerm.toLowerCase())
@@ -635,8 +660,37 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
     if (isLoading) return <div className="p-10 text-center text-slate-500"><Loader className="animate-spin inline mr-2"/> กำลังโหลดข้อมูล...</div>;
 
     return (
-        <div className="space-y-6 animate-fade-in pb-10">
-            {/* Header */}
+        <div className="space-y-6 animate-fade-in pb-10 relative">
+            {/* Background Task Queue UI */}
+            {backgroundTasks.length > 0 && (
+                <div className="fixed bottom-20 right-6 z-[60] w-72 flex flex-col gap-2 pointer-events-none">
+                    {backgroundTasks.map(task => (
+                        <div key={task.id} className={`p-3 rounded-xl shadow-2xl border flex flex-col gap-2 animate-slide-up pointer-events-auto transition-all ${
+                            task.status === 'done' ? 'bg-emerald-50 border-emerald-200' : 
+                            task.status === 'error' ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'
+                        }`}>
+                            <div className="flex justify-between items-start">
+                                <div className="flex items-center gap-2">
+                                    {task.status === 'done' ? <CheckCircle className="text-emerald-600" size={16}/> : 
+                                     task.status === 'error' ? <AlertTriangle className="text-red-600" size={16}/> : 
+                                     <Loader className="animate-spin text-blue-600" size={16}/>}
+                                    <span className="text-xs font-bold text-slate-700 truncate max-w-[180px]">{task.title}</span>
+                                </div>
+                                {task.status === 'error' && <button onClick={() => removeTask(task.id)} className="text-slate-400 hover:text-slate-600"><X size={14}/></button>}
+                            </div>
+                            <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+                                <div className={`h-full transition-all duration-500 ${
+                                    task.status === 'done' ? 'bg-emerald-500 w-full' : 
+                                    task.status === 'error' ? 'bg-red-500 w-full' : 
+                                    task.status === 'uploading' ? 'bg-orange-500 w-2/3' : 'bg-blue-500 w-1/3'
+                                }`}></div>
+                            </div>
+                            <p className={`text-[10px] ${task.status === 'error' ? 'text-red-600' : 'text-slate-500'}`}>{task.message}</p>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-800 text-white p-4 rounded-xl">
                 <div>
                     <h2 className="text-xl font-bold">ระบบงานสารบรรณอิเล็กทรอนิกส์</h2>
@@ -644,7 +698,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 </div>
             </div>
 
-            {/* --- LIST VIEW --- */}
             {viewMode === 'LIST' && (
                 <>
                     <div className="flex justify-between items-center">
@@ -662,39 +715,51 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                     <div className="grid grid-cols-1 gap-4">
                         {displayedDocs.length === 0 ? (
                             <div className="text-center py-10 text-slate-400 bg-white rounded-xl">ไม่มีหนังสือราชการ</div>
-                        ) : displayedDocs.map((doc, index) => {
-                             const isUnread = doc.status === 'Distributed' && doc.targetTeachers.includes(currentUser.id) && !doc.acknowledgedBy.includes(currentUser.id);
-                             const isAcknowledged = doc.status === 'Distributed' && doc.acknowledgedBy.includes(currentUser.id);
-                             const isOrder = doc.category === 'ORDER';
-                             const isNewForDirector = isDirector && doc.status === 'PendingDirector';
+                        ) : displayedDocs.map((docItem, index) => {
+                             const isUnread = docItem.status === 'Distributed' && docItem.targetTeachers.includes(currentUser.id) && !docItem.acknowledgedBy.includes(currentUser.id);
+                             const isAcknowledged = docItem.status === 'Distributed' && docItem.acknowledgedBy.includes(currentUser.id);
+                             const isOrder = docItem.category === 'ORDER';
+                             const isNewForDirector = isDirector && docItem.status === 'PendingDirector';
                              
+                             // Check if this doc is currently being processed in background
+                             const backgroundTask = backgroundTasks.find(t => t.id === docItem.id);
+                             const isProcessing = backgroundTask && (backgroundTask.status === 'processing' || backgroundTask.status === 'uploading');
+
                              return (
-                                <div key={doc.id}
+                                <div key={docItem.id}
                                     className={`p-4 rounded-xl shadow-sm border transition-all relative overflow-hidden group
-                                        ${doc.status === 'PendingDirector' && isDirector ? 'border-l-4 border-l-yellow-400' : 'border-slate-200'}
+                                        ${docItem.status === 'PendingDirector' && isDirector ? 'border-l-4 border-l-yellow-400 shadow-md' : 'border-slate-200'}
                                         ${index % 2 === 1 ? 'bg-blue-50' : 'bg-white'}
+                                        ${isProcessing ? 'opacity-70 pointer-events-none' : ''}
                                     `}
                                 >
-                                    {/* DISTINCT NEW BADGE FOR DIRECTOR */}
-                                    {isNewForDirector && (
+                                    {isNewForDirector && !isProcessing && (
                                         <div className="absolute top-0 right-0 bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-bl-lg shadow-md z-20 flex items-center gap-1 animate-pulse">
                                             <Bell size={12} className="fill-current"/> หนังสือเข้าใหม่ !
                                         </div>
                                     )}
 
-                                    {/* ... Document Card Content ... */}
-                                    <div className="flex justify-between items-start cursor-pointer" onClick={() => { setSelectedDoc(doc); setViewMode('DETAIL'); }}>
+                                    {isProcessing && (
+                                        <div className="absolute top-0 left-0 w-full h-full bg-blue-500/5 z-10 flex items-center justify-center pointer-events-none">
+                                            <div className="bg-white/80 px-4 py-2 rounded-full shadow-lg border border-blue-100 flex items-center gap-3">
+                                                <Loader size={18} className="animate-spin text-blue-600" />
+                                                <span className="text-xs font-bold text-blue-700">กำลังประมวลผล... ({backgroundTask.message})</span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="flex justify-between items-start cursor-pointer" onClick={() => { setSelectedDoc(docItem); setViewMode('DETAIL'); }}>
                                         <div className="flex items-start gap-4">
-                                            <div className={`p-3 rounded-lg ${doc.status === 'Distributed' ? (isOrder ? 'bg-indigo-100 text-indigo-600' : 'bg-green-50 text-green-600') : 'bg-slate-100 text-slate-500'}`}>
+                                            <div className={`p-3 rounded-lg ${docItem.status === 'Distributed' ? (isOrder ? 'bg-indigo-100 text-indigo-600' : 'bg-green-50 text-green-600') : 'bg-slate-100 text-slate-500'}`}>
                                                 {isOrder ? <Megaphone size={24}/> : <FileText size={24} />}
                                             </div>
                                             <div>
                                                 <div className="flex items-center gap-2 mb-1">
                                                     <span className={`text-xs font-mono px-2 py-0.5 rounded ${isOrder ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                        {isOrder ? 'เลขที่คำสั่ง' : 'รับที่'}: {doc.bookNumber}
+                                                        {isOrder ? 'เลขที่คำสั่ง' : 'รับที่'}: {docItem.bookNumber}
                                                     </span>
-                                                    <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${getPriorityColor(doc.priority)}`}>
-                                                        {getPriorityLabel(doc.priority)}
+                                                    <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${getPriorityColor(docItem.priority)}`}>
+                                                        {getPriorityLabel(docItem.priority)}
                                                     </span>
                                                     {isUnread && (
                                                         <span className="bg-red-600 text-white text-[10px] px-2 py-1 rounded-full animate-pulse font-bold shadow-sm">
@@ -707,62 +772,61 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                                         </span>
                                                     )}
                                                 </div>
-                                                <h3 className="font-bold text-slate-800 text-lg group-hover:text-blue-600 transition-colors">{doc.title}</h3>
-                                                <p className="text-sm text-slate-500 line-clamp-1">{doc.description}</p>
+                                                <h3 className="font-bold text-slate-800 text-lg group-hover:text-blue-600 transition-colors">{docItem.title}</h3>
+                                                <p className="text-sm text-slate-500 line-clamp-1">{docItem.description}</p>
                                                 
-                                                {(isDirector || isDocOfficer) && doc.status === 'Distributed' && (
+                                                {(isDirector || isDocOfficer) && docItem.status === 'Distributed' && (
                                                     <div className="mt-2 text-xs font-bold text-green-600 flex items-center gap-1">
                                                         <CheckCircle size={12} />
-                                                        รับทราบแล้ว {doc.acknowledgedBy.length}/{doc.targetTeachers.length} ท่าน
-                                                        {doc.acknowledgedBy.length === doc.targetTeachers.length && <span className="text-green-500 ml-1">(ครบถ้วน)</span>}
+                                                        รับทราบแล้ว {docItem.acknowledgedBy.length}/{docItem.targetTeachers.length} ท่าน
+                                                        {docItem.acknowledgedBy.length === docItem.targetTeachers.length && <span className="text-green-500 ml-1">(ครบถ้วน)</span>}
                                                     </div>
                                                 )}
 
                                                 <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
-                                                    <span>จาก: {doc.from}</span>
-                                                    <span>{doc.date}</span>
+                                                    <span>จาก: {docItem.from}</span>
+                                                    <span>{docItem.date}</span>
                                                 </div>
                                             </div>
                                         </div>
                                         <div className="flex flex-col items-end gap-2">
-                                            {/* Hide 'Pending' Tag for Director if we show the Red Badge instead, or keep both? Keep tag for clarity but maybe redundant */}
-                                            {!isNewForDirector && doc.status === 'PendingDirector' && (
+                                            {!isNewForDirector && docItem.status === 'PendingDirector' && (
                                                 <span className="bg-yellow-100 text-yellow-700 text-xs px-2 py-1 rounded-full flex items-center gap-1">
                                                     <Users size={12} /> รอเกษียณ
                                                 </span>
                                             )}
-                                            {doc.attachments && doc.attachments.length > 0 && (
+                                            {docItem.attachments && docItem.attachments.length > 0 && (
                                                  <span className="text-xs text-slate-400 flex items-center gap-1">
-                                                    <LinkIcon size={12}/> {doc.attachments.length} ไฟล์
+                                                    <LinkIcon size={12}/> {docItem.attachments.length} ไฟล์
                                                  </span>
                                             )}
-                                            {(isSystemAdmin || (isDocOfficer && (doc.status === 'PendingDirector' || isOrder))) && (
-                                                <button onClick={(e) => handleDeleteDoc(e, doc.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors z-10">
+                                            {(isSystemAdmin || (isDocOfficer && (docItem.status === 'PendingDirector' || isOrder))) && (
+                                                <button onClick={(e: any) => handleDeleteDoc(e, docItem.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors z-10">
                                                     <Trash2 size={18} />
                                                 </button>
                                             )}
                                         </div>
                                     </div>
                                     
-                                    {(!isDirector) && doc.status === 'Distributed' && (
+                                    {(!isDirector) && docItem.status === 'Distributed' && (
                                         <div className="mt-4 pt-3 border-t border-slate-100">
                                             <p className="text-xs text-slate-500 mb-2 font-bold">เอกสารแนบ (คลิกเพื่อเปิดและรับทราบ)</p>
                                             <div className="flex flex-col gap-2">
-                                                {doc.signedFileUrl && (
-                                                    <button onClick={(e) => { e.stopPropagation(); handleOpenAndAck(doc, doc.signedFileUrl!); }} className="w-full flex items-center justify-between p-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg group transition-all">
+                                                {docItem.signedFileUrl && (
+                                                    <button onClick={(e) => { e.stopPropagation(); handleOpenAndAck(docItem, docItem.signedFileUrl!); }} className="w-full flex items-center justify-between p-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg group transition-all">
                                                         <div className="flex items-center gap-3">
                                                             <div className="bg-white p-2 rounded-full text-emerald-600 shadow-sm"><FileCheck size={20}/></div>
                                                             <div className="text-left">
                                                                 <div className="font-bold text-emerald-900 text-sm">เอกสารฉบับที่ 1 (บันทึกข้อสั่งการ)</div>
-                                                                <div className="text-[10px] text-emerald-500">{`stamp${doc.bookNumber.replace(/\D/g,'')}${formatDateForFilename(doc.date)}.pdf`}</div>
+                                                                <div className="text-[10px] text-emerald-500">{`stamp${docItem.bookNumber.replace(/\D/g,'')}${formatDateForFilename(docItem.date)}.pdf`}</div>
                                                             </div>
                                                         </div>
                                                     </button>
                                                 )}
-                                                {doc.attachments.map((att, index) => {
-                                                    const displayIndex = doc.signedFileUrl ? index + 2 : index + 1;
+                                                {docItem.attachments.map((att, idx) => {
+                                                    const displayIndex = docItem.signedFileUrl ? idx + 2 : idx + 1;
                                                     return (
-                                                        <button key={index} onClick={(e) => { e.stopPropagation(); handleOpenAndAck(doc, att.url); }} className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg group transition-all">
+                                                        <button key={idx} onClick={(e) => { e.stopPropagation(); handleOpenAndAck(docItem, att.url); }} className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg group transition-all">
                                                             <div className="flex items-center gap-3">
                                                                 <div className="bg-white p-2 rounded-full shadow-sm">{getFileIcon(att.name, att.type as 'FILE'|'LINK', 20)}</div>
                                                                 <div className="text-left"><div className="font-bold text-slate-700 text-sm">เอกสารฉบับที่ {displayIndex}</div><div className="text-[10px] text-slate-400 truncate max-w-[200px]">{att.name}</div></div>
@@ -772,7 +836,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                                     );
                                                 })}
                                             </div>
-                                            {doc.acknowledgedBy.includes(currentUser.id) && (
+                                            {docItem.acknowledgedBy.includes(currentUser.id) && (
                                                 <div className="mt-2 flex items-center justify-center gap-1 text-green-600 font-bold text-xs bg-green-50 px-2 py-1 rounded-full border border-green-100">
                                                     <CheckCircle size={12}/> ท่านได้รับทราบหนังสือฉบับนี้แล้ว
                                                 </div>
@@ -794,10 +858,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 </>
             )}
 
-            {/* ... (Create View remains same) ... */}
             {viewMode === 'CREATE' && (
-                <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6 max-w-4xl mx-auto">
-                    {/* ... (Create Form content, omitted for brevity as requested to focus on Director UI) ... */}
+                <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6 max-w-4xl mx-auto relative">
                     {isUploading && (
                         <div className="absolute inset-0 bg-white/90 z-50 flex items-center justify-center flex-col rounded-xl">
                             <Loader className="animate-spin text-blue-600 mb-2" size={40} />
@@ -812,9 +874,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                             <button type="button" onClick={() => setDocCategory('ORDER')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${docCategory === 'ORDER' ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:text-slate-700'}`}><Megaphone size={16}/> บันทึกคำสั่งปฏิบัติราชการ</button>
                         </div>
                     </div>
-                    {/* ... Form fields ... */}
                     <form onSubmit={handleCreateDoc} className="space-y-4">
-                        {/* ... (Same as original) ... */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-4">
                                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
@@ -837,7 +897,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                     <div className="flex flex-col gap-2"><input type="text" placeholder="ชื่อเอกสาร (ถ้ามี)" value={linkNameInput} onChange={e => setLinkNameInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm focus:ring-1 outline-none"/><div className="flex gap-2"><input type="text" placeholder="วางลิงก์ https://..." value={linkInput} onChange={e => setLinkInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm focus:ring-1 outline-none"/><button type="button" onClick={handleAddLink} className="bg-slate-600 text-white px-3 py-2 rounded hover:bg-slate-700"><Plus size={16}/></button></div></div>
                                 </div>
                                 {docCategory === 'ORDER' && (
-                                    // Use new Recipient UI here as well if you want consistent design, but kept simple here for now
                                     <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-200 flex-1 flex flex-col">
                                         <div className="flex justify-between items-center mb-2">
                                             <h4 className="font-bold text-indigo-900 flex items-center gap-2"><Users size={18}/> ผู้รับปฏิบัติ (ส่งทันที)</h4>
@@ -855,19 +914,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                 </div>
             )}
 
-            {/* --- DETAIL VIEW --- */}
             {viewMode === 'DETAIL' && selectedDoc && (
                 <div className={`max-w-4xl mx-auto space-y-6 ${isHighlighted ? 'ring-4 ring-blue-300 rounded-xl transition-all duration-500' : ''}`}>
-                     {/* Overlay Loader for Signing */}
-                     {isSigning && (
-                        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center flex-col text-white">
-                            <Loader className="animate-spin mb-4" size={48}/>
-                            <h3 className="text-xl font-bold">{processingMessage || 'กำลังประมวลผล...'}</h3>
-                            <p className="text-slate-300">กรุณารอสักครู่ ระบบกำลังดึงไฟล์ต้นฉบับจาก Google Drive และประทับตรา</p>
-                        </div>
-                    )}
-
-                    {/* Header */}
                     <div className="flex items-center gap-4">
                         <button onClick={() => setViewMode('LIST')} className="p-2 hover:bg-slate-200 rounded-full text-slate-600">
                             <ArrowLeft size={24}/>
@@ -875,9 +923,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                         <h2 className="text-2xl font-bold text-slate-800">รายละเอียดหนังสือราชการ</h2>
                     </div>
 
-                    {/* 1. Files List */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        {/* ... (File list display same as before) ... */}
                         <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><LinkIcon size={20}/> เอกสารแนบ (แตะเพื่อเปิด)</h3>
                         <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-2 text-sm text-blue-800"><AlertTriangle size={16} className="shrink-0 mt-0.5" /><p>การคลิกเปิดอ่านไฟล์เอกสาร จะถือว่าท่าน <strong>"รับทราบ"</strong> หนังสือฉบับนี้โดยอัตโนมัติ</p></div>
                         <div className="flex flex-col gap-3">
@@ -888,14 +934,13 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                 const fileLabel = `เอกสารฉบับที่ ${idx + 1}${showSigned ? ' (ลงนามแล้ว)' : ''}`;
                                 return (
                                     <button key={idx} onClick={() => handleOpenAndAck(selectedDoc, targetUrl || '')} className={`w-full p-4 text-white rounded-xl shadow-md active:scale-[0.98] transition-all flex items-center justify-between group ${showSigned ? 'bg-emerald-600 hover:bg-emerald-700 border-2 border-emerald-400' : (selectedDoc.category === 'ORDER' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-blue-600 hover:bg-blue-700')}`}>
-                                        <div className="flex items-center gap-4"><div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">{showSigned ? <CheckCircle size={28}/> : getFileIcon(att.name, att.type as 'FILE'|'LINK', 28, false)}</div><div className="text-left"><div className="font-bold text-lg">{fileLabel}</div><div className="text-sm opacity-90 truncate max-w-[200px] md:max-w-md">{att.name}</div></div></div><div className="flex items-center gap-2 bg-white/10 px-3 py-1 rounded-full text-xs font-medium"><MousePointerClick size={14}/> แตะเปิด</div>
+                                        <div className="flex items-center gap-4"><div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">{showSigned ? <CheckCircle size={28}/> : getFileIcon(att.name, att.type as 'FILE'|'LINK', 28, false)}</div><div className="text-left"><div className="font-bold text-lg">{fileLabel}</div><div className="text-sm opacity-90 truncate max-w-[200px] md:max-w-md">{att.name}</div></div></div><div className="flex items-center gap-2 bg-white/10 px-3 py-1 rounded-full text-xs font-medium"><MousePointerClick size={14}/> แแตะเปิด</div>
                                     </button>
                                 );
                             })}
                         </div>
                     </div>
 
-                    {/* 2. Document Details (Same as before) */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                         <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><FileText size={20}/> รายละเอียดหนังสือ</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm">
@@ -909,9 +954,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                         </div>
                     </div>
 
-                    {/* 3. Action Panel (Director / Teacher) */}
-                    
-                    {/* ROLE: DIRECTOR ACTIONS - IMPROVED UI FOR RECIPIENT SELECTION */}
                     {isDirector && selectedDoc.status === 'PendingDirector' && selectedDoc.category !== 'ORDER' && (
                         <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 shadow-sm animate-fade-in">
                             <div className="flex items-center gap-2 mb-4 text-blue-900 border-b border-blue-200 pb-2">
@@ -920,7 +962,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                             </div>
                             
                             <div className="grid grid-cols-1 gap-6">
-                                {/* Command Input - Full Width */}
                                 <div>
                                     <label className="block text-sm font-bold text-blue-900 mb-2">ข้อความสั่งการ</label>
                                     <textarea 
@@ -931,7 +972,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                     ></textarea>
                                 </div>
                                 
-                                {/* Improved Teacher Selection UI */}
                                 <div className="bg-white rounded-xl border border-blue-100 p-4 shadow-sm">
                                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-3">
                                         <label className="block text-sm font-bold text-blue-900 flex items-center gap-2">
@@ -958,7 +998,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                         </div>
                                     </div>
 
-                                    {/* Grid Layout for Teachers */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-60 overflow-y-auto custom-scrollbar p-1">
                                         {filteredTeachers.map(t => {
                                             const isSelected = selectedTeachers.includes(t.id);
@@ -996,11 +1035,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                                     </div>
                                 </div>
 
-                                {/* Page Selection */}
                                 <div className="flex justify-end">
                                     <div className="flex items-center gap-3 bg-white p-2 rounded-lg border border-blue-100 shadow-sm">
                                         <span className="text-xs font-bold text-slate-500">หน้าที่จะประทับตรา:</span>
-                                        <button onClick={() => setStampPage(Math.max(1, stampPage - 1))} className="p-1 bg-slate-100 rounded hover:bg-slate-200"><ArrowLeft size={16}/></button>
+                                        <button onClick={() => setStampPage(Math.max(1, stampPage - 1))} className="p-1 bg-slate-100 rounded hover:bg-slate-200"><ChevronLeft size={16}/></button>
                                         <span className="font-bold text-blue-800 text-lg w-8 text-center">{stampPage}</span>
                                         <button onClick={() => setStampPage(stampPage + 1)} className="p-1 bg-slate-100 rounded hover:bg-slate-200"><Plus size={16}/></button>
                                     </div>
@@ -1008,10 +1046,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                             </div>
 
                             <div className="flex gap-3 mt-6">
-                                <button onClick={() => handleDirectorAction(true)} disabled={isSigning} className="flex-1 py-3 bg-white border-2 border-green-600 text-green-600 rounded-xl hover:bg-green-50 font-bold flex items-center justify-center gap-2 transition-all shadow-sm">
+                                <button onClick={() => handleDirectorAction(true)} className="flex-1 py-3 bg-white border-2 border-green-600 text-green-600 rounded-xl hover:bg-green-50 font-bold flex items-center justify-center gap-2 transition-all shadow-sm">
                                     <FileCheck size={20}/> รับทราบ (ไม่ต้องพิมพ์)
                                 </button>
-                                <button onClick={() => handleDirectorAction(false)} disabled={isSigning} className="flex-1 py-3 bg-blue-600 text-white rounded-xl shadow-lg hover:bg-blue-700 font-bold flex items-center justify-center gap-2 transition-all hover:shadow-xl">
+                                <button onClick={() => handleDirectorAction(false)} className="flex-1 py-3 bg-blue-600 text-white rounded-xl shadow-lg hover:bg-blue-700 font-bold flex items-center justify-center gap-2 transition-all hover:shadow-xl">
                                     <PenTool size={20}/> ลงนามสั่งการ
                                 </button>
                             </div>
@@ -1019,7 +1057,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, allTeach
                         </div>
                     )}
 
-                    {/* ... (Teacher Acknowledge & Status Sections remain same) ... */}
                     {!isDirector && selectedDoc.status === 'Distributed' && !selectedDoc.acknowledgedBy.includes(currentUser.id) && selectedDoc.targetTeachers.includes(currentUser.id) && (
                         <div className="bg-orange-50 p-6 rounded-xl border border-orange-200 shadow-sm animate-fade-in text-center">
                             <h4 className="font-bold text-orange-800 flex items-center justify-center gap-2 text-lg mb-2"><Eye size={24}/> ยืนยันการรับทราบ</h4>
