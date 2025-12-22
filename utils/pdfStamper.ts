@@ -14,9 +14,14 @@ export const toThaiDigits = (num: string | number): string => {
 export const dataURItoUint8Array = (dataURI: string) => {
     try {
         if (!dataURI) return new Uint8Array(0);
-        const split = dataURI.split(',');
-        const base64 = split.length > 1 ? split[1] : dataURI;
-        const byteString = atob(base64);
+        
+        // Remove whitespace and potential hidden characters
+        const cleanURI = dataURI.trim();
+        const split = cleanURI.split(',');
+        const base64 = split.length > 1 ? split[1] : cleanURI;
+        
+        // Final sanity check for atob
+        const byteString = atob(base64.replace(/\s/g, ''));
         const ab = new ArrayBuffer(byteString.length);
         const ia = new Uint8Array(ab);
         for (let i = 0; i < byteString.length; i++) {
@@ -132,7 +137,7 @@ export const stampReceiveNumber = async ({ fileBase64, bookNumber, date, time, s
         try {
             const logoBytes = dataURItoUint8Array(schoolLogoBase64);
             let logoImage;
-            if(schoolLogoBase64.includes('png')) logoImage = await pdfDoc.embedPng(logoBytes);
+            if(schoolLogoBase64.toLowerCase().includes('png')) logoImage = await pdfDoc.embedPng(logoBytes);
             else logoImage = await pdfDoc.embedJpg(logoBytes);
             
             const logoDim = logoImage.scaleToFit(20, 20);
@@ -214,7 +219,7 @@ export const stampPdfDocument = async ({
         const page = pdfDoc.addPage();
         const imageBytes = dataURItoUint8Array(fileUrl);
         let embeddedImage;
-        if (fileType?.includes('png')) embeddedImage = await pdfDoc.embedPng(imageBytes);
+        if (fileType?.toLowerCase().includes('png')) embeddedImage = await pdfDoc.embedPng(imageBytes);
         else embeddedImage = await pdfDoc.embedJpg(imageBytes);
         const { width, height } = embeddedImage.scaleToFit(page.getWidth(), page.getHeight());
         page.drawImage(embeddedImage, { x: (page.getWidth() - width) / 2, y: page.getHeight() - height, width, height });
@@ -291,7 +296,10 @@ export const stampPdfDocument = async ({
     if (signatureImageBase64) {
         try {
             const sigBytes = dataURItoUint8Array(signatureImageBase64);
-            const sigImage = await pdfDoc.embedPng(sigBytes);
+            let sigImage;
+            if (signatureImageBase64.toLowerCase().includes('png')) sigImage = await pdfDoc.embedPng(sigBytes);
+            else sigImage = await pdfDoc.embedJpg(sigBytes);
+
             const maxSigWidth = 80 * (signatureScale || 1);
             const maxSigHeight = 40 * (signatureScale || 1);
             const sigDims = sigImage.scaleToFit(maxSigWidth, maxSigHeight);
@@ -380,7 +388,7 @@ export const generateOfficialLeavePdf = async (options: LeavePdfOptions): Promis
         let garudaImage;
         if (officialGarudaBase64) {
              const gBytes = dataURItoUint8Array(officialGarudaBase64);
-             if (officialGarudaBase64.includes('png')) garudaImage = await pdfDoc.embedPng(gBytes);
+             if (officialGarudaBase64.toLowerCase().includes('png')) garudaImage = await pdfDoc.embedPng(gBytes);
              else garudaImage = await pdfDoc.embedJpg(gBytes);
         } else {
              const garudaUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Emblem_of_the_Ministry_of_Education_of_Thailand.svg/1200px-Emblem_of_the_Ministry_of_Education_of_Thailand.svg.png";
@@ -472,10 +480,15 @@ export const generateOfficialLeavePdf = async (options: LeavePdfOptions): Promis
     if (teacherSignatureBase64) {
         try {
             const tSigBytes = dataURItoUint8Array(teacherSignatureBase64);
-            const tSigImage = await pdfDoc.embedPng(tSigBytes);
+            let tSigImage;
+            if (teacherSignatureBase64.toLowerCase().includes('png')) tSigImage = await pdfDoc.embedPng(tSigBytes);
+            else tSigImage = await pdfDoc.embedJpg(tSigBytes);
+            
             const tSigDim = tSigImage.scaleToFit(100, 40);
             page.drawImage(tSigImage, { x: blockCenterX - (tSigDim.width / 2), y: currentY, width: tSigDim.width, height: tSigDim.height });
-        } catch(e) {}
+        } catch(e) {
+            console.warn("Could not embed teacher signature", e);
+        }
     } else {
         const dotLine = "(.......................................................)";
         const dotWidth = thaiFont.widthOfTextAtSize(dotLine, fontSize);
@@ -548,21 +561,45 @@ export const generateOfficialLeavePdf = async (options: LeavePdfOptions): Promis
     page.drawText(commentHeader, { x: dirX + (220 - commentW)/2, y: dirTextY, size: 14, font: thaiFont, color: rgb(0,0,0) });
     dirTextY -= 25;
 
-    const isApproved = req.status === 'Approved';
+    // ตรวจสอบสถานะการอนุมัติแบบ Case-insensitive เผื่อความผิดพลาด
+    const isApproved = req.status?.toLowerCase() === 'approved';
+    const isRejected = req.status?.toLowerCase() === 'rejected';
+
     page.drawText(isApproved ? "[ / ] อนุญาต" : "[   ] อนุญาต", { x: dirX + 20, y: dirTextY, size: 14, font: thaiFont });
     dirTextY -= 20;
-    page.drawText(!isApproved && req.status === 'Rejected' ? "[ / ] ไม่อนุมัติ" : "[   ] ไม่อนุมัติ", { x: dirX + 20, y: dirTextY, size: 14, font: thaiFont });
+    page.drawText(isRejected ? "[ / ] ไม่อนุมัติ" : "[   ] ไม่อนุมัติ", { x: dirX + 20, y: dirTextY, size: 14, font: thaiFont });
     dirTextY -= 30; 
 
     if (isApproved && directorSignatureBase64) {
         try {
             const dSigBytes = dataURItoUint8Array(directorSignatureBase64);
-            const dSigImage = await pdfDoc.embedPng(dSigBytes);
-            const scale = options.directorSignatureScale || 1;
-            const dSigDim = dSigImage.scaleToFit(80 * scale, 40 * scale);
-            const yOffset = options.directorSignatureYOffset || 0;
-            page.drawImage(dSigImage, { x: dirX + (220 - dSigDim.width)/2, y: dirTextY + yOffset, width: dSigDim.width, height: dSigDim.height });
-        } catch(e) {}
+            let dSigImage;
+            
+            // พยายามโหลด PNG ก่อน ถ้าล้มเหลวให้ลอง JPG
+            try {
+                if (directorSignatureBase64.toLowerCase().includes('png')) {
+                    dSigImage = await pdfDoc.embedPng(dSigBytes);
+                } else {
+                    dSigImage = await pdfDoc.embedJpg(dSigBytes);
+                }
+            } catch (embedError) {
+                // Fallback attempt
+                try {
+                    dSigImage = await pdfDoc.embedPng(dSigBytes);
+                } catch {
+                    dSigImage = await pdfDoc.embedJpg(dSigBytes);
+                }
+            }
+
+            if (dSigImage) {
+                const scale = options.directorSignatureScale || 1;
+                const dSigDim = dSigImage.scaleToFit(80 * scale, 40 * scale);
+                const yOffset = options.directorSignatureYOffset || 0;
+                page.drawImage(dSigImage, { x: dirX + (220 - dSigDim.width)/2, y: dirTextY + yOffset, width: dSigDim.width, height: dSigDim.height });
+            }
+        } catch(e) {
+            console.error("PDF: Director signature embed failed", e);
+        }
     } 
     
     dirTextY -= 20;
@@ -642,10 +679,8 @@ export const generateLeaveSummaryPdf = async (options: SummaryPdfOptions): Promi
     const margin = 50;
     const contentWidth = width - (2 * margin);
 
-    // Dynamic Intro Text Construction (No redundant "โรงเรียน")
     const intro = `ตามที่ ${schoolName} จะดำเนินการประเมินประสิทธิภาพและประสิทธิผลการปฏิบัติงานของข้าราชการครูและบุคลากรทางการศึกษา เพื่อประกอบการพิจารณาเลื่อนเงินเดือน (${startThai} ถึง ${endThai}) ในการนี้ เพื่อให้การดำเนินการเป็นไปด้วยความเรียบร้อยและถูกต้องตามระเบียบ ก.ค.ศ. ว่าด้วยการเลื่อนเงินเดือน นั้น จึงขอแจ้งสรุปสถิติการลาประเภทต่างๆ เพื่อให้บุคลากรได้ตรวจสอบความถูกต้องของข้อมูลตนเอง ดังนี้`;
     
-    // Manual wrap for the first indented line
     let wordsArr = intro.split('');
     let firstLine = "";
     let i = 0;
@@ -668,7 +703,6 @@ export const generateLeaveSummaryPdf = async (options: SummaryPdfOptions): Promi
     });
     curY -= 15;
 
-    // Table
     const colX = [50, 80, 250, 290, 330, 370, 410, 450];
     const tableHeaders = ["ที่", "ชื่อ-นามสกุล", "ป่วย", "กิจ", "ลอด", "สาย", "นอก", "ลงชื่อรับทราบ"];
     
@@ -691,7 +725,6 @@ export const generateLeaveSummaryPdf = async (options: SummaryPdfOptions): Promi
         }
 
         const s = getStatsFn(t.id, startDate, endDate);
-        // แปลงตัวเลขข้อมูลในตารางทั้งหมดเป็นเลขไทย
         const rowData = [
             toThaiDigits(idx + 1),
             t.name,
@@ -719,15 +752,23 @@ export const generateLeaveSummaryPdf = async (options: SummaryPdfOptions): Promi
     const footerX = 320;
     if (directorSignatureBase64) {
         try {
-            const dSig = await pdfDoc.embedPng(dataURItoUint8Array(directorSignatureBase64));
-            const dDim = dSig.scaleToFit(100 * directorSignatureScale, 45 * directorSignatureScale);
-            page.drawImage(dSig, { x: footerX + 40, y: curY + directorSignatureYOffset + 10, width: dDim.width, height: dDim.height });
+            const dSigBytes = dataURItoUint8Array(directorSignatureBase64);
+            let dSigImage;
+            try {
+                dSigImage = await pdfDoc.embedPng(dSigBytes);
+            } catch {
+                dSigImage = await pdfDoc.embedJpg(dSigBytes);
+            }
+            
+            if (dSigImage) {
+                const dDim = dSigImage.scaleToFit(100 * directorSignatureScale, 45 * directorSignatureScale);
+                page.drawImage(dSigImage, { x: footerX + 40, y: curY + directorSignatureYOffset + 10, width: dDim.width, height: dDim.height });
+            }
         } catch (e) {}
     }
     
     page.drawText(`(ลงชื่อ).................................................`, { x: footerX, y: curY - 15, size: 14, font: thaiFont });
     page.drawText(`(${directorName})`, { x: footerX + 40, y: curY - 35, size: 14, font: thaiFont });
-    // แสดงตำแหน่งผู้อำนวยการตามชื่อโรงเรียนให้ถูกต้อง
     const posTextFooter = `ผู้อำนวยการ${schoolName || '...................'}`;
     page.drawText(posTextFooter, { x: footerX + 25, y: curY - 55, size: 14, font: thaiFont });
 

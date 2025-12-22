@@ -64,13 +64,11 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     const canApprove = isDirectorRole;
     const canViewAll = isDirectorRole || isSystemAdmin || isDocOfficer;
 
-    // ฟังก์ชันตรวจสอบว่าบุคคลนั้นเป็นผู้อำนวยการหรือไม่ (เช็คจาก Role หรือ ตำแหน่ง)
     const checkIfDirector = (teacher: Teacher) => {
         return teacher.roles.includes('DIRECTOR') || 
                teacher.position.includes('ผู้อำนวยการ');
     };
 
-    // Helper: Convert Date String to Thai Format with BE Year and Thai Digits
     const getThaiFullDateUI = (dateStr: string) => {
         if (!dateStr) return '';
         const d = new Date(dateStr);
@@ -81,26 +79,23 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         return toThaiDigits(`${day} ${month} ${year}`);
     };
 
-    // Helper: Get BE Year from date string
     const getBEYear = (dateStr: string) => {
         if (!dateStr) return '';
         return toThaiDigits(new Date(dateStr).getFullYear() + 543);
     };
 
-    // --- Real-time Data Subscription ---
     useEffect(() => {
-        let unsubscribe: () => void;
+        let unsubscribeReqs: () => void;
+        let unsubscribeConfig: () => void;
 
-        const fetchConfig = async () => {
-             if (isConfigured && db) {
-                 try {
-                     const docRef = doc(db, "system_config", "settings");
-                     const docSnap = await getDoc(docRef);
-                     if (docSnap.exists()) setSysConfig(docSnap.data() as SystemConfig);
-                 } catch (e) { console.error("Config fetch error", e); }
-             }
-        };
-        fetchConfig();
+        if (isConfigured && db) {
+            const configRef = doc(db, "system_config", "settings");
+            unsubscribeConfig = onSnapshot(configRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    setSysConfig(docSnap.data() as SystemConfig);
+                }
+            });
+        }
 
         if (isConfigured && db) {
             const q = query(
@@ -108,9 +103,10 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                 where("schoolId", "==", currentUser.schoolId)
             );
 
-            unsubscribe = onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+            unsubscribeReqs = onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
                 const fetched: LeaveRequest[] = [];
                 snapshot.forEach((docSnap) => {
+                    // สำคัญ: เราจะใช้ docSnap.id (Document ID ของ Firebase) เป็น id หลักของ Object ใน App
                     fetched.push({ ...docSnap.data(), id: docSnap.id } as LeaveRequest);
                 });
                 
@@ -133,10 +129,12 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             setIsLoading(false);
         }
 
-        return () => { if (unsubscribe) unsubscribe(); };
+        return () => { 
+            if (unsubscribeReqs) unsubscribeReqs(); 
+            if (unsubscribeConfig) unsubscribeConfig();
+        };
     }, [currentUser.schoolId]);
 
-    // --- Deep Link Effect ---
     useEffect(() => {
         if (focusRequestId && requests.length > 0) {
             const found = requests.find(r => r.id === focusRequestId);
@@ -150,15 +148,15 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         }
     }, [focusRequestId, requests]);
 
-    // --- PDF Effect ---
     useEffect(() => {
         const generatePdf = async () => {
             if (viewMode === 'PDF' && selectedRequest) {
                 setIsGeneratingPdf(true);
                 try {
-                    const approvedReqs = requests.filter(r => r.teacherId === selectedRequest.teacherId && r.status === 'Approved' && r.id !== selectedRequest.id);
+                    const currentReq = requests.find(r => r.id === selectedRequest.id) || selectedRequest;
+                    const approvedReqs = requests.filter(r => r.teacherId === currentReq.teacherId && r.status === 'Approved' && r.id !== currentReq.id);
                     const stats = {
-                        currentDays: calculateDays(selectedRequest.startDate, selectedRequest.endDate),
+                        currentDays: calculateDays(currentReq.startDate, currentReq.endDate),
                         prevSick: approvedReqs.filter(r => r.type === 'Sick').reduce((acc, r) => acc + calculateDays(r.startDate, r.endDate), 0),
                         prevPersonal: approvedReqs.filter(r => r.type === 'Personal').reduce((acc, r) => acc + calculateDays(r.startDate, r.endDate), 0),
                         prevMaternity: approvedReqs.filter(r => r.type === 'Maternity').reduce((acc, r) => acc + calculateDays(r.startDate, r.endDate), 0),
@@ -166,21 +164,33 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                         prevOffCampus: approvedReqs.filter(r => r.type === 'OffCampus').length
                     };
 
-                    const teacher = allTeachers.find(t => t.id === selectedRequest.teacherId) || currentUser;
+                    let teacher = allTeachers.find(t => t.id === currentReq.teacherId);
+                    if (currentReq.teacherId === currentUser.id) {
+                        teacher = currentUser;
+                    } else if (!teacher) {
+                        teacher = { ...currentUser, id: currentReq.teacherId, name: currentReq.teacherName || 'ไม่ระบุชื่อ' } as Teacher;
+                    }
+
                     const director = allTeachers.find(t => checkIfDirector(t));
 
                     const base64Pdf = await generateOfficialLeavePdf({
-                        req: selectedRequest, stats, teacher,
+                        req: currentReq,
+                        stats, 
+                        teacher,
                         schoolName: currentSchool?.name || 'โรงเรียน...',
                         directorName: director?.name || '...',
                         directorSignatureBase64: sysConfig?.directorSignatureBase64,
-                        teacherSignatureBase64: teacher.signatureBase64,
+                        teacherSignatureBase64: teacher.signatureBase64 || (teacher.id === currentUser.id ? currentUser.signatureBase64 : undefined),
                         officialGarudaBase64: sysConfig?.officialGarudaBase64,
                         directorSignatureScale: sysConfig?.directorSignatureScale || 1.0,
                         directorSignatureYOffset: sysConfig?.directorSignatureYOffset || 0
                     });
                     setPdfUrl(base64Pdf);
-                } catch (e) { console.error(e); } finally { setIsGeneratingPdf(false); }
+                } catch (e) { 
+                    console.error("PDF generation error:", e); 
+                } finally { 
+                    setIsGeneratingPdf(false); 
+                }
             }
         };
         generatePdf();
@@ -225,9 +235,8 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
 
     const submitRequest = async () => {
         setIsUploading(true);
-        const reqId = `leave_${Date.now()}`;
         const newReq: any = {
-            id: reqId, teacherId: currentUser.id, teacherName: currentUser.name, teacherPosition: currentUser.position || 'ครู',
+            teacherId: currentUser.id, teacherName: currentUser.name, teacherPosition: currentUser.position || 'ครู',
             type: leaveType, startDate, endDate, reason, contactInfo: contactInfo || '', mobilePhone: mobilePhone || '',
             status: 'Pending', createdAt: new Date().toISOString(), schoolId: currentUser.schoolId
         };
@@ -235,23 +244,41 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         if (leaveType === 'OffCampus') newReq.endTime = endTime;
         
         try {
-            await addDoc(collection(db, "leave_requests"), newReq);
+            // บันทึกและดึง Firebase Document ID ทันที
+            const docRef = await addDoc(collection(db, "leave_requests"), newReq);
+            const actualDocId = docRef.id;
+
             if (sysConfig?.telegramBotToken) {
                 const directors = allTeachers.filter(t => checkIfDirector(t));
                 const message = `📢 <b>มีใบลาใหม่รอการอนุมัติ</b>\nจาก: ${currentUser.name}\nประเภท: ${getLeaveTypeName(leaveType)}\nเหตุผล: ${reason}`;
-                directors.forEach(dir => dir.telegramChatId && sendTelegramMessage(sysConfig.telegramBotToken!, dir.telegramChatId, message, `${sysConfig.appBaseUrl}?view=LEAVE&id=${reqId}`));
+                // ใช้ actualDocId ใน Deep Link เพื่อให้เปิดมาแล้วเจอข้อมูลทันที
+                directors.forEach(dir => dir.telegramChatId && sendTelegramMessage(sysConfig.telegramBotToken!, dir.telegramChatId, message, `${sysConfig.appBaseUrl}?view=LEAVE&id=${actualDocId}`));
             }
             alert('เสนอใบลาเรียบร้อยแล้ว');
             setViewMode('LIST');
-        } catch(e) { alert("บันทึกล้มเหลว"); } finally { setIsUploading(false); setShowWarningModal(false); }
+        } catch(e) { 
+            console.error(e);
+            alert("บันทึกล้มเหลว"); 
+        } finally { 
+            setIsUploading(false); 
+            setShowWarningModal(false); 
+        }
     };
 
-    const handleDelete = async (e: React.MouseEvent, docId: string) => {
-        e.stopPropagation();
-        if (!confirm("คุณต้องการลบรายการนี้ใช่หรือไม่?")) return;
+    const handleDelete = async (e: React.MouseEvent | null, docId: string) => {
+        if (e) e.stopPropagation();
+        if (!confirm("คุณต้องการลบข้อมูลการลานี้ใช่หรือไม่? (ข้อมูลจะหายไปจากระบบทั้งหมด)")) return;
         try {
-            await deleteDoc(doc(db, "leave_requests", docId));
-        } catch (e) { console.error(e); }
+            // ใช้ Document ID (docId) ลบโดยตรง ไม่ต้อง Query อีกรอบ
+            const docRef = doc(db, "leave_requests", docId);
+            await deleteDoc(docRef);
+            alert("ลบข้อมูลเรียบร้อยแล้ว");
+            setViewMode('LIST');
+            setSelectedRequest(null);
+        } catch (e) { 
+            console.error("Delete Error:", e);
+            alert("เกิดข้อผิดพลาดในการลบข้อมูล: " + (e as Error).message);
+        }
     };
 
     const handleDirectorApprove = async (req: LeaveRequest, isApproved: boolean) => {
@@ -262,9 +289,10 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             approvedDate: new Date().toISOString().split('T')[0] 
         };
         try {
+            // อัปเดตโดยใช้ Document ID ของ Firebase โดยตรง
             const docRef = doc(db, "leave_requests", req.id);
             await updateDoc(docRef, updateData);
-
+            
             const targetTeacher = allTeachers.find(t => t.id === req.teacherId);
             if (targetTeacher?.telegramChatId && sysConfig?.telegramBotToken) {
                 const statusText = isApproved ? 'อนุมัติ' : 'ไม่อนุมัติ';
@@ -277,9 +305,11 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             setSelectedRequest(null);
             setViewMode('LIST');
         } catch (e) { 
-            console.error(e);
-            alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล");
-        } finally { setIsProcessingApproval(false); }
+            console.error("Approve Error:", e);
+            alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล: " + (e as Error).message);
+        } finally { 
+            setIsProcessingApproval(false); 
+        }
     };
 
     // --- Statistics Logic ---
@@ -301,13 +331,11 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         };
     };
 
-    // --- Generate Summary PDF ---
     const handleGenerateSummaryReport = async () => {
         setIsGeneratingSummary(true);
         try {
             const director = allTeachers.find(t => checkIfDirector(t));
             
-            // กรองผู้อำนวยการออกก่อนส่งให้ฟังก์ชันทำ PDF
             const schoolTeachers = allTeachers
                 .filter(t => t.schoolId === currentUser.schoolId && !checkIfDirector(t))
                 .sort((a, b) => {
@@ -439,7 +467,6 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                                             <button 
                                                                 onClick={() => { 
                                                                     const teacher = allTeachers.find(t => t.id === req.teacherId);
-                                                                    // กรองผู้อำนวยการออกตรงนี้ด้วย
                                                                     if (teacher && checkIfDirector(teacher)) return;
                                                                     setStatTeacher(teacher || { id: req.teacherId, name: req.teacherName, position: req.teacherPosition } as any); 
                                                                     setViewMode('STATS'); 
@@ -533,6 +560,20 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                 <div className="flex justify-between border-b border-dashed border-slate-100 pb-1"><span className="text-slate-500">วันที่เสนอ:</span><span>{getThaiDate(selectedRequest.createdAt || '')}</span></div>
                             </div>
                         </div>
+
+                        {(isDirectorRole || isSystemAdmin) && (
+                            <div className="pt-4 border-t border-slate-200">
+                                <button 
+                                    onClick={() => handleDelete(null, selectedRequest.id)}
+                                    className="w-full py-3 bg-red-50 text-red-600 rounded-xl border border-red-100 font-bold flex items-center justify-center gap-2 hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                                >
+                                    <Trash2 size={18}/> ลบรายการลานี้ถาวร
+                                </button>
+                                <p className="text-[10px] text-slate-400 mt-2 text-center">
+                                    * การลบจะทำให้ข้อมูลหายไปจากฐานข้อมูลทั้งหมด
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -714,7 +755,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                     <tbody className="divide-y divide-slate-100">
                                         {(() => {
                                             const sortedTeachers = allTeachers
-                                                .filter(t => t.schoolId === currentUser.schoolId && !checkIfDirector(t)) // กรองผู้อำนวยการออกโดยใช้ตำแหน่งและสิทธิ์
+                                                .filter(t => t.schoolId === currentUser.schoolId && !checkIfDirector(t)) 
                                                 .sort((a, b) => {
                                                     const idxA = ACADEMIC_POSITIONS.indexOf(a.position);
                                                     const idxB = ACADEMIC_POSITIONS.indexOf(b.position);

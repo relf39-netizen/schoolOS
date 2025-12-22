@@ -2,7 +2,8 @@
 import React, { useState } from 'react';
 import { Teacher } from '../types';
 import { ACADEMIC_POSITIONS } from '../constants';
-import { User, Lock, Save, UploadCloud, FileSignature, Briefcase, Eye, EyeOff } from 'lucide-react';
+import { User, Lock, Save, UploadCloud, FileSignature, Briefcase, Eye, EyeOff, Loader } from 'lucide-react';
+import { db, isConfigured, doc, setDoc } from '../firebaseConfig';
 
 interface UserProfileProps {
     currentUser: Teacher;
@@ -20,16 +21,50 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
     const [showPassword, setShowPassword] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
-    const handleSignatureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Helper: Resize Image and convert to PNG
+    const resizeImage = (file: File, maxWidth: number = 300): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > maxWidth) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/png', 0.8)); // Convert to PNG
+                    } else {
+                        reject(new Error("Canvas context error"));
+                    }
+                };
+                img.onerror = () => reject(new Error("Image load error"));
+                img.src = event.target?.result as string;
+            };
+            reader.onerror = error => reject(error);
+            reader.readAsDataURL(file);
+        });
+    };
+
+    const handleSignatureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
-            const reader = new FileReader();
-            reader.onload = () => {
-                if (reader.result) {
-                    setSignaturePreview(reader.result as string);
-                }
-            };
-            reader.readAsDataURL(file);
+            try {
+                const base64 = await resizeImage(file, 400); 
+                setSignaturePreview(base64);
+            } catch (error) {
+                console.error("Error processing signature", error);
+                alert("เกิดข้อผิดพลาดในการประมวลผลรูปภาพ");
+            }
         }
     };
 
@@ -37,22 +72,26 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
         e.preventDefault();
         setIsSaving(true);
         
-        // Update Object
         const updated: Teacher = {
             ...currentUser,
             name: formData.name,
             position: formData.position,
             password: formData.password,
             signatureBase64: signaturePreview
-            // Telegram ID is preserved but not editable here
         };
 
-        // Mock Save
-        setTimeout(() => {
+        try {
+            if (isConfigured && db) {
+                await setDoc(doc(db, 'teachers', updated.id), updated);
+            }
             onUpdateUser(updated);
             alert("บันทึกข้อมูลเรียบร้อยแล้ว");
+        } catch (error) {
+            console.error("Save profile error", error);
+            alert("บันทึกข้อมูลไม่สำเร็จ");
+        } finally {
             setIsSaving(false);
-        }, 800);
+        }
     };
 
     return (
@@ -141,10 +180,10 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
                         </div>
                         <div className="flex-1 flex flex-col justify-center gap-2">
                             <p className="text-xs text-slate-500 mb-2">
-                                อัปโหลดรูปภาพลายเซ็น (พื้นหลังโปร่งใส .png ดีที่สุด) เพื่อใช้ในการอนุมัติเอกสารออนไลน์
+                                อัปโหลดรูปภาพลายเซ็น (ไฟล์ภาพจะถูกบีบอัดอัตโนมัติเพื่อให้ลายเซ็นแสดงใน PDF ได้ดีที่สุด)
                             </p>
                             <label className="cursor-pointer bg-purple-50 text-purple-700 border border-purple-200 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-purple-100 transition-colors">
-                                <UploadCloud size={20}/> เลือกรูปภาพ
+                                <UploadCloud size={20}/> เลือกรูปภาพลายเซ็น
                                 <input type="file" className="hidden" accept="image/*" onChange={handleSignatureUpload}/>
                             </label>
                             {signaturePreview && (
@@ -166,7 +205,8 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
                         disabled={isSaving}
                         className="bg-purple-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
                     >
-                        {isSaving ? <span className="animate-spin">C</span> : <Save size={20}/>} บันทึกข้อมูล
+                        {isSaving ? <Loader className="animate-spin" size={20}/> : <Save size={20}/>} 
+                        {isSaving ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
                     </button>
                 </div>
              </form>
