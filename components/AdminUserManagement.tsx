@@ -1,10 +1,14 @@
-
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
-import { Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, Calendar, RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut, Send, Globe } from 'lucide-react';
-import { db, isConfigured } from '../firebaseConfig';
+import { 
+    Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, 
+    Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, 
+    MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, 
+    Calendar, RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut, 
+    Send, Globe, Copy, Check, Cloud 
+} from 'lucide-react';
+import { db, isConfigured, doc, getDoc, setDoc } from '../firebaseConfig';
 import { ACADEMIC_POSITIONS } from '../constants';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface AdminUserManagementProps {
     teachers: Teacher[];
@@ -27,7 +31,8 @@ const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
 ];
 
 const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onAddTeacher, onEditTeacher, onDeleteTeacher, currentSchool, onUpdateSchool }) => {
-    const [activeTab, setActiveTab] = useState<'USERS' | 'SETTINGS' | 'SCHOOL_SETTINGS'>('USERS');
+    const [activeTab, setActiveTab] = useState<'USERS' | 'SETTINGS' | 'SCHOOL_SETTINGS' | 'CLOUD_SETUP'>('USERS');
+    const [copied, setCopied] = useState(false);
     
     // User Management State
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -41,6 +46,58 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     // School Settings State (Local)
     const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
     const [isGettingLocation, setIsGettingLocation] = useState(false);
+
+    // Google Apps Script Code
+    const gasCode = `/**
+ * SchoolOS - Cloud Storage Bridge (Google Drive)
+ * สคริปต์สำหรับรับไฟล์จาก App และบันทึกลงใน Google Drive
+ */
+function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var folderId = data.folderId; // ID ของโฟลเดอร์โรงเรียน
+    var fileName = data.fileName; 
+    var base64Data = data.fileData; 
+    var mimeType = data.mimeType;
+
+    // ค้นหาโฟลเดอร์
+    var folder = DriveApp.getFolderById(folderId);
+    
+    // แปลง base64 เป็น Blob
+    var bytes = Utilities.base64Decode(base64Data);
+    var blob = Utilities.newBlob(bytes, mimeType, fileName);
+    
+    // บันทึกไฟล์
+    var file = folder.createFile(blob);
+    
+    // ตั้งค่าให้คนที่มีลิงก์เข้าถึงได้ (View Only)
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    return ContentService.createTextOutput(JSON.stringify({
+      'status': 'success',
+      'url': file.getUrl(),
+      'id': file.getId(),
+      'downloadUrl': "https://docs.google.com/uc?export=download&id=" + file.getId()
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (f) {
+    return ContentService.createTextOutput(JSON.stringify({
+      'status': 'error',
+      'message': f.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// สำหรับทดสอบสถานะ API
+function doGet(e) {
+  return ContentService.createTextOutput("SchoolOS API is Online").setMimeType(ContentService.MimeType.TEXT);
+}`;
+
+    const handleCopyCode = () => {
+        navigator.clipboard.writeText(gasCode);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
 
     // Init School Form
     useEffect(() => {
@@ -230,24 +287,30 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                         <p className="text-slate-500 text-sm">จัดการผู้ใช้งานและตั้งค่าระบบ</p>
                     </div>
                 </div>
-                <div className="flex bg-slate-100 p-1 rounded-lg">
+                <div className="flex bg-slate-100 p-1 rounded-lg overflow-x-auto max-w-full">
                     <button 
                         onClick={() => setActiveTab('USERS')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${activeTab === 'USERS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'USERS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         ผู้ใช้งาน
                     </button>
                     <button 
                         onClick={() => setActiveTab('SCHOOL_SETTINGS')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         ตั้งค่าโรงเรียน
                     </button>
                     <button 
                         onClick={() => setActiveTab('SETTINGS')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${activeTab === 'SETTINGS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'SETTINGS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                         ตั้งค่าระบบ
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('CLOUD_SETUP')}
+                        className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'CLOUD_SETUP' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                        เชื่อมต่อ Cloud
                     </button>
                 </div>
             </div>
@@ -567,6 +630,16 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                                         ใช้สำหรับส่งการแจ้งเตือนหนังสือราชการไปยังบุคลากรผ่าน Telegram
                                     </p>
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">App Base URL (สำหรับส่งลิงก์ในแชท)</label>
+                                    <input 
+                                        type="text" 
+                                        value={config.appBaseUrl || ''}
+                                        onChange={e => setConfig({...config, appBaseUrl: e.target.value})}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
+                                        placeholder="https://your-app.vercel.app"
+                                    />
+                                </div>
                             </div>
                         </div>
 
@@ -614,7 +687,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                                     <div className="flex items-center gap-4">
                                         <div className="w-24 h-24 border border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
                                             {config.schoolLogoBase64 ? (
-                                                <img src={config.schoolLogoBase64} className="w-full h-full object-contain"/>
+                                                <img src={config.schoolLogoBase64} className="w-full h-full object-contain" alt="School Logo"/>
                                             ) : <ImageIcon className="text-slate-300"/>}
                                         </div>
                                         <div className="flex-1">
@@ -629,7 +702,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                                     <div className="flex items-center gap-4">
                                         <div className="w-24 h-24 border border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
                                             {config.officialGarudaBase64 ? (
-                                                <img src={config.officialGarudaBase64} className="w-full h-full object-contain"/>
+                                                <img src={config.officialGarudaBase64} className="w-full h-full object-contain" alt="Garuda Logo"/>
                                             ) : <ImageIcon className="text-slate-300"/>}
                                         </div>
                                         <div className="flex-1">
@@ -650,6 +723,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                                                 <img 
                                                     src={config.directorSignatureBase64} 
                                                     className="object-contain" 
+                                                    alt="Director Signature"
                                                     style={{ 
                                                         transform: `scale(${config.directorSignatureScale}) translateY(${config.directorSignatureYOffset}px)` 
                                                     }}
@@ -694,9 +768,56 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
                                 disabled={isLoadingConfig}
                                 className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg flex items-center gap-2 disabled:opacity-50"
                             >
-                                {isLoadingConfig ? <RefreshCw className="animate-spin"/> : <Save size={20}/>} 
+                                {isLoadingConfig ? <RefreshCw className="animate-spin" size={20}/> : <Save size={20}/>} 
                                 บันทึกการตั้งค่าระบบ
                             </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* --- CLOUD SETUP TAB --- */}
+                {activeTab === 'CLOUD_SETUP' && (
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="bg-orange-50 border border-orange-200 rounded-xl p-6">
+                            <h3 className="text-xl font-bold text-orange-800 mb-4 flex items-center gap-2">
+                                <Cloud className="text-orange-600"/> คู่มือติดตั้งระบบเก็บไฟล์ Cloud (Google Drive)
+                            </h3>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                <div className="space-y-4">
+                                    <p className="text-slate-700 text-sm leading-relaxed">
+                                        เพื่อให้โรงเรียนของท่านสามารถอัปโหลดไฟล์เอกสารและลายเซ็นได้ แอดมินต้องสร้างสคริปต์สะพานเชื่อมต่อไว้ในบัญชี Google ของโรงเรียนตามขั้นตอนดังนี้:
+                                    </p>
+                                    <ol className="space-y-3 text-sm text-slate-600 list-decimal pl-5">
+                                        <li>เข้าสู่ระบบ <a href="https://script.google.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold underline">Google Apps Script</a></li>
+                                        <li>คลิก <b>"New Project"</b></li>
+                                        <li>คัดลอกโค้ดทางด้านขวาไปวางทับโค้ดเดิมทั้งหมด</li>
+                                        <li>คลิก <b>"Deploy"</b> เลือก <b>"New Deployment"</b></li>
+                                        <li>เลือกประเภทเป็น <b>"Web App"</b></li>
+                                        <li>ตั้งค่า <b>Execute as: Me</b> และ <b>Who has access: Anyone</b></li>
+                                        <li>คลิก Deploy และคัดลอก <b>Web App URL</b> มาวางในหน้า "ตั้งค่าระบบ"</li>
+                                    </ol>
+                                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800">
+                                        <AlertCircle className="inline mr-1" size={14}/> <b>หมายเหตุ:</b> ในการ Deploy ครั้งแรก ท่านต้องกด "Advanced" และ "Go to Project (unsafe)" เพื่ออนุญาตสิทธิ์เข้าถึง Drive
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center px-1">
+                                        <span className="text-xs font-bold text-slate-500 uppercase">Google Apps Script Code</span>
+                                        <button 
+                                            onClick={handleCopyCode} 
+                                            className="text-xs flex items-center gap-1 font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded transition-colors"
+                                        >
+                                            {copied ? <><Check size={14}/> คัดลอกแล้ว</> : <><Copy size={14}/> คัดลอกโค้ด</>}
+                                        </button>
+                                    </div>
+                                    <div className="bg-slate-900 rounded-xl p-4 overflow-hidden relative">
+                                        <pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-[350px] custom-scrollbar leading-relaxed">
+                                            {gasCode}
+                                        </pre>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}

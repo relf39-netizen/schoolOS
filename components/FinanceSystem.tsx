@@ -30,9 +30,6 @@ const parseExcelDate = (raw: any): string => {
 
     // Case 1: Excel Serial Number (e.g., 45302)
     if (typeof raw === 'number') {
-        // Excel base date is Dec 30, 1899. 
-        // 25569 is the diff between Unix epoch and Excel epoch in days.
-        // 86400 * 1000 is milliseconds per day.
         const date = new Date(Math.round((raw - 25569) * 86400 * 1000));
         return date.toISOString().split('T')[0];
     }
@@ -46,10 +43,7 @@ const parseExcelDate = (raw: any): string => {
         const d = parts[0].padStart(2, '0');
         const m = parts[1].padStart(2, '0');
         let y = parseInt(parts[2]);
-        
-        // Convert Thai Year if > 2400 (Simple heuristic)
         if (y > 2400) y -= 543;
-        
         return `${y}-${m}-${d}`;
     }
 
@@ -97,8 +91,8 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         isBudgetOfficer ? 'Budget' : isNonBudgetOfficer ? 'NonBudget' : 'Budget'
     );
     
-    // View State
-    const [viewMode, setViewMode] = useState<'DASHBOARD' | 'DETAIL' | 'PRINT'>('DASHBOARD');
+    // View State (Updated to include TRANS_FORM)
+    const [viewMode, setViewMode] = useState<'DASHBOARD' | 'DETAIL' | 'PRINT' | 'TRANS_FORM'>('DASHBOARD');
 
     // Drill-down State
     const [selectedAccount, setSelectedAccount] = useState<FinanceAccount | null>(null);
@@ -116,8 +110,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         customEnd: new Date().toISOString().split('T')[0]
     });
 
-    // UI State
-    const [showTransForm, setShowTransForm] = useState(false);
+    // UI State (showTransForm is replaced by viewMode === 'TRANS_FORM')
     const [showAccountForm, setShowAccountForm] = useState(false);
     
     // Edit Transaction State
@@ -143,7 +136,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         const loadData = async () => {
             setIsLoadingData(true);
             
-            // 1. Fetch from LocalStorage (Fallback)
             let localAccounts: FinanceAccount[] = [];
             let localTrans: Transaction[] = [];
             try {
@@ -158,37 +150,30 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 console.error("Local Load Error", e);
             }
 
-            // 2. Fetch from Firebase (If Configured)
             if (isConfigured && db) {
                 try {
-                    // Fetch Accounts
                     const accQ = query(collection(db, "finance_accounts"), where("schoolId", "==", currentUser.schoolId));
                     const accSnap = await getDocs(accQ);
                     const dbAccounts = accSnap.docs.map(doc => doc.data() as FinanceAccount);
 
-                    // Fetch Transactions
                     const transQ = query(collection(db, "finance_transactions"), where("schoolId", "==", currentUser.schoolId));
                     const transSnap = await getDocs(transQ);
                     const dbTrans = transSnap.docs.map(doc => doc.data() as Transaction);
 
-                    // Use DB data if available, otherwise fallback/merge (DB takes precedence)
                     if (dbAccounts.length > 0 || dbTrans.length > 0) {
                         setAccounts(dbAccounts);
                         setTransactions(dbTrans);
                     } else {
-                        // First time online or empty DB? Use local or Mock
                         if (localAccounts.length > 0) {
                              setAccounts(localAccounts);
                              setTransactions(localTrans);
                         } else {
-                            // Fallback to Mock if absolutely nothing
-                            const mockBudget = MOCK_ACCOUNTS.filter(a => a.schoolId === currentUser.schoolId || a.type === 'Budget'); // Filter somewhat
+                            const mockBudget = MOCK_ACCOUNTS.filter(a => a.schoolId === currentUser.schoolId || a.type === 'Budget');
                              setAccounts(mockBudget);
                              setTransactions(MOCK_TRANSACTIONS.filter(t => t.schoolId === currentUser.schoolId));
                         }
                     }
 
-                    // Fetch System Config for Telegram
                     const configRef = doc(db, "system_config", "settings");
                     const configSnap = await getDoc(configRef);
                     if (configSnap.exists()) {
@@ -201,7 +186,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     setTransactions(localTrans.length ? localTrans : MOCK_TRANSACTIONS);
                 }
             } else {
-                // Offline Mode
                 setAccounts(localAccounts.length ? localAccounts : MOCK_ACCOUNTS);
                 setTransactions(localTrans.length ? localTrans : MOCK_TRANSACTIONS);
             }
@@ -212,7 +196,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         loadData();
     }, [currentUser.schoolId]);
 
-    // Helper to Save Data (Router: Local vs Firebase)
     const handleSaveTransaction = async (transactionData: any) => {
         if (isConfigured && db) {
             try {
@@ -224,7 +207,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 return false;
             }
         } else {
-            // Save to LocalStorage
             const currentAllTrans = JSON.parse(localStorage.getItem('schoolos_finance_transactions') || '[]');
             const updatedAllTrans = [...currentAllTrans, transactionData];
             localStorage.setItem('schoolos_finance_transactions', JSON.stringify(updatedAllTrans));
@@ -243,7 +225,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 return false;
             }
         } else {
-            // LocalStorage
             const currentAllAcc = JSON.parse(localStorage.getItem('schoolos_finance_accounts') || '[]');
             const updatedAllAcc = [...currentAllAcc, accountData];
             localStorage.setItem('schoolos_finance_accounts', JSON.stringify(updatedAllAcc));
@@ -255,7 +236,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         e.preventDefault();
         if (!editingAccount || !newAccountName) return;
 
-        // Optimistic Update UI
         const updatedAccounts = accounts.map(a => a.id === editingAccount.id ? { ...a, name: newAccountName } : a);
         setAccounts(updatedAccounts);
 
@@ -263,8 +243,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
         if (isConfigured && db) {
             try {
-                // Use setDoc with merge: true. 
-                // This prevents "Document not found" errors if editing a Mock Account that hasn't been synced to DB yet.
                 const accRef = doc(db, "finance_accounts", editingAccount.id);
                 await setDoc(accRef, { name: newAccountName }, { merge: true });
             } catch (e) {
@@ -273,7 +251,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             }
         } 
         
-        // Always update LocalStorage as backup/offline persistence
         try {
             const allLocal = JSON.parse(localStorage.getItem('schoolos_finance_accounts') || '[]');
             const existingIndex = allLocal.findIndex((a: any) => a.id === editingAccount.id);
@@ -282,7 +259,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             if (existingIndex >= 0) {
                 updatedLocal = allLocal.map((a:any) => a.id === editingAccount.id ? updatedAccountObj : a);
             } else {
-                // If editing a Mock account for the first time, it won't be in LS yet, so add it.
                 updatedLocal = [...allLocal, updatedAccountObj];
             }
             localStorage.setItem('schoolos_finance_accounts', JSON.stringify(updatedLocal));
@@ -294,36 +270,26 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         setEditingAccount(null);
     };
 
-    // --- Delete Account Logic ---
     const handleDeleteAccount = async (e: React.MouseEvent, accId: string) => {
         e.stopPropagation();
         if (!confirm("ยืนยันการลบบัญชีนี้?\n\n⚠️ คำเตือน: ประวัติธุรกรรมทั้งหมดในบัญชีนี้จะถูกลบออกจากหน้าจอ")) return;
 
-        // 1. Remove from Account State
         const updatedAccounts = accounts.filter(a => a.id !== accId);
         setAccounts(updatedAccounts);
 
-        // 2. Remove Transactions from State (Clean up UI immediately)
         const updatedTrans = transactions.filter(t => t.accountId !== accId);
         setTransactions(updatedTrans);
 
-        // 3. Persistent Delete
         if (isConfigured && db) {
             try {
-                // Delete Account Doc
                 await deleteDoc(doc(db, "finance_accounts", accId));
-                // Note: We don't batch delete transactions here to keep it simple, 
-                // they will just be orphaned in Firestore but hidden in UI.
             } catch (e) { console.error(e); }
         } else {
-            // Update LocalStorage
             localStorage.setItem('schoolos_finance_accounts', JSON.stringify(updatedAccounts));
             localStorage.setItem('schoolos_finance_transactions', JSON.stringify(updatedTrans));
         }
     };
 
-
-    // Update active tab logic based on permissions
     useEffect(() => {
         if (!isDirector && !isSystemAdmin) {
             if (activeTab === 'Budget' && !isBudgetOfficer && isNonBudgetOfficer) {
@@ -333,7 +299,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             }
         }
         
-        // Auto-select logic
         if (activeTab === 'NonBudget') {
             setSelectedAccount(null); 
             if (viewMode === 'DASHBOARD') setViewMode('DETAIL');
@@ -344,22 +309,17 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
     }, [currentUser, isBudgetOfficer, isNonBudgetOfficer, isDirector, isSystemAdmin, activeTab]);
 
-    // Reset pagination when account changes
     useEffect(() => {
         setCurrentPage(1);
     }, [selectedAccount, activeTab]);
 
-    // --- Permissions Helpers ---
     const canSeeBudget = isDirector || isSystemAdmin || isBudgetOfficer;
     const canSeeNonBudget = isDirector || isSystemAdmin || isNonBudgetOfficer;
     
-    // Updated: Director and Admin should also be able to edit/fix data
     const canEditBudget = isBudgetOfficer || isDirector || isSystemAdmin;
     const canEditNonBudget = isNonBudgetOfficer || isDirector || isSystemAdmin;
     
     const canEdit = (activeTab === 'Budget' && canEditBudget) || (activeTab === 'NonBudget' && canEditNonBudget);
-
-    // --- Logic ---
 
     const getAccountBalance = (accId: string) => {
         const accTrans = transactions.filter(t => t.accountId === accId);
@@ -393,18 +353,15 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         let targetAccountId = '';
         let targetAccountName = '';
 
-        // If an account is explicitly selected, use it.
         if (selectedAccount) {
             targetAccountId = selectedAccount.id;
             targetAccountName = selectedAccount.name;
         } else if (activeTab === 'NonBudget') {
-            // Find NonBudget Account
             const nbAcc = accounts.find(a => a.type === 'NonBudget');
             if (nbAcc) {
                 targetAccountId = nbAcc.id;
                 targetAccountName = nbAcc.name;
             } else {
-                // Create Default NonBudget Account
                 const defaultName = 'เงินรายได้สถานศึกษา (ทั่วไป)';
                 const newId = `acc_nb_${Date.now()}`;
                 const createdAcc: any = {
@@ -436,11 +393,12 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             setTransactions([...transactions, created]);
             alert("บันทึกรายการเรียบร้อยแล้ว");
             setNewTrans({ date: new Date().toISOString().split('T')[0], desc: '', amount: '', type: 'Income' });
-            setShowTransForm(false);
+            
+            // Go back to Detail View instead of closing modal
+            setViewMode('DETAIL');
 
             // --- TELEGRAM NOTIFICATION ---
             if (sysConfig?.telegramBotToken) {
-                // 1. Calculate New Balance (Current + New Transaction)
                 const currentTrans = transactions.filter(t => t.accountId === targetAccountId);
                 const prevIncome = currentTrans.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0);
                 const prevExpense = currentTrans.filter(t => t.type === 'Expense').reduce((s, t) => s + t.amount, 0);
@@ -450,20 +408,14 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     ? prevBalance + transactionAmount 
                     : prevBalance - transactionAmount;
 
-                // 2. Identify Recipients
-                // - Director (Always)
-                // - Finance Officer (Based on Tab)
                 const recipients = allTeachers.filter(t => {
-                    const isDirector = t.roles.includes('DIRECTOR');
-                    const isRelevantOfficer = activeTab === 'Budget' 
+                    const isDir = t.roles.includes('DIRECTOR');
+                    const isRelOfficer = activeTab === 'Budget' 
                         ? t.roles.includes('FINANCE_BUDGET') 
                         : t.roles.includes('FINANCE_NONBUDGET');
-                    
-                    // Filter by school and role, must have chat ID
-                    return t.schoolId === currentUser.schoolId && t.telegramChatId && (isDirector || isRelevantOfficer);
+                    return t.schoolId === currentUser.schoolId && t.telegramChatId && (isDir || isRelOfficer);
                 });
 
-                // 3. Construct Message
                 const icon = newTrans.type === 'Income' ? '🟢' : '🔴';
                 const typeLabel = newTrans.type === 'Income' ? 'รายรับ' : 'รายจ่าย';
                 const message = `${icon} <b>แจ้งเตือนการเงิน (${activeTab === 'Budget' ? 'งบประมาณ' : 'นอกงบประมาณ'})</b>\n` +
@@ -479,7 +431,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 const baseUrl = sysConfig.appBaseUrl || window.location.origin;
                 const deepLink = `${baseUrl}?view=FINANCE`;
 
-                // 4. Send
                 recipients.forEach(t => {
                     sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId!, message, deepLink);
                 });
@@ -487,7 +438,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         }
     };
 
-    // --- Excel Import Logic ---
     const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || !e.target.files[0]) return;
         const file = e.target.files[0];
@@ -507,7 +457,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 const newAccounts: any[] = [];
                 let successCount = 0;
 
-                // Clone existing accounts map for quick lookup
                 const accountMap = new Map<string, string>(); // Name -> ID
                 accounts.forEach(a => accountMap.set(a.name.trim(), a.id));
 
@@ -515,7 +464,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     const normalizedRow: any = {};
                     Object.keys(row).forEach(key => normalizedRow[key.trim()] = row[key]);
 
-                    // Extract columns
                     const dateRaw = normalizedRow['Date'] || normalizedRow['date'] || normalizedRow['วันที่'];
                     const accountNameRaw = normalizedRow['Account'] || normalizedRow['ชื่อบัญชี'] || normalizedRow['Account Name'];
                     const descRaw = normalizedRow['Description'] || normalizedRow['description'] || normalizedRow['รายการ'];
@@ -527,31 +475,27 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     let amountValue = parseFloat(amountRaw.toString().replace(/,/g, ''));
                     if (isNaN(amountValue)) continue;
 
-                    // Determine Type (Income/Expense)
                     let finalType = 'Income';
                     const typeStr = typeRaw ? typeRaw.toString().toLowerCase() : '';
                     if (typeStr.includes('จ่าย') || typeStr.includes('ถอน') || typeStr.includes('expense') || typeStr.includes('withdraw') || typeStr.includes('out')) {
                         finalType = 'Expense';
                     }
 
-                    // Parse Date
                     const finalDate = parseExcelDate(dateRaw);
                     const cleanAccountName = accountNameRaw.toString().trim();
 
-                    // --- ACCOUNT MATCHING LOGIC ---
                     let targetAccountId = accountMap.get(cleanAccountName);
 
                     if (!targetAccountId) {
-                        // Create New Account if not exists
                         const newId = `acc_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
                         const newAcc = {
                             id: newId,
                             schoolId: currentUser.schoolId,
                             name: cleanAccountName,
-                            type: activeTab // Use current tab as default type for new accounts
+                            type: activeTab
                         };
                         newAccounts.push(newAcc);
-                        accountMap.set(cleanAccountName, newId); // Update map
+                        accountMap.set(cleanAccountName, newId);
                         targetAccountId = newId;
                     }
 
@@ -568,7 +512,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 }
 
                 if (batchTransactions.length > 0) {
-                    // 1. Save New Accounts First
                     if (newAccounts.length > 0) {
                         if (isConfigured && db) {
                             try {
@@ -576,15 +519,12 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                                 await Promise.all(accPromises);
                             } catch (e) { console.error("Account Batch Save Error", e); }
                         } else {
-                            // Local Storage
                             const currentAllAcc = JSON.parse(localStorage.getItem('schoolos_finance_accounts') || '[]');
                             localStorage.setItem('schoolos_finance_accounts', JSON.stringify([...currentAllAcc, ...newAccounts]));
                         }
-                        // Update State
                         setAccounts(prev => [...prev, ...newAccounts]);
                     }
 
-                    // 2. Save Transactions
                     if (isConfigured && db) {
                         try {
                             const transPromises = batchTransactions.map(t => setDoc(doc(db, "finance_transactions", t.id), t));
@@ -615,7 +555,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         reader.readAsBinaryString(file);
     };
     
-    // --- Edit / Delete Transaction ---
     const handleEditTransaction = (t: Transaction) => {
         if (!canEdit) return;
         setEditingTransaction(t);
@@ -626,7 +565,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         e.preventDefault();
         if (!editingTransaction) return;
 
-        // UI Update
         const updatedTrans = transactions.map(t => t.id === editingTransaction.id ? editingTransaction : t);
         setTransactions(updatedTrans);
 
@@ -638,7 +576,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                  console.error("Update Trans Error", e);
              }
         } else {
-            // Local
             const currentAllTrans = JSON.parse(localStorage.getItem('schoolos_finance_transactions') || '[]');
             const updated = currentAllTrans.map((t:any) => t.id === editingTransaction.id ? editingTransaction : t);
             localStorage.setItem('schoolos_finance_transactions', JSON.stringify(updated));
@@ -652,7 +589,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         if (!editingTransaction) return;
         if (!confirm("ยืนยันการลบรายการนี้?")) return;
 
-         // UI Update
          const updatedTrans = transactions.filter(t => t.id !== editingTransaction.id);
          setTransactions(updatedTrans);
 
@@ -663,7 +599,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 console.error("Delete Trans Error", e);
             }
         } else {
-            // Local
             const currentAllTrans = JSON.parse(localStorage.getItem('schoolos_finance_transactions') || '[]');
             const updated = currentAllTrans.filter((t:any) => t.id !== editingTransaction.id);
             localStorage.setItem('schoolos_finance_transactions', JSON.stringify(updated));
@@ -673,11 +608,10 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
          setEditingTransaction(null);
     };
 
-    // --- Renderers ---
+    // --- Render Functions ---
 
     const renderDashboard = () => (
         <div className="animate-fade-in space-y-6 pb-20">
-            {/* Header / Tabs */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex flex-col">
                     <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
@@ -714,7 +648,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 </div>
             </div>
 
-            {/* Global Actions (Import Button Moved Here) */}
             {canEdit && (
                 <div className="flex justify-end gap-2">
                     <div className="relative flex items-center gap-1">
@@ -744,14 +677,12 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 </div>
             )}
 
-            {/* Content based on Tab */}
             {activeTab === 'Budget' && canSeeBudget && (
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {accounts.filter(a => a.type === 'Budget').map((acc, index) => {
                             const balance = getAccountBalance(acc.id);
                             
-                            // Beautified Card Styles (Alternating Colors)
                             const cardStyles = [
                                 'bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200 hover:border-blue-300 shadow-blue-100',
                                 'bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200 hover:border-emerald-300 shadow-emerald-100',
@@ -778,7 +709,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                                     className={`relative rounded-2xl shadow-sm hover:shadow-lg border-2 p-6 transition-all cursor-pointer group hover:-translate-y-1 ${currentStyle}`}
                                     onClick={() => { setSelectedAccount(acc); setViewMode('DETAIL'); }}
                                 >
-                                    {/* Edit Button */}
                                     {canEditBudget && (
                                         <div className="absolute top-3 right-3 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 rounded-lg p-1 shadow-sm backdrop-blur-sm">
                                             <button 
@@ -816,9 +746,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                                         </div>
                                     </div>
                                     
-                                    <div className="absolute bottom-4 left-6 text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        แตะเพื่อดูรายละเอียด
-                                    </div>
                                     <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1">
                                         <ArrowRight className="text-slate-400"/>
                                     </div>
@@ -826,7 +753,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                             );
                         })}
                         
-                        {/* Add Account Button (Only Officer) */}
                         {canEditBudget && (
                             <button 
                                 onClick={() => setShowAccountForm(true)}
@@ -869,9 +795,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-300">
                         <Wallet size={48} className="mx-auto text-slate-300 mb-4"/>
                         <p className="text-slate-500 font-bold mb-2">ยังไม่มีบัญชีเงินนอกงบประมาณ</p>
-                        <p className="text-xs text-slate-400 mb-6 max-w-md mx-auto">
-                            หากท่านพบว่ามีข้อมูลในฐานข้อมูล แต่ไม่แสดงในหน้านี้ อาจเกิดจากข้อมูลบัญชี (Account) สูญหายหรือไม่ตรงกัน 
-                        </p>
                         {canEditNonBudget && (
                              <button onClick={() => setShowAccountForm(true)} className="bg-blue-600 text-white px-6 py-2 rounded-lg shadow font-bold hover:bg-blue-700 transition-colors">
                                 เปิดบัญชีรายได้สถานศึกษา
@@ -892,7 +815,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         const totalExpense = filteredTrans.filter(t => t.type === 'Expense').reduce((s,t) => s + t.amount, 0);
         const currentBalance = totalIncome - totalExpense;
 
-        // Pagination Logic
         const totalPages = Math.ceil(filteredTrans.length / ITEMS_PER_PAGE);
         const displayedTrans = filteredTrans.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
@@ -902,7 +824,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
         return (
             <div className="space-y-6 animate-slide-up pb-20">
-                 {/* Header */}
                  <div className="flex flex-col md:flex-row justify-between items-start gap-4">
                     <div className="flex items-center gap-4">
                         {activeTab === 'Budget' && (
@@ -934,8 +855,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     </div>
                     
                     <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-                        
-                        {/* PRINT BUTTON */}
                         <button 
                             onClick={() => setViewMode('PRINT')}
                             className="bg-slate-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-slate-700 font-bold flex items-center gap-2 text-sm"
@@ -949,7 +868,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                                     if (activeTab === 'NonBudget' && !selectedAccount && targetAcc) {
                                         setSelectedAccount(targetAcc);
                                     }
-                                    setShowTransForm(true);
+                                    setViewMode('TRANS_FORM'); // Changed to viewMode instead of setShowTransForm
                                 }} 
                                 className="bg-orange-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-orange-700 font-bold flex items-center gap-2 text-sm ml-auto"
                             >
@@ -959,7 +878,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     </div>
                  </div>
 
-                 {/* Stats Cards */}
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                          <p className="text-xs text-slate-500">รับตลอดปี</p>
@@ -975,7 +893,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                      </div>
                  </div>
 
-                 {/* Transactions Table */}
                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
                      <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                          <h3 className="font-bold text-slate-700">รายการเคลื่อนไหว (ทั้งหมด {filteredTrans.length})</h3>
@@ -1015,13 +932,12 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                         </table>
                      </div>
 
-                     {/* Pagination Controls */}
                      {totalPages > 1 && (
                         <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-center items-center gap-4 sticky bottom-0">
                             <button 
                                 onClick={() => goToPage(currentPage - 1)}
                                 disabled={currentPage === 1}
-                                className="p-2 rounded-lg bg-white border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-50 text-slate-600 shadow-sm"
+                                className="p-2 rounded-lg bg-white border border-slate-200 disabled:opacity-50 shadow-sm"
                             >
                                 <ChevronLeft size={20}/>
                             </button>
@@ -1031,7 +947,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                             <button 
                                 onClick={() => goToPage(currentPage + 1)}
                                 disabled={currentPage === totalPages}
-                                className="p-2 rounded-lg bg-white border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-50 text-slate-600 shadow-sm"
+                                className="p-2 rounded-lg bg-white border border-slate-200 disabled:opacity-50 shadow-sm"
                             >
                                 <ChevronRight size={20}/>
                             </button>
@@ -1042,7 +958,121 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         );
     };
 
-    // Print View remains largely same ...
+    // --- NEW: TRANSACTION FORM FULL VIEW ---
+    const renderTransactionFormView = () => {
+        let targetAcc = selectedAccount;
+        if (!targetAcc && activeTab === 'NonBudget') {
+            targetAcc = accounts.find(a => a.type === 'NonBudget') || null;
+        }
+        if (!targetAcc) return null;
+
+        return (
+            <div className="max-w-2xl mx-auto space-y-6 animate-slide-up pb-20">
+                {/* Header for Form */}
+                <div className="flex items-center gap-4">
+                    <button 
+                        onClick={() => setViewMode('DETAIL')} 
+                        className="p-2 hover:bg-slate-200 rounded-full text-slate-600 transition-colors"
+                    >
+                        <ArrowLeft size={24}/>
+                    </button>
+                    <div>
+                        <h2 className="text-2xl font-bold text-slate-800">บันทึกรายการบัญชี</h2>
+                        <p className="text-slate-500 text-sm">บัญชี: {targetAcc.name}</p>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
+                    <div className="p-8">
+                        <form onSubmit={handleAddTransaction} className="space-y-6">
+                            {/* Type Selector */}
+                            <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
+                                <button 
+                                    type="button" 
+                                    onClick={() => setNewTrans({...newTrans, type: 'Income'})} 
+                                    className={`flex-1 py-3 rounded-lg font-bold text-base transition-all ${newTrans.type === 'Income' ? 'bg-white text-green-600 shadow-md ring-1 ring-slate-200' : 'text-slate-500'}`}
+                                >
+                                    รายรับ (ฝาก)
+                                </button>
+                                <button 
+                                    type="button" 
+                                    onClick={() => setNewTrans({...newTrans, type: 'Expense'})} 
+                                    className={`flex-1 py-3 rounded-lg font-bold text-base transition-all ${newTrans.type === 'Expense' ? 'bg-white text-red-600 shadow-md ring-1 ring-slate-200' : 'text-slate-500'}`}
+                                >
+                                    รายจ่าย (ถอน)
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-1">
+                                        <Calendar size={16} className="text-slate-400"/> วันที่ทำรายการ
+                                    </label>
+                                    <input 
+                                        type="date" 
+                                        required
+                                        value={newTrans.date}
+                                        onChange={e => setNewTrans({...newTrans, date: e.target.value})}
+                                        className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-slate-700 font-medium"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-1">
+                                        <DollarSign size={16} className="text-slate-400"/> จำนวนเงิน (บาท)
+                                    </label>
+                                    <input 
+                                        type="number" 
+                                        step="0.01"
+                                        required
+                                        placeholder="0.00"
+                                        value={newTrans.amount}
+                                        onChange={e => setNewTrans({...newTrans, amount: e.target.value})}
+                                        className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-xl font-bold text-slate-800"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">รายละเอียดรายการ</label>
+                                <textarea 
+                                    rows={3}
+                                    required
+                                    placeholder="ระบุที่มาหรือรายละเอียดการจ่าย..."
+                                    value={newTrans.desc}
+                                    onChange={e => setNewTrans({...newTrans, desc: e.target.value})}
+                                    className="w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-orange-500 outline-none text-slate-700 font-medium"
+                                />
+                            </div>
+
+                            <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 flex items-start gap-3">
+                                <AlertTriangle className="text-orange-500 shrink-0 mt-0.5" size={18}/>
+                                <div className="text-xs text-orange-800 leading-relaxed font-medium">
+                                    การบันทึกข้อมูลจะถูกส่งไปยังระบบตรวจสอบออนไลน์และแจ้งเตือนผู้บริหารทันที โปรดตรวจสอบความถูกต้องของจำนวนเงินก่อนบันทึก
+                                </div>
+                            </div>
+
+                            <div className="flex gap-4 pt-4">
+                                <button 
+                                    type="button" 
+                                    onClick={() => setViewMode('DETAIL')} 
+                                    className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors"
+                                >
+                                    ยกเลิก
+                                </button>
+                                <button 
+                                    type="submit" 
+                                    className="flex-[2] py-4 bg-orange-600 text-white rounded-xl font-bold shadow-lg hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
+                                >
+                                    <Save size={20}/> บันทึกรายการลงบัญชี
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const renderPrintView = () => {
         let targetAcc = selectedAccount;
         if (!targetAcc && activeTab === 'NonBudget') {
@@ -1073,7 +1103,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
         return (
             <div className="absolute inset-0 z-50 bg-slate-100 min-h-screen animate-fade-in">
-                {/* Print Controls Toolbar */}
                 <div className="bg-white p-4 shadow-sm mb-6 print:hidden sticky top-0 z-40 border-b border-slate-200">
                     <div className="max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
                          <div className="flex items-center gap-4 w-full md:w-auto flex-wrap">
@@ -1082,57 +1111,24 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                              </button>
                              
                              <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                                <button 
-                                    onClick={() => setReportConfig({ ...reportConfig, type: 'MONTH' })}
-                                    className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'MONTH' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
-                                >
-                                    รายเดือน
-                                </button>
-                                <button 
-                                    onClick={() => setReportConfig({ ...reportConfig, type: 'CUSTOM' })}
-                                    className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'CUSTOM' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
-                                >
-                                    กำหนดเอง
-                                </button>
-                                <button 
-                                    onClick={() => setReportConfig({ ...reportConfig, type: 'ALL' })}
-                                    className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'ALL' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}
-                                >
-                                    ทั้งหมด
-                                </button>
+                                <button onClick={() => setReportConfig({ ...reportConfig, type: 'MONTH' })} className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'MONTH' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>รายเดือน</button>
+                                <button onClick={() => setReportConfig({ ...reportConfig, type: 'CUSTOM' })} className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'CUSTOM' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>กำหนดเอง</button>
+                                <button onClick={() => setReportConfig({ ...reportConfig, type: 'ALL' })} className={`px-3 py-1 text-xs font-bold rounded ${reportConfig.type === 'ALL' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>ทั้งหมด</button>
                              </div>
 
                              {reportConfig.type === 'MONTH' && (
-                                 <input 
-                                    type="month" 
-                                    value={reportConfig.month}
-                                    onChange={(e) => setReportConfig({ ...reportConfig, month: e.target.value })}
-                                    className="border rounded px-2 py-1 text-sm text-slate-700"
-                                 />
+                                 <input type="month" value={reportConfig.month} onChange={(e) => setReportConfig({ ...reportConfig, month: e.target.value })} className="border rounded px-2 py-1 text-sm text-slate-700"/>
                              )}
                              {reportConfig.type === 'CUSTOM' && (
                                  <div className="flex items-center gap-1">
-                                     <input 
-                                        type="date" 
-                                        value={reportConfig.customStart}
-                                        onChange={(e) => setReportConfig({ ...reportConfig, customStart: e.target.value })}
-                                        className="border rounded px-2 py-1 text-xs text-slate-700 w-32"
-                                     />
+                                     <input type="date" value={reportConfig.customStart} onChange={(e) => setReportConfig({ ...reportConfig, customStart: e.target.value })} className="border rounded px-2 py-1 text-xs text-slate-700 w-32"/>
                                      <span className="text-slate-400">-</span>
-                                     <input 
-                                        type="date" 
-                                        value={reportConfig.customEnd}
-                                        onChange={(e) => setReportConfig({ ...reportConfig, customEnd: e.target.value })}
-                                        className="border rounded px-2 py-1 text-xs text-slate-700 w-32"
-                                     />
+                                     <input type="date" value={reportConfig.customEnd} onChange={(e) => setReportConfig({ ...reportConfig, customEnd: e.target.value })} className="border rounded px-2 py-1 text-xs text-slate-700 w-32"/>
                                  </div>
                              )}
                          </div>
 
                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-400 font-mono hidden md:inline">
-                                Found {filteredTrans.length} records
-                            </span>
                             <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2 shadow-sm">
                                 <Printer size={20}/> สั่งพิมพ์
                             </button>
@@ -1224,6 +1220,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             {viewMode === 'DASHBOARD' && renderDashboard()}
             {viewMode === 'DETAIL' && renderDetail()}
             {viewMode === 'PRINT' && renderPrintView()}
+            {viewMode === 'TRANS_FORM' && renderTransactionFormView()}
 
             {/* Help Import Modal */}
             {showImportHelp && (
@@ -1248,7 +1245,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                                 <ul className="list-disc pl-5 space-y-1 text-blue-700">
                                     <li>ระบบจะแยกรายการไปลงตาม <strong>ชื่อบัญชี</strong> ที่ระบุในไฟล์ให้อัตโนมัติ</li>
                                     <li>ถ้ายังไม่มีบัญชีชื่อนั้น ระบบจะสร้างการ์ดบัญชีใหม่ให้ทันที</li>
-                                    <li>ถ้าช่อง "ฝาก/ถอน" มีคำว่า <strong>ถอน</strong> หรือ <strong>จ่าย</strong> ระบบจะบันทึกเป็นรายจ่าย (ตัวแดง) นอกนั้นเป็นรายรับ</li>
                                 </ul>
                             </div>
                         </div>
@@ -1314,61 +1310,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                 </div>
             )}
 
-            {/* Transaction Form Modal */}
-            {showTransForm && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-scale-up">
-                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                            <PlusCircle className="text-orange-500"/> บันทึกรายการใหม่
-                        </h3>
-                        <form onSubmit={handleAddTransaction} className="space-y-4">
-                            {/* Type Selector */}
-                            <div className="flex bg-slate-100 p-1 rounded-lg mb-2">
-                                <button type="button" onClick={() => setNewTrans({...newTrans, type: 'Income'})} className={`flex-1 py-2 rounded-md font-bold text-sm transition-all ${newTrans.type === 'Income' ? 'bg-white text-green-600 shadow' : 'text-slate-500'}`}>รายรับ</button>
-                                <button type="button" onClick={() => setNewTrans({...newTrans, type: 'Expense'})} className={`flex-1 py-2 rounded-md font-bold text-sm transition-all ${newTrans.type === 'Expense' ? 'bg-white text-red-600 shadow' : 'text-slate-500'}`}>รายจ่าย</button>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">วันที่</label>
-                                <input 
-                                    type="date" 
-                                    required
-                                    value={newTrans.date}
-                                    onChange={e => setNewTrans({...newTrans, date: e.target.value})}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">รายการ</label>
-                                <input 
-                                    type="text" 
-                                    required
-                                    placeholder="ระบุรายละเอียด..."
-                                    value={newTrans.desc}
-                                    onChange={e => setNewTrans({...newTrans, desc: e.target.value})}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">จำนวนเงิน (บาท)</label>
-                                <input 
-                                    type="number" 
-                                    step="0.01"
-                                    required
-                                    value={newTrans.amount}
-                                    onChange={e => setNewTrans({...newTrans, amount: e.target.value})}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-orange-500 outline-none text-xl font-bold text-slate-800"
-                                />
-                            </div>
-                            <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => setShowTransForm(false)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold">ยกเลิก</button>
-                                <button type="submit" className="flex-1 py-2 bg-orange-600 text-white rounded-lg font-bold shadow-md">บันทึก</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
             {/* EDIT Transaction Modal */}
             {showEditModal && editingTransaction && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -1388,7 +1329,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                         </div>
 
                         <form onSubmit={handleUpdateTransaction} className="space-y-4">
-                             {/* Type Selector */}
                              <div className="flex bg-slate-100 p-1 rounded-lg mb-2">
                                 <button type="button" onClick={() => setEditingTransaction({...editingTransaction, type: 'Income'})} className={`flex-1 py-2 rounded-md font-bold text-sm transition-all ${editingTransaction.type === 'Income' ? 'bg-white text-green-600 shadow' : 'text-slate-500'}`}>รายรับ</button>
                                 <button type="button" onClick={() => setEditingTransaction({...editingTransaction, type: 'Expense'})} className={`flex-1 py-2 rounded-md font-bold text-sm transition-all ${editingTransaction.type === 'Expense' ? 'bg-white text-red-600 shadow' : 'text-slate-500'}`}>รายจ่าย</button>
