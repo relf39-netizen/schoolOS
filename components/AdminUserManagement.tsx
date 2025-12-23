@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
 import { 
@@ -106,15 +107,19 @@ function doGet(e) {
         }
     }, [currentSchool]);
 
-    // Load Config
+    // Load Config - Isolated by School ID
     useEffect(() => {
         const fetchConfig = async () => {
-             if (isConfigured && db) {
+             if (isConfigured && db && currentSchool?.id) {
                  try {
-                     const docRef = doc(db, "system_config", "settings");
+                     // Updated Path for School Isolation
+                     const docRef = doc(db, "schools", currentSchool.id, "settings", "config");
                      const docSnap = await getDoc(docRef);
                      if (docSnap.exists()) {
                          setConfig(docSnap.data() as SystemConfig);
+                     } else {
+                         // Default values if first time
+                         setConfig(prev => ({ ...prev, schoolName: currentSchool.name }));
                      }
                  } catch (e) {
                      console.error("Config fetch error", e);
@@ -122,7 +127,7 @@ function doGet(e) {
              }
         };
         fetchConfig();
-    }, []);
+    }, [currentSchool.id]);
 
     // Helper: Resize Image
     const resizeImage = (file: File, maxWidth: number = 300): Promise<string> => {
@@ -173,16 +178,19 @@ function doGet(e) {
     };
 
     const handleSaveConfig = async () => {
+        if (!currentSchool?.id) return;
         setIsLoadingConfig(true);
         // Ensure no trailing slash
         let cleanUrl = config.appBaseUrl || '';
         if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
-        const newConfig = { ...config, appBaseUrl: cleanUrl };
+        const newConfig = { ...config, appBaseUrl: cleanUrl, schoolName: currentSchool.name };
 
         try {
             if (isConfigured && db) {
-                await setDoc(doc(db, "system_config", "settings"), newConfig);
-                alert("บันทึกการตั้งค่าเรียบร้อย");
+                // Updated Path for School Isolation
+                const docRef = doc(db, "schools", currentSchool.id, "settings", "config");
+                await setDoc(docRef, newConfig);
+                alert("บันทึกการตั้งค่าเฉพาะโรงเรียนของท่านเรียบร้อยแล้ว");
             } else {
                 // Mock Save
                 setTimeout(() => {
@@ -284,7 +292,7 @@ function doGet(e) {
                     </div>
                     <div>
                         <h2 className="text-xl font-bold text-slate-800">ผู้ดูแลระบบ</h2>
-                        <p className="text-slate-500 text-sm">จัดการผู้ใช้งานและตั้งค่าระบบ</p>
+                        <p className="text-slate-500 text-sm">จัดการผู้ใช้งานและตั้งค่าระบบโรงเรียน {currentSchool.name}</p>
                     </div>
                 </div>
                 <div className="flex bg-slate-100 p-1 rounded-lg overflow-x-auto max-w-full">
@@ -608,7 +616,7 @@ function doGet(e) {
                     <div className="space-y-6">
                         <div className="flex items-center gap-2 mb-4 border-b pb-4">
                             <Database className="text-purple-600"/>
-                            <h3 className="font-bold text-lg text-slate-800">ตั้งค่าระบบส่วนกลาง (Integration)</h3>
+                            <h3 className="font-bold text-lg text-slate-800">ตั้งค่าระบบเฉพาะโรงเรียน (School-Isolated Config)</h3>
                         </div>
 
                         {/* Telegram Config */}
@@ -627,7 +635,7 @@ function doGet(e) {
                                         placeholder="123456789:ABCDefGhIJKlmNoPQRstUvwxyz..."
                                     />
                                     <p className="text-xs text-blue-500 mt-1">
-                                        ใช้สำหรับส่งการแจ้งเตือนหนังสือราชการไปยังบุคลากรผ่าน Telegram
+                                        ใช้สำหรับส่งการแจ้งเตือนหนังสือราชการไปยังบุคลากรผ่าน Telegram (ข้อมูลเป็นความลับเฉพาะโรงเรียนท่าน)
                                     </p>
                                 </div>
                                 <div>

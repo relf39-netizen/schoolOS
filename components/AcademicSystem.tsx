@@ -1,102 +1,74 @@
 
 import React, { useState, useEffect } from 'react';
 import { Teacher, EnrollmentData, TestScoreData, TestType } from '../types';
-import { MOCK_ENROLLMENTS, MOCK_TEST_SCORES, CURRENT_SCHOOL_YEAR } from '../constants';
+import { CURRENT_SCHOOL_YEAR } from '../constants';
 import { 
     GraduationCap, Users, LineChart, BarChart as BarChartIcon, 
-    Plus, Save, Edit2, ChevronLeft, ChevronRight, LayoutGrid, 
-    BookOpen, Award, Database, ServerOff, Loader, CheckCircle
+    Save, ChevronLeft, Award, Database, Loader, Cloud, RefreshCw
 } from 'lucide-react';
 import { 
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
     LineChart as RechartsLineChart, Line, LabelList 
 } from 'recharts';
-import { db, isConfigured } from '../firebaseConfig';
-import { collection, query, where, getDocs, setDoc, doc } from 'firebase/firestore';
+import { supabase, isConfigured } from '../supabaseClient';
 
 interface AcademicSystemProps {
     currentUser: Teacher;
 }
 
 const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
-    // View State
     const [viewMode, setViewMode] = useState<'DASHBOARD' | 'ENROLLMENT' | 'TEST_SCORES'>('DASHBOARD');
-    
-    // Data State
     const [enrollments, setEnrollments] = useState<EnrollmentData[]>([]);
     const [testScores, setTestScores] = useState<TestScoreData[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
-    // Form State (Enrollment)
     const [selectedYear, setSelectedYear] = useState<string>(CURRENT_SCHOOL_YEAR);
     const [tempEnrollment, setTempEnrollment] = useState<EnrollmentData | null>(null);
-
-    // Form State (Test Scores)
     const [selectedTestType, setSelectedTestType] = useState<TestType>('ONET');
     const [tempScore, setTempScore] = useState<TestScoreData | null>(null);
 
-    // Initial Load
-    useEffect(() => {
-        const loadData = async () => {
-            setIsLoading(true);
-            if (isConfigured && db) {
-                try {
-                    // Fetch Enrollments
-                    const enrollQ = query(collection(db, "academic_enrollments"), where("schoolId", "==", currentUser.schoolId));
-                    const enrollSnap = await getDocs(enrollQ);
-                    const fetchedEnrollments = enrollSnap.docs.map(doc => doc.data() as EnrollmentData);
-                    
-                    // Fetch Scores
-                    const scoreQ = query(collection(db, "academic_test_scores"), where("schoolId", "==", currentUser.schoolId));
-                    const scoreSnap = await getDocs(scoreQ);
-                    const fetchedScores = scoreSnap.docs.map(doc => doc.data() as TestScoreData);
-
-                    if (fetchedEnrollments.length > 0 || fetchedScores.length > 0) {
-                        setEnrollments(fetchedEnrollments);
-                        setTestScores(fetchedScores);
-                    } else {
-                        // Fallback
-                        setEnrollments(MOCK_ENROLLMENTS);
-                        setTestScores(MOCK_TEST_SCORES);
-                    }
-                } catch (e) {
-                    console.error("Firebase Academic Fetch Error", e);
-                    setEnrollments(MOCK_ENROLLMENTS);
-                    setTestScores(MOCK_TEST_SCORES);
+    const loadData = async () => {
+        setIsLoading(true);
+        if (isConfigured && supabase) {
+            try {
+                const { data: enrollData } = await supabase
+                    .from('academic_enrollments')
+                    .select('*')
+                    .eq('school_id', currentUser.schoolId);
+                
+                if (enrollData) {
+                    setEnrollments(enrollData.map(d => ({
+                        id: d.id, schoolId: d.school_id, year: d.year, levels: d.levels
+                    })));
                 }
-            } else {
-                // Mock
-                setEnrollments(MOCK_ENROLLMENTS);
-                setTestScores(MOCK_TEST_SCORES);
+
+                const { data: scoreData } = await supabase
+                    .from('academic_test_scores')
+                    .select('*')
+                    .eq('school_id', currentUser.schoolId);
+                
+                if (scoreData) {
+                    setTestScores(scoreData.map(d => ({
+                        id: d.id, schoolId: d.school_id, year: d.year, testType: d.test_type as TestType, results: d.results
+                    })));
+                }
+            } catch (err) {
+                console.error("Database Fetch Error:", err);
             }
-            setIsLoading(false);
-        };
+        }
+        setIsLoading(false);
+    };
+
+    useEffect(() => {
         loadData();
     }, [currentUser.schoolId]);
 
-    // --- Logic & Helpers ---
-
     const LEVELS = [
-        { id: 'Anuban1', label: 'อนุบาล 1' },
-        { id: 'Anuban2', label: 'อนุบาล 2' },
-        { id: 'Anuban3', label: 'อนุบาล 3' },
-        { id: 'Prathom1', label: 'ประถมศึกษาปีที่ 1' },
-        { id: 'Prathom2', label: 'ประถมศึกษาปีที่ 2' },
-        { id: 'Prathom3', label: 'ประถมศึกษาปีที่ 3' },
-        { id: 'Prathom4', label: 'ประถมศึกษาปีที่ 4' },
-        { id: 'Prathom5', label: 'ประถมศึกษาปีที่ 5' },
-        { id: 'Prathom6', label: 'ประถมศึกษาปีที่ 6' },
+        { id: 'Anuban1', label: 'อนุบาล 1' }, { id: 'Anuban2', label: 'อนุบาล 2' }, { id: 'Anuban3', label: 'อนุบาล 3' },
+        { id: 'Prathom1', label: 'ป.1' }, { id: 'Prathom2', label: 'ป.2' }, { id: 'Prathom3', label: 'ป.3' },
+        { id: 'Prathom4', label: 'ป.4' }, { id: 'Prathom5', label: 'ป.5' }, { id: 'Prathom6', label: 'ป.6' },
     ];
-
-    const getTestSubjects = (type: TestType) => {
-        switch(type) {
-            case 'RT': return ['Reading', 'Understanding']; // การอ่านออกเสียง, การอ่านรู้เรื่อง
-            case 'NT': return ['Math', 'Thai']; // คณิตศาสตร์, ภาษาไทย
-            case 'ONET': return ['Thai', 'Math', 'Science', 'English']; // ไทย, คณิต, วิทย์, อังกฤษ
-            default: return [];
-        }
-    };
 
     const getTestSubjectLabel = (key: string) => {
         const map: any = {
@@ -106,394 +78,255 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
         return map[key] || key;
     };
 
+    const getTestSubjects = (type: TestType) => {
+        switch(type) {
+            case 'RT': return ['Reading', 'Understanding'];
+            case 'NT': return ['Math', 'Thai'];
+            case 'ONET': return ['Thai', 'Math', 'Science', 'English'];
+            default: return [];
+        }
+    };
+
     const handleSaveEnrollment = async () => {
-        if (!tempEnrollment) return;
+        if (!tempEnrollment || !supabase) return;
         setIsSaving(true);
-        
-        let newEnrollments = [...enrollments];
-        const existingIndex = newEnrollments.findIndex(e => e.year === tempEnrollment.year);
-        
-        if (existingIndex >= 0) {
-            newEnrollments[existingIndex] = tempEnrollment;
-        } else {
-            newEnrollments.push(tempEnrollment);
-        }
-
-        if (isConfigured && db) {
-            try {
-                // Use a unique ID combination: schoolId + year
-                const docId = tempEnrollment.id.includes(currentUser.schoolId) 
-                    ? tempEnrollment.id 
-                    : `enroll_${currentUser.schoolId}_${tempEnrollment.year}`;
-                
-                // Ensure the ID in the data matches the doc ID
-                const dataToSave = { ...tempEnrollment, id: docId };
-                
-                await setDoc(doc(db, "academic_enrollments", docId), dataToSave);
-                
-                // Update local state with the correct ID
-                if (existingIndex >= 0) {
-                    newEnrollments[existingIndex] = dataToSave;
-                } else {
-                    newEnrollments[newEnrollments.length - 1] = dataToSave;
-                }
-            } catch (e) {
-                console.error("Save Enrollment Error", e);
-                alert("บันทึกออนไลน์ไม่สำเร็จ (แต่บันทึกในหน้าจอแล้ว)");
-            }
-        } else {
-            // Simulate delay
-            await new Promise(r => setTimeout(r, 500));
-        }
-
-        setEnrollments(newEnrollments);
+        const payload = {
+            id: `enroll_${currentUser.schoolId}_${tempEnrollment.year}`,
+            school_id: currentUser.schoolId,
+            year: tempEnrollment.year,
+            levels: tempEnrollment.levels
+        };
+        const { error } = await supabase.from('academic_enrollments').upsert([payload]);
+        if (!error) { alert("บันทึกข้อมูลเรียบร้อยแล้ว"); await loadData(); setViewMode('DASHBOARD'); }
         setIsSaving(false);
-        alert("บันทึกข้อมูลจำนวนนักเรียนเรียบร้อยแล้ว");
     };
 
     const handleSaveScore = async () => {
-        if (!tempScore) return;
+        if (!tempScore || !supabase) return;
         setIsSaving(true);
-
-        let newScores = [...testScores];
-        const existingIndex = newScores.findIndex(s => s.year === tempScore.year && s.testType === tempScore.testType);
-
-        if (existingIndex >= 0) {
-            newScores[existingIndex] = tempScore;
-        } else {
-            newScores.push(tempScore);
-        }
-
-        if (isConfigured && db) {
-            try {
-                // Use a unique ID combination: schoolId + type + year
-                const docId = tempScore.id.includes(currentUser.schoolId) 
-                    ? tempScore.id 
-                    : `score_${currentUser.schoolId}_${tempScore.testType.toLowerCase()}_${tempScore.year}`;
-
-                const dataToSave = { ...tempScore, id: docId };
-
-                await setDoc(doc(db, "academic_test_scores", docId), dataToSave);
-
-                // Update local state
-                if (existingIndex >= 0) {
-                    newScores[existingIndex] = dataToSave;
-                } else {
-                    newScores[newScores.length - 1] = dataToSave;
-                }
-            } catch (e) {
-                console.error("Save Score Error", e);
-                alert("บันทึกออนไลน์ไม่สำเร็จ (แต่บันทึกในหน้าจอแล้ว)");
-            }
-        } else {
-            await new Promise(r => setTimeout(r, 500));
-        }
-
-        setTestScores(newScores);
+        const payload = {
+            id: `score_${currentUser.schoolId}_${tempScore.testType.toLowerCase()}_${tempScore.year}`,
+            school_id: currentUser.schoolId,
+            year: tempScore.year,
+            test_type: tempScore.testType,
+            results: tempScore.results
+        };
+        const { error } = await supabase.from('academic_test_scores').upsert([payload]);
+        if (!error) { alert("บันทึกคะแนนสอบเรียบร้อยแล้ว"); await loadData(); setViewMode('DASHBOARD'); }
         setIsSaving(false);
-        alert("บันทึกคะแนนสอบเรียบร้อยแล้ว");
     };
 
     const initEnrollmentForm = (year: string) => {
         const existing = enrollments.find(e => e.year === year);
-        if (existing) {
-            setTempEnrollment({ ...existing }); // Clone
-        } else {
-            const emptyLevels: any = {};
-            LEVELS.forEach(l => emptyLevels[l.id] = { m: 0, f: 0 });
-            setTempEnrollment({
-                id: `enroll_${currentUser.schoolId}_${year}`, // Generate ID with SchoolID
-                schoolId: currentUser.schoolId,
-                year: year,
-                levels: emptyLevels
-            });
+        if (existing) setTempEnrollment({ ...existing });
+        else {
+            const empty: any = {}; LEVELS.forEach(l => empty[l.id] = { m: 0, f: 0 });
+            setTempEnrollment({ id: '', schoolId: currentUser.schoolId, year, levels: empty });
         }
     };
 
     const initScoreForm = (year: string, type: TestType) => {
         const existing = testScores.find(s => s.year === year && s.testType === type);
-        if (existing) {
-            setTempScore({ ...existing });
-        } else {
-            const subjects = getTestSubjects(type);
-            const emptyResults: any = {};
-            subjects.forEach(sub => emptyResults[sub] = 0);
-            setTempScore({
-                id: `score_${currentUser.schoolId}_${type.toLowerCase()}_${year}`, // Generate ID with SchoolID
-                schoolId: currentUser.schoolId,
-                year: year,
-                testType: type,
-                results: emptyResults
-            });
+        if (existing) setTempScore({ ...existing });
+        else {
+            const res: any = {}; getTestSubjects(type).forEach(s => res[s] = 0);
+            setTempScore({ id: '', schoolId: currentUser.schoolId, year, testType: type, results: res });
         }
     };
 
-    // --- Renderers ---
-
     const renderDashboard = () => {
-        // Chart 1: Total Students per Year (Aggregated)
         const enrollmentChartData = enrollments
             .sort((a, b) => parseInt(a.year) - parseInt(b.year))
             .map(e => {
-                let totalM = 0;
-                let totalF = 0;
-                Object.values(e.levels).forEach((val: any) => {
-                    totalM += val.m || 0;
-                    totalF += val.f || 0;
-                });
-                return {
-                    year: `ปี ${e.year}`,
-                    Total: totalM + totalF, // Use Total for bar
-                    Male: totalM, // Keep for tooltip
-                    Female: totalF // Keep for tooltip
-                };
+                let total = 0;
+                Object.values(e.levels).forEach((val: any) => { total += (parseInt(val.m) || 0) + (parseInt(val.f) || 0); });
+                return { year: `ปี ${e.year}`, Total: total };
             });
 
-        // Chart 2: Compare Scores (Latest available type)
-        // Group by Test Type then by Subject
         const prepareScoreData = (type: TestType) => {
-            const filtered = testScores.filter(s => s.testType === type).sort((a,b) => parseInt(a.year) - parseInt(b.year));
-            // Transform for Recharts: array of { year, subject1, subject2... }
-            return filtered.map(s => {
-                const item: any = { year: `ปี ${s.year}` };
-                Object.keys(s.results).forEach(subj => {
-                    item[getTestSubjectLabel(subj)] = s.results[subj];
+            return testScores.filter(s => s.testType === type)
+                .sort((a,b) => parseInt(a.year) - parseInt(b.year))
+                .map(s => {
+                    const item: any = { year: `ปี ${s.year}` };
+                    Object.keys(s.results).forEach(subj => { item[getTestSubjectLabel(subj)] = s.results[subj]; });
+                    return item;
                 });
-                return item;
-            });
         };
 
         const rtData = prepareScoreData('RT');
         const ntData = prepareScoreData('NT');
         const onetData = prepareScoreData('ONET');
-
-        const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#a4de6c'];
+        const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+        const hasNoData = enrollments.length === 0 && testScores.length === 0;
 
         return (
-            <div className="space-y-8 pb-20 animate-fade-in">
-                {/* Header */}
-                <div className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white p-6 rounded-2xl shadow-lg flex justify-between items-center">
-                    <div>
-                        <h2 className="text-2xl font-bold flex items-center gap-2">
-                            <GraduationCap size={32}/> งานบริหารวิชาการ
-                        </h2>
-                        <p className="text-indigo-100 mt-1">สถิตินักเรียนและผลสัมฤทธิ์ทางการเรียน</p>
+            <div className="space-y-6 pb-20 animate-fade-in">
+                {/* Header Banner */}
+                <div className="bg-indigo-600 text-white p-5 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-white/20 p-2.5 rounded-xl"><GraduationCap size={28}/></div>
+                        <div>
+                            <h2 className="text-xl font-bold">งานบริหารวิชาการ</h2>
+                            <p className="text-indigo-100 text-xs font-medium">สถิตินักเรียนและผลสัมฤทธิ์ทางการเรียนระดับสถานศึกษา</p>
+                        </div>
                     </div>
-                    <div className="flex gap-3">
-                        <button onClick={() => { setViewMode('ENROLLMENT'); initEnrollmentForm(selectedYear); }} className="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg font-bold backdrop-blur-sm flex items-center gap-2 transition-all">
-                            <Users size={18}/> ข้อมูลนักเรียน
+                    <div className="flex gap-2">
+                        <button onClick={() => { setViewMode('ENROLLMENT'); initEnrollmentForm(selectedYear); }} className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-2 transition-all border border-white/10">
+                            <Users size={14}/> ข้อมูลนักเรียน
                         </button>
-                        <button onClick={() => { setViewMode('TEST_SCORES'); initScoreForm(selectedYear, selectedTestType); }} className="bg-white text-indigo-700 hover:bg-indigo-50 px-4 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2 transition-all">
-                            <Award size={18}/> ผลสอบ O-NET/NT/RT
+                        <button onClick={() => { setViewMode('TEST_SCORES'); initScoreForm(selectedYear, selectedTestType); }} className="bg-white text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg font-bold text-xs shadow-md flex items-center gap-2 transition-all">
+                            <Award size={14}/> ผลสอบ O-NET/NT/RT
                         </button>
                     </div>
                 </div>
 
-                {/* Enrollment Chart */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                        <BarChartIcon className="text-indigo-500"/> เปรียบเทียบจำนวนนักเรียนรวมแต่ละปีการศึกษา
-                    </h3>
-                    <div className="h-[350px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={enrollmentChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                <XAxis dataKey="year" />
-                                <YAxis />
-                                <Tooltip cursor={{ fill: '#f1f5f9' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                                <Legend />
-                                {/* Single Bar for Total with Label on Top */}
-                                <Bar dataKey="Total" name="จำนวนนักเรียนทั้งหมด" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={60}>
-                                    <LabelList dataKey="Total" position="top" fill="#1e293b" fontSize={12} fontWeight="bold" />
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
+                {hasNoData ? (
+                    <div className="bg-white p-20 rounded-2xl border-2 border-dashed border-slate-100 text-center">
+                        <Database className="mx-auto text-slate-200 mb-3" size={40}/>
+                        <h3 className="text-lg font-bold text-slate-800">ไม่มีข้อมูลในระบบ</h3>
+                        <p className="text-slate-400 text-sm">กรุณาบันทึกข้อมูลเพื่อเริ่มแสดงผลรายงานสถิติ</p>
                     </div>
-                </div>
+                ) : (
+                    <div className="space-y-6">
+                        {/* 1. Bar Chart Full Width */}
+                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                            <h3 className="text-sm font-bold text-slate-600 mb-5 flex items-center gap-2 uppercase tracking-wide">
+                                <BarChartIcon size={16} className="text-indigo-500"/> เปรียบเทียบจำนวนนักเรียนรวมแต่ละปีการศึกษา
+                            </h3>
+                            <div className="h-[300px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={enrollmentChartData} margin={{ top: 15, right: 30, left: 0, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11, fontWeight: 'bold'}} dy={10} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
+                                        <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                                        <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                                        <Bar dataKey="Total" name="จำนวนนักเรียนทั้งหมด" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={40}>
+                                            <LabelList dataKey="Total" position="top" fill="#4338ca" fontSize={10} fontWeight="black" offset={8} />
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
 
-                {/* Test Score Charts Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* O-NET */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                            <LineChart className="text-orange-500"/> ผลสอบ O-NET (ป.6) ย้อนหลัง
-                        </h3>
-                        <div className="h-[300px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <RechartsLineChart data={onetData} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis dataKey="year" />
-                                    <YAxis domain={[0, 100]} />
-                                    <Tooltip />
-                                    <Legend />
-                                    <Line type="monotone" dataKey="ภาษาไทย" stroke={COLORS[0]} strokeWidth={2} activeDot={{ r: 8 }}>
-                                        <LabelList position="top" offset={10} fontSize={10} formatter={(val: number) => Number(val).toFixed(2)} fill={COLORS[0]}/>
-                                    </Line>
-                                    <Line type="monotone" dataKey="คณิตศาสตร์" stroke={COLORS[1]} strokeWidth={2} activeDot={{ r: 8 }}>
-                                        <LabelList position="top" offset={10} fontSize={10} formatter={(val: number) => Number(val).toFixed(2)} fill={COLORS[1]}/>
-                                    </Line>
-                                    <Line type="monotone" dataKey="วิทยาศาสตร์" stroke={COLORS[2]} strokeWidth={2} activeDot={{ r: 8 }}>
-                                        <LabelList position="top" offset={10} fontSize={10} formatter={(val: number) => Number(val).toFixed(2)} fill={COLORS[2]}/>
-                                    </Line>
-                                    <Line type="monotone" dataKey="ภาษาอังกฤษ" stroke={COLORS[3]} strokeWidth={2} activeDot={{ r: 8 }}>
-                                        <LabelList position="top" offset={10} fontSize={10} formatter={(val: number) => Number(val).toFixed(2)} fill={COLORS[3]}/>
-                                    </Line>
-                                </RechartsLineChart>
-                            </ResponsiveContainer>
+                        {/* 2. Grid for Score Charts (3 Columns) */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {/* O-NET */}
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                                <h3 className="text-xs font-black text-slate-500 mb-5 flex items-center gap-2 uppercase tracking-widest">
+                                    <LineChart size={14} className="text-orange-500"/> ผลสอบ O-NET (ป.6)
+                                </h3>
+                                <div className="h-[220px] w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <RechartsLineChart data={onetData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 'bold'}} />
+                                            <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
+                                            <Tooltip contentStyle={{ borderRadius: '12px', fontSize: '11px' }} />
+                                            <Legend iconType="circle" wrapperStyle={{fontSize: '9px', paddingTop: '10px'}} />
+                                            {['ภาษาไทย', 'คณิตศาสตร์', 'วิทยาศาสตร์', 'ภาษาอังกฤษ'].map((subj, idx) => (
+                                                <Line key={subj} type="monotone" dataKey={subj} stroke={COLORS[idx]} strokeWidth={3} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} />
+                                            ))}
+                                        </RechartsLineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            {/* NT */}
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                                <h3 className="text-xs font-black text-slate-500 mb-5 flex items-center gap-2 uppercase tracking-widest">
+                                    <LineChart size={14} className="text-emerald-500"/> ผลสอบ NT (ป.3)
+                                </h3>
+                                <div className="h-[220px] w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <RechartsLineChart data={ntData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 'bold'}} />
+                                            <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
+                                            <Tooltip contentStyle={{ borderRadius: '12px', fontSize: '11px' }} />
+                                            <Legend iconType="circle" wrapperStyle={{fontSize: '9px', paddingTop: '10px'}} />
+                                            {['คณิตศาสตร์', 'ภาษาไทย'].map((subj, idx) => (
+                                                <Line key={subj} type="monotone" dataKey={subj} stroke={COLORS[idx + 1]} strokeWidth={3} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} />
+                                            ))}
+                                        </RechartsLineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            {/* RT */}
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                                <h3 className="text-xs font-black text-slate-500 mb-5 flex items-center gap-2 uppercase tracking-widest">
+                                    <LineChart size={14} className="text-blue-500"/> ผลสอบ RT (ป.1)
+                                </h3>
+                                <div className="h-[220px] w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <RechartsLineChart data={rtData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                            <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 'bold'}} />
+                                            <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
+                                            <Tooltip contentStyle={{ borderRadius: '12px', fontSize: '11px' }} />
+                                            <Legend iconType="circle" wrapperStyle={{fontSize: '9px', paddingTop: '10px'}} />
+                                            {['การอ่านออกเสียง', 'การอ่านรู้เรื่อง'].map((subj, idx) => (
+                                                <Line key={subj} type="monotone" dataKey={subj} stroke={COLORS[idx + 4]} strokeWidth={3} dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} activeDot={{ r: 6 }} />
+                                            ))}
+                                        </RechartsLineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-center pt-8">
+                            <div className="px-4 py-1.5 bg-slate-50 rounded-full text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-2">
+                                <Cloud size={10}/> Analytics Connected via Cloud SQL
+                            </div>
                         </div>
                     </div>
-
-                    {/* NT */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                            <LineChart className="text-green-500"/> ผลสอบ NT (ป.3) ย้อนหลัง
-                        </h3>
-                        <div className="h-[300px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <RechartsLineChart data={ntData} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis dataKey="year" />
-                                    <YAxis domain={[0, 100]} />
-                                    <Tooltip />
-                                    <Legend />
-                                    <Line type="monotone" dataKey="คณิตศาสตร์" stroke={COLORS[1]} strokeWidth={2} activeDot={{ r: 8 }}>
-                                        <LabelList position="top" offset={10} fontSize={10} formatter={(val: number) => Number(val).toFixed(2)} fill={COLORS[1]}/>
-                                    </Line>
-                                    <Line type="monotone" dataKey="ภาษาไทย" stroke={COLORS[0]} strokeWidth={2} activeDot={{ r: 8 }}>
-                                        <LabelList position="top" offset={10} fontSize={10} formatter={(val: number) => Number(val).toFixed(2)} fill={COLORS[0]}/>
-                                    </Line>
-                                </RechartsLineChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-
-                    {/* RT */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                            <LineChart className="text-blue-500"/> ผลสอบ RT (ป.1) ย้อนหลัง
-                        </h3>
-                        <div className="h-[300px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <RechartsLineChart data={rtData} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis dataKey="year" />
-                                    <YAxis domain={[0, 100]} />
-                                    <Tooltip />
-                                    <Legend />
-                                    <Line type="monotone" dataKey="การอ่านออกเสียง" stroke={COLORS[0]} strokeWidth={2} activeDot={{ r: 8 }}>
-                                        <LabelList position="top" offset={10} fontSize={10} formatter={(val: number) => Number(val).toFixed(2)} fill={COLORS[0]}/>
-                                    </Line>
-                                    <Line type="monotone" dataKey="การอ่านรู้เรื่อง" stroke={COLORS[4]} strokeWidth={2} activeDot={{ r: 8 }}>
-                                        <LabelList position="top" offset={10} fontSize={10} formatter={(val: number) => Number(val).toFixed(2)} fill={COLORS[4]}/>
-                                    </Line>
-                                </RechartsLineChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                </div>
+                )}
             </div>
         );
     };
 
     const renderEnrollmentForm = () => {
         if (!tempEnrollment) return null;
-
-        // Calculate Totals for Preview
-        let totalM = 0;
-        let totalF = 0;
-        Object.values(tempEnrollment.levels).forEach((v: any) => {
-            totalM += parseInt(v.m || 0);
-            totalF += parseInt(v.f || 0);
-        });
+        let totalM = 0, totalF = 0;
+        Object.values(tempEnrollment.levels).forEach((v: any) => { totalM += parseInt(v.m || 0); totalF += parseInt(v.f || 0); });
 
         return (
-            <div className="max-w-4xl mx-auto space-y-6 pb-20 animate-slide-up">
-                <div className="flex items-center gap-4 mb-2">
-                    <button onClick={() => setViewMode('DASHBOARD')} className="p-2 hover:bg-slate-200 rounded-full text-slate-600">
-                        <ChevronLeft size={24}/>
-                    </button>
-                    <h2 className="text-2xl font-bold text-slate-800">บันทึกข้อมูลนักเรียน</h2>
-                </div>
-
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                        <div className="flex items-center gap-2">
-                            <label className="font-bold text-slate-700">ปีการศึกษา:</label>
-                            <select 
-                                value={tempEnrollment.year} 
-                                onChange={(e) => initEnrollmentForm(e.target.value)}
-                                className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-500"
-                            >
-                                {[...Array(7)].map((_, i) => {
-                                    const y = parseInt(CURRENT_SCHOOL_YEAR) - 3 + i;
-                                    return <option key={y} value={y}>{y}</option>
-                                })}
+            <div className="max-w-3xl mx-auto space-y-4 pb-20 animate-slide-up">
+                <button onClick={() => setViewMode('DASHBOARD')} className="flex items-center gap-2 text-slate-500 font-bold hover:text-indigo-600 transition-colors text-sm">
+                    <ChevronLeft size={16}/> กลับสู่หน้าวิเคราะห์
+                </button>
+                <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 relative overflow-hidden">
+                    {isSaving && <div className="absolute inset-0 bg-white/60 z-50 flex items-center justify-center backdrop-blur-sm"><Loader className="animate-spin text-indigo-600" size={32}/></div>}
+                    <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 border-b pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-indigo-50 rounded-xl text-indigo-600"><Users size={20}/></div>
+                            <select value={tempEnrollment.year} onChange={(e) => initEnrollmentForm(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1 font-bold text-indigo-700 outline-none text-base">
+                                {[2565, 2566, 2567, 2568, 2569].map(y => <option key={y} value={y}>{y}</option>)}
                             </select>
                         </div>
-                        <div className="flex gap-4 text-sm font-bold bg-slate-50 px-4 py-2 rounded-lg border">
-                            <span className="text-blue-600">ชาย: {totalM}</span>
-                            <span className="text-pink-600">หญิง: {totalF}</span>
-                            <span className="text-slate-800">รวม: {totalM + totalF}</span>
+                        <div className="flex gap-4 text-xs font-black bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
+                            <span className="text-blue-500 uppercase">M: {totalM}</span>
+                            <span className="text-pink-500 uppercase">F: {totalF}</span>
+                            <span className="text-slate-800 border-l pl-4 uppercase">Total: {totalM + totalF}</span>
                         </div>
                     </div>
-
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-indigo-50 text-indigo-900 uppercase">
-                                <tr>
-                                    <th className="px-6 py-3 rounded-l-lg">ระดับชั้น</th>
-                                    <th className="px-6 py-3 text-center">นักเรียนชาย</th>
-                                    <th className="px-6 py-3 text-center rounded-r-lg">นักเรียนหญิง</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {LEVELS.map((level) => (
-                                    <tr key={level.id} className="hover:bg-slate-50">
-                                        <td className="px-6 py-3 font-bold text-slate-700">{level.label}</td>
-                                        <td className="px-6 py-3">
-                                            <input 
-                                                type="number" min="0" 
-                                                className="w-full text-center border rounded-lg py-1.5 focus:ring-2 focus:ring-blue-400 outline-none text-blue-700 font-bold bg-blue-50/30"
-                                                value={tempEnrollment.levels[level.id]?.m || 0}
-                                                onChange={(e) => setTempEnrollment({
-                                                    ...tempEnrollment,
-                                                    levels: {
-                                                        ...tempEnrollment.levels,
-                                                        [level.id]: { ...tempEnrollment.levels[level.id], m: parseInt(e.target.value) || 0 }
-                                                    }
-                                                })}
-                                            />
-                                        </td>
-                                        <td className="px-6 py-3">
-                                            <input 
-                                                type="number" min="0" 
-                                                className="w-full text-center border rounded-lg py-1.5 focus:ring-2 focus:ring-pink-400 outline-none text-pink-700 font-bold bg-pink-50/30"
-                                                value={tempEnrollment.levels[level.id]?.f || 0}
-                                                onChange={(e) => setTempEnrollment({
-                                                    ...tempEnrollment,
-                                                    levels: {
-                                                        ...tempEnrollment.levels,
-                                                        [level.id]: { ...tempEnrollment.levels[level.id], f: parseInt(e.target.value) || 0 }
-                                                    }
-                                                })}
-                                            />
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                    <div className="space-y-1">
+                        {LEVELS.map((level) => (
+                            <div key={level.id} className="grid grid-cols-12 items-center gap-2 p-1.5 hover:bg-slate-50 rounded-lg transition-colors">
+                                <div className="col-span-6 md:col-span-4 font-bold text-slate-700 text-sm">{level.label}</div>
+                                <div className="col-span-3 md:col-span-4 relative">
+                                    <input type="number" min="0" className="w-full text-center border rounded-lg py-1.5 focus:border-blue-400 outline-none text-blue-700 font-bold text-sm bg-slate-50/30" value={tempEnrollment.levels[level.id]?.m || 0} onChange={e => setTempEnrollment({...tempEnrollment, levels: {...tempEnrollment.levels, [level.id]: {...tempEnrollment.levels[level.id], m: parseInt(e.target.value)||0}}})}/>
+                                </div>
+                                <div className="col-span-3 md:col-span-4 relative">
+                                    <input type="number" min="0" className="w-full text-center border rounded-lg py-1.5 focus:border-pink-400 outline-none text-pink-700 font-bold text-sm bg-slate-50/30" value={tempEnrollment.levels[level.id]?.f || 0} onChange={e => setTempEnrollment({...tempEnrollment, levels: {...tempEnrollment.levels, [level.id]: {...tempEnrollment.levels[level.id], f: parseInt(e.target.value)||0}}})}/>
+                                </div>
+                            </div>
+                        ))}
                     </div>
-
-                    <div className="mt-6 flex justify-end">
-                        <button 
-                            onClick={handleSaveEnrollment} 
-                            disabled={isSaving}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform hover:scale-105 disabled:opacity-50 disabled:scale-100"
-                        >
-                            {isSaving ? <Loader className="animate-spin" size={20}/> : <Save size={20}/>} 
-                            {isSaving ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
-                        </button>
-                    </div>
+                    <button onClick={handleSaveEnrollment} disabled={isSaving} className="w-full mt-6 py-3 bg-indigo-600 text-white rounded-xl font-bold text-base shadow-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 active:scale-95">
+                        <Save size={18}/> บันทึกข้อมูลนักเรียน (SQL)
+                    </button>
                 </div>
             </div>
         );
@@ -501,98 +334,51 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
     const renderTestScoreForm = () => {
         if (!tempScore) return null;
-
         const subjects = getTestSubjects(tempScore.testType);
-
         return (
-            <div className="max-w-3xl mx-auto space-y-6 pb-20 animate-slide-up">
-                <div className="flex items-center gap-4 mb-2">
-                    <button onClick={() => setViewMode('DASHBOARD')} className="p-2 hover:bg-slate-200 rounded-full text-slate-600">
-                        <ChevronLeft size={24}/>
-                    </button>
-                    <h2 className="text-2xl font-bold text-slate-800">บันทึกคะแนนสอบระดับชาติ</h2>
-                </div>
-
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    
-                    {/* Controls */}
+            <div className="max-w-2xl mx-auto space-y-4 pb-20 animate-slide-up">
+                <button onClick={() => setViewMode('DASHBOARD')} className="flex items-center gap-2 text-slate-500 font-bold hover:text-emerald-600 transition-colors text-sm">
+                    <ChevronLeft size={16}/> กลับสู่หน้าวิเคราะห์
+                </button>
+                <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 relative overflow-hidden">
+                    {isSaving && <div className="absolute inset-0 bg-white/60 z-50 flex items-center justify-center backdrop-blur-sm"><Loader className="animate-spin text-emerald-600" size={32}/></div>}
                     <div className="flex flex-col md:flex-row gap-4 mb-8 bg-slate-50 p-4 rounded-xl border border-slate-100">
                         <div className="flex-1">
-                            <label className="block text-xs font-bold text-slate-500 mb-1">ประเภทการสอบ</label>
-                            <div className="flex bg-white rounded-lg p-1 border shadow-sm">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">ประเภทการสอบ</label>
+                            <div className="flex bg-white rounded-lg p-1 border border-slate-200">
                                 {['RT', 'NT', 'ONET'].map((t) => (
-                                    <button 
-                                        key={t}
-                                        onClick={() => { setSelectedTestType(t as TestType); initScoreForm(tempScore.year, t as TestType); }}
-                                        className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-all ${tempScore.testType === t ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:bg-slate-100'}`}
-                                    >
-                                        {t}
-                                    </button>
+                                    <button key={t} onClick={() => { setSelectedTestType(t as TestType); initScoreForm(tempScore.year, t as TestType); }} className={`flex-1 py-1 text-xs font-black rounded-md transition-all ${tempScore.testType === t ? 'bg-indigo-600 text-white shadow' : 'text-slate-500'}`}>{t}</button>
                                 ))}
                             </div>
                         </div>
                         <div className="flex-1">
-                            <label className="block text-xs font-bold text-slate-500 mb-1">ปีการศึกษา</label>
-                            <select 
-                                value={tempScore.year} 
-                                onChange={(e) => initScoreForm(e.target.value, tempScore.testType)}
-                                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 h-[36px]"
-                            >
-                                {[...Array(7)].map((_, i) => {
-                                    const y = parseInt(CURRENT_SCHOOL_YEAR) - 3 + i;
-                                    return <option key={y} value={y}>{y}</option>
-                                })}
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">ปีการศึกษา</label>
+                            <select value={tempScore.year} onChange={(e) => initScoreForm(e.target.value, tempScore.testType)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1 font-bold text-slate-700 outline-none text-sm h-[32px]">
+                                {[2565, 2566, 2567, 2568, 2569].map(y => <option key={y} value={y}>{y}</option>)}
                             </select>
                         </div>
                     </div>
-
-                    <h3 className="text-center font-bold text-xl text-indigo-800 mb-6">
-                        บันทึกคะแนนเฉลี่ย {tempScore.testType} ปีการศึกษา {tempScore.year}
-                    </h3>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+                    <div className="space-y-4 max-w-md mx-auto">
+                        <h3 className="text-center font-bold text-lg text-slate-800 flex items-center justify-center gap-2"><Award className="text-emerald-500" size={20}/> คะแนนเฉลี่ย {tempScore.testType}</h3>
                         {subjects.map(subj => (
-                            <div key={subj} className="relative">
-                                <label className="block text-sm font-bold text-slate-700 mb-1">
-                                    {getTestSubjectLabel(subj)} (คะแนนเฉลี่ย)
-                                </label>
-                                <input 
-                                    type="number" step="0.01" min="0" max="100"
-                                    value={tempScore.results[subj] || ''}
-                                    onChange={(e) => setTempScore({
-                                        ...tempScore,
-                                        results: { ...tempScore.results, [subj]: parseFloat(e.target.value) || 0 }
-                                    })}
-                                    className="w-full px-4 py-3 border-2 border-indigo-100 rounded-xl focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none text-xl font-bold text-center text-indigo-700"
-                                    placeholder="0.00"
-                                />
+                            <div key={subj} className="space-y-1">
+                                <label className="block text-[11px] font-bold text-slate-500 ml-1 uppercase">{getTestSubjectLabel(subj)}</label>
+                                <div className="relative">
+                                    <input type="number" step="0.01" min="0" max="100" value={tempScore.results[subj] || ''} onChange={e => setTempScore({...tempScore, results: { ...tempScore.results, [subj]: parseFloat(e.target.value) || 0 }})} className="w-full px-4 py-2.5 border rounded-xl focus:border-emerald-500 outline-none text-2xl font-bold text-center text-emerald-600 bg-slate-50/50 transition-all"/>
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 font-bold text-xs">/ 100</div>
+                                </div>
                             </div>
                         ))}
                     </div>
-
-                    <div className="mt-8 flex justify-center">
-                        <button 
-                            onClick={handleSaveScore} 
-                            disabled={isSaving}
-                            className="bg-green-600 hover:bg-green-700 text-white px-10 py-3 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-transform hover:scale-105 disabled:opacity-50 disabled:scale-100"
-                        >
-                            {isSaving ? <Loader className="animate-spin" size={20}/> : <Save size={20}/>} 
-                            {isSaving ? 'กำลังบันทึก...' : 'บันทึกคะแนน'}
-                        </button>
-                    </div>
+                    <button onClick={handleSaveScore} disabled={isSaving} className="w-full mt-8 py-3 bg-emerald-600 text-white rounded-xl font-bold text-base shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 active:scale-95">
+                        <Save size={18}/> บันทึกคะแนนเฉลี่ยลง SQL
+                    </button>
                 </div>
             </div>
         );
     };
 
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center h-64 text-slate-400 flex-col gap-2">
-               <Loader className="animate-spin" size={32}/>
-               <p>กำลังโหลดข้อมูลวิชาการ...</p>
-           </div>
-       );
-    }
+    if (isLoading) return <div className="flex items-center justify-center h-64 text-slate-400 flex-col gap-3 animate-pulse"><Loader className="animate-spin text-indigo-600" size={32}/><p className="font-bold text-sm">กำลังเชื่อมต่อข้อมูล...</p></div>;
 
     return (
         <div className="max-w-7xl mx-auto">

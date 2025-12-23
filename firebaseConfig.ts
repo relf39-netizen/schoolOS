@@ -1,6 +1,5 @@
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-// Fix: Consolidated Firestore imports and combined type/value imports to ensure proper member resolution.
 import { 
   getFirestore, 
   collection, 
@@ -15,34 +14,31 @@ import {
   deleteDoc, 
   getDocs, 
   setDoc,
-  Timestamp,
-  type QuerySnapshot,
-  type DocumentData
+  Timestamp
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
-// Configuration from Environment Variables
-const env = (import.meta as any).env;
-
+/**
+ * 💡 คำแนะนำ: นำค่าที่คัดลอกมาจาก Firebase Project Settings มาวางที่นี่
+ */
 const firebaseConfig = {
-    apiKey: "AIzaSyDEpU1t8EBzxpeWmy8AZrcMySi-SbqGLl4",
-    authDomain: "schooloperatorsystem.firebaseapp.com",
-    databaseURL: "https://schooloperatorsystem-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "schooloperatorsystem",
-    storageBucket: "schooloperatorsystem.firebasestorage.app",
-    messagingSenderId: "821652200196",
-    appId: "1:821652200196:web:5d6e2fe19a365603f64e51",
-    measurementId: "G-DPHF36ZLKK"
-   };
+  apiKey: "AIzaSyDEpU1t8EBzxpeWmy8AZrcMySi-SbqGLl4",
+  authDomain: "schooloperatorsystem.firebaseapp.com",
+  databaseURL: "https://schooloperatorsystem-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "schooloperatorsystem",
+  storageBucket: "schooloperatorsystem.firebasestorage.app",
+  messagingSenderId: "821652200196",
+  appId: "1:821652200196:web:5d6e2fe19a365603f64e51",
+  measurementId: "G-DPHF36ZLKK"
+};
 
-// Check if Firebase should be enabled (API Key must exist)
-export const isConfigured = !!firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_API_KEY';
+export const isConfigured = !!firebaseConfig.apiKey && firebaseConfig.apiKey.length > 10;
 
-let app;
-let db: any;
-let auth: any;
-let storage: any;
+let app: any = null;
+let db: any = null;
+let auth: any = null;
+let storage: any = null;
 
 if (isConfigured) {
   try {
@@ -51,11 +47,10 @@ if (isConfigured) {
     auth = getAuth(app);
     storage = getStorage(app);
   } catch (error) {
-    console.error("Firebase initialization error:", error);
+    console.warn("Firebase initialization failed:", error);
   }
 }
 
-// Re-export Firestore functions to be used throughout the app
 export { 
   db, 
   auth, 
@@ -74,7 +69,5 @@ export {
   setDoc,
   Timestamp
 };
-
-export type { QuerySnapshot, DocumentData };
 
 export default app;
