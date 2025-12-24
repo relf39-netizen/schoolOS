@@ -185,7 +185,7 @@ export const stampReceiveNumber = async ({ fileBase64, bookNumber, date, time, s
     return await pdfDoc.saveAsBase64({ dataUri: true });
 };
 
-// --- STAMP: DIRECTOR COMMAND (BOTTOM RIGHT) ---
+// --- STAMP: COMMAND (Hierarchical Support) ---
 interface StampOptions {
     fileUrl: string;       
     fileType: string;      
@@ -200,13 +200,14 @@ interface StampOptions {
     onStatusChange: (status: string) => void; 
     signatureScale?: number;
     signatureYOffset?: number;
+    alignment?: 'left' | 'right';
 }
 
 export const stampPdfDocument = async ({ 
-    fileUrl, fileType, commandText, directorName, signatureImageBase64, schoolName, targetPage = 1, onStatusChange, signatureScale = 1, signatureYOffset = 0
+    fileUrl, fileType, commandText, directorName, directorPosition, signatureImageBase64, schoolName, targetPage = 1, onStatusChange, signatureScale = 1, signatureYOffset = 0, alignment = 'right'
 }: StampOptions): Promise<string> => {
     
-    onStatusChange('กำลังโหลดฟอนต์และเตรียมเอกสาร...');
+    onStatusChange('กำลังเตรียมเอกสาร...');
 
     let pdfDoc;
     const isNewSheet = fileType === 'new' || !fileUrl;
@@ -242,14 +243,19 @@ export const stampPdfDocument = async ({
     
     const cmToPoints = 28.35;
     const bottomMargin = 0.5 * cmToPoints;
-    const rightMargin = 0.5 * cmToPoints;
+    const horizontalMargin = 0.5 * cmToPoints;
     const boxWidth = 260; 
-    const boxX = pageWidth - boxWidth - rightMargin;
+    
+    // Position box based on alignment (Hierarchy: Director right, Vice-director left)
+    const boxX = alignment === 'left' 
+        ? horizontalMargin 
+        : pageWidth - boxWidth - horizontalMargin;
+
     const fontSize = 14; 
     const lineHeight = fontSize * 1.05; 
     const maxWidth = boxWidth - 10;
 
-    onStatusChange('กำลังเขียนคำสั่งการ...');
+    onStatusChange('กำลังเขียนข้อความ...');
     
     let commandLines: string[] = [];
     commandText.split('\n').forEach(line => {
@@ -282,7 +288,11 @@ export const stampPdfDocument = async ({
     targetPdfPage.drawText(dateText, { x: centerX - (dateWidth / 2), y: footerY, size: fontSize, font: thaiFont, color: rgb(0, 0, 0) });
     footerY += lineHeight;
 
-    const posText = `ผู้อำนวยการ${schoolName || '...................'}`;
+    // FIX: มั่นใจว่าใช้ตำแหน่งที่ส่งมา ไม่ Default เป็น ผอ. ทันที
+    const posText = directorPosition && directorPosition.length > 2 
+        ? directorPosition 
+        : `ผู้อำนวยการ${schoolName || '...................'}`;
+        
     const posWidth = thaiFont.widthOfTextAtSize(posText, fontSize);
     targetPdfPage.drawText(posText, { x: centerX - (posWidth / 2), y: footerY, size: fontSize, font: thaiFont, color: rgb(0, 0, 0) });
     footerY += lineHeight;
@@ -292,7 +302,6 @@ export const stampPdfDocument = async ({
     targetPdfPage.drawText(nameText, { x: centerX - (nameWidth / 2), y: footerY, size: fontSize, font: thaiFont, color: rgb(0, 0, 0) });
     footerY += (lineHeight + 5);
 
-    onStatusChange('กำลังประทับลายเซ็น...');
     if (signatureImageBase64) {
         try {
             const sigBytes = dataURItoUint8Array(signatureImageBase64);

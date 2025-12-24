@@ -5,7 +5,7 @@ import LeaveSystem from './components/LeaveSystem';
 import FinanceSystem from './components/FinanceSystem';
 import AttendanceSystem from './components/AttendanceSystem';
 import ActionPlanSystem from './components/ActionPlanSystem';
-import AcademicSystem from './components/AcademicSystem'; 
+import AcademicSystem from './components/AcademicSystem';
 import AdminUserManagement from './components/AdminUserManagement';
 import UserProfile from './components/UserProfile';
 import LoginScreen from './components/LoginScreen';
@@ -25,6 +25,13 @@ import { sendTelegramMessage } from './utils/telegram';
 
 const SESSION_KEY = 'schoolos_session_v1';
 
+interface AppNotification {
+    message: string;
+    type: 'info' | 'alert';
+    linkTo?: SystemView;
+    linkId?: string;
+}
+
 const App: React.FC = () => {
     const [allTeachers, setAllTeachers] = useState<Teacher[]>([]);
     const [allSchools, setAllSchools] = useState<School[]>([]);
@@ -32,15 +39,16 @@ const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<Teacher | null>(null);
     const [isSuperAdminMode, setIsSuperAdminMode] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [notification, setNotification] = useState<AppNotification | null>(null);
+    const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
     const [focusItem, setFocusItem] = useState<{ view: SystemView, id: string } | null>(null);
     const [pendingDeepLink, setPendingDeepLink] = useState<{ view: SystemView, id: string } | null>(null);
     const [currentView, setCurrentView] = useState<SystemView>(SystemView.DASHBOARD);
 
-    // Hybrid Data Loading: Supabase Sync
+    // Hybrid Data Loading: Supabase Sync for main data
     useEffect(() => {
         const loadData = async () => {
             if (isSupabaseConfigured && supabase) {
-                // Fetch schools
                 const { data: schools } = await supabase.from('schools').select('*');
                 if (schools) setAllSchools(schools.map(s => ({
                     id: s.id, name: s.name, district: s.district, province: s.province,
@@ -48,12 +56,11 @@ const App: React.FC = () => {
                     logoBase64: s.logo_base_64, isSuspended: s.is_suspended
                 })));
 
-                // Fetch profiles
                 const { data: profiles } = await supabase.from('profiles').select('*');
                 if (profiles) setAllTeachers(profiles.map(p => ({
                     id: p.id, schoolId: p.school_id, name: p.name, password: p.password,
                     position: p.position, roles: p.roles as TeacherRole[], 
-                    signatureBase64: p.signature_base64, telegramChatId: p.telegram_chat_id,
+                    signature_base64: p.signature_base_64, telegram_chat_id: p.telegram_chat_id,
                     isSuspended: p.is_suspended
                 })));
                 
@@ -78,7 +85,6 @@ const App: React.FC = () => {
                 if (session.isSuperAdmin) setIsSuperAdminMode(true);
                 else {
                     const user = allTeachers.find(t => t.id === session.userId);
-                    // Check suspension on session restore
                     const school = allSchools.find(s => s.id === user?.schoolId);
                     if (user && !user.isSuspended && !school?.isSuspended) {
                         setCurrentUser(user);
@@ -105,6 +111,23 @@ const App: React.FC = () => {
             window.history.replaceState({}, document.title, window.location.pathname);
         }
     }, [currentUser, pendingDeepLink]);
+
+    // Real-time Notifications via Firebase (if configured)
+    useEffect(() => {
+        if (!currentUser || !isConfigured || !db) return;
+        
+        // Listen for pending leaves
+        const qLeave = query(
+            collection(db, "leave_requests"), 
+            where("status", "==", "Pending"),
+            where("schoolId", "==", currentUser.schoolId) 
+        );
+        const unsubLeave = onSnapshot(qLeave, (snapshot) => {
+            setPendingLeaveCount(snapshot.size);
+        });
+
+        return () => { unsubLeave(); };
+    }, [currentUser]);
 
     const handleLogin = (user: Teacher) => {
         setCurrentUser(user);
@@ -142,27 +165,10 @@ const App: React.FC = () => {
         setCurrentUser(updatedUser);
     };
 
-    const handleCreateSchool = async (s: School) => {
-        if (isSupabaseConfigured && supabase) {
-            await supabase.from('schools').upsert([{ id: s.id, name: s.name, district: s.district, province: s.province, is_suspended: false }]);
-            await supabase.from('school_configs').upsert([{ school_id: s.id, app_base_url: window.location.origin }]);
-            setAllSchools([...allSchools, { ...s, isSuspended: false }]);
-        }
-    };
-
     const handleUpdateSchool = async (s: School) => {
         if (isSupabaseConfigured && supabase) {
-            await supabase.from('schools').upsert([{ id: s.id, name: s.name, district: s.district, province: s.province, lat: s.lat, lng: s.lng, radius: s.radius, late_time_threshold: s.lateTimeThreshold, is_suspended: s.isSuspended || false }]);
+            await supabase.from('schools').upsert([{ id: s.id, name: s.name, district: s.district, province: s.province, lat: s.lat, lng: s.lng, radius: s.radius, late_time_threshold: s.late_time_threshold, is_suspended: s.isSuspended || false }]);
             setAllSchools(allSchools.map(sch => sch.id === s.id ? s : sch));
-        }
-    };
-
-    const handleDeleteSchool = async (id: string) => {
-        if (confirm(`ยืนยันการลบโรงเรียนรหัส ${id}?`)) {
-            if (isSupabaseConfigured && supabase) {
-                await supabase.from('schools').delete().eq('id', id);
-                setAllSchools(allSchools.filter(s => s.id !== id));
-            }
         }
     };
 
@@ -173,6 +179,7 @@ const App: React.FC = () => {
         }
     };
 
+    // Fix: Corrected property name from 'is_suspended' to 'isSuspended' to match Teacher type
     const handleEditTeacher = async (t: Teacher) => { 
         if (isSupabaseConfigured && supabase) {
             await supabase.from('profiles').upsert([{
@@ -191,39 +198,70 @@ const App: React.FC = () => {
         }
     };
 
+    const handleNotificationClick = () => {
+        if (notification?.linkTo) {
+            setCurrentView(notification.linkTo);
+            if (notification.linkId) setFocusItem({ view: notification.linkTo, id: notification.linkId });
+            setNotification(null);
+        }
+    };
+
     const schoolTeachers = allTeachers.filter(t => t.schoolId === currentUser?.schoolId);
     const currentSchool = allSchools.find(s => s.id === currentUser?.schoolId);
 
     const modules = [
-        { id: SystemView.PROFILE, title: 'ข้อมูลส่วนตัว', slogan: 'แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล', icon: UserCircle, color: 'bg-purple-500', blob: 'rgba(168, 85, 247, 0.1)', visible: true },
-        { id: SystemView.DIRECTOR_CALENDAR, title: 'ปฏิทินปฏิบัติงาน ผอ.', slogan: 'แจ้งเตือนนัดหมาย และภารกิจ', icon: Calendar, color: 'bg-blue-500', blob: 'rgba(59, 130, 246, 0.1)', visible: true },
-        { id: SystemView.ACADEMIC, title: 'งานวิชาการ', slogan: 'สถิตินักเรียน / ผลสอบ O-NET', icon: GraduationCap, color: 'bg-indigo-600', blob: 'rgba(79, 70, 229, 0.1)', visible: true },
-        { id: SystemView.DOCUMENTS, title: 'งานสารบรรณ', slogan: 'รับ-ส่ง รวดเร็ว ทันใจ', icon: FileText, color: 'bg-blue-400', blob: 'rgba(56, 189, 248, 0.1)', visible: true },
-        { id: SystemView.PLAN, title: 'แผนปฏิบัติการ', slogan: 'วางแผนแม่นยำ สู่ความสำเร็จ', icon: CalendarRange, color: 'bg-fuchsia-500', blob: 'rgba(217, 70, 239, 0.1)', visible: true },
-        { id: SystemView.LEAVE, title: 'ระบบการลา', slogan: 'โปร่งใส ตรวจสอบง่าย', icon: Users, color: 'bg-emerald-500', blob: 'rgba(16, 185, 129, 0.1)', visible: true },
-        { id: SystemView.FINANCE, title: 'ระบบการเงิน', slogan: 'คุมงบประมาณ อย่างมีประสิทธิภาพ', icon: Activity, color: 'bg-orange-500', blob: 'rgba(249, 115, 22, 0.1)', visible: currentUser?.roles.includes('DIRECTOR') || currentUser?.roles.includes('FINANCE_BUDGET') || currentUser?.roles.includes('FINANCE_NONBUDGET') },
-        { id: SystemView.ATTENDANCE, title: 'ลงเวลาทำงาน', slogan: 'เช็คเวลาแม่นยำ ด้วย GPS', icon: Clock, color: 'bg-rose-500', blob: 'rgba(244, 63, 94, 0.1)', visible: true },
-        { id: SystemView.ADMIN_USERS, title: 'ผู้ดูแลระบบ', slogan: 'ตั้งค่าระบบ และผู้ใช้งาน', icon: Settings, color: 'bg-slate-500', blob: 'rgba(100, 116, 139, 0.1)', visible: currentUser?.roles.includes('SYSTEM_ADMIN') }
+        { id: SystemView.PROFILE, title: 'ข้อมูลส่วนตัว', slogan: 'แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล', icon: UserCircle, color: 'from-purple-500 to-indigo-400', shadow: 'shadow-purple-200', visible: true },
+        { id: SystemView.DIRECTOR_CALENDAR, title: 'ปฏิทินปฏิบัติงาน ผอ.', slogan: 'แจ้งเตือนนัดหมาย และภารกิจ', icon: Calendar, color: 'from-indigo-500 to-blue-400', shadow: 'shadow-indigo-200', visible: true },
+        { id: SystemView.ACADEMIC, title: 'งานวิชาการ', slogan: 'สถิตินักเรียน / ผลสอบ O-NET', icon: GraduationCap, color: 'from-indigo-600 to-violet-500', shadow: 'shadow-indigo-200', visible: true },
+        { id: SystemView.DOCUMENTS, title: 'งานสารบรรณ', slogan: 'รับ-ส่ง รวดเร็ว ทันใจ', icon: FileText, color: 'from-blue-500 to-cyan-400', shadow: 'shadow-blue-200', visible: true },
+        { id: SystemView.PLAN, title: 'แผนปฏิบัติการ', slogan: 'วางแผนแม่นยำ สู่ความสำเร็จ', icon: CalendarRange, color: 'from-violet-500 to-fuchsia-400', shadow: 'shadow-violet-200', visible: true },
+        { id: SystemView.LEAVE, title: 'ระบบการลา', slogan: 'โปร่งใส ตรวจสอบง่าย', icon: Users, color: 'from-emerald-500 to-teal-400', shadow: 'shadow-emerald-200', visible: true, badge: pendingLeaveCount > 0 ? `มีใบลา ${pendingLeaveCount} ใบ` : null },
+        { id: SystemView.FINANCE, title: 'ระบบการเงิน', slogan: 'คุมงบประมาณ อย่างมีประสิทธิภาพ', icon: Activity, color: 'from-amber-500 to-orange-400', shadow: 'shadow-amber-200', visible: currentUser?.roles.includes('DIRECTOR') || currentUser?.roles.includes('FINANCE_BUDGET') || currentUser?.roles.includes('FINANCE_NONBUDGET') },
+        { id: SystemView.ATTENDANCE, title: 'ลงเวลาทำงาน', slogan: 'เช็คเวลาแม่นยำ ด้วย GPS', icon: Clock, color: 'from-rose-500 to-pink-400', shadow: 'shadow-rose-200', visible: true },
+        { id: SystemView.ADMIN_USERS, title: 'ผู้ดูแลระบบ', slogan: 'ตั้งค่าระบบ และผู้ใช้งาน', icon: Settings, color: 'from-slate-600 to-slate-400', shadow: 'shadow-slate-200', visible: currentUser?.roles.includes('SYSTEM_ADMIN') || currentUser?.roles.includes('DIRECTOR') }
     ];
 
     const DashboardCards = () => (
-        <div className="p-6 md:p-12 animate-fade-in pb-24 max-w-7xl mx-auto space-y-12">
-            <div className="bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border flex flex-col md:flex-row items-center gap-8">
-                <div className="w-24 h-24 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-100 shrink-0 overflow-hidden">
-                    {currentSchool?.logoBase64 ? <img src={currentSchool.logoBase64} className="w-full h-full object-contain rounded-2xl" /> : <Building2 size={48} />}
+        <div className="p-4 md:p-8 animate-fade-in pb-24">
+            <div className="max-w-7xl mx-auto">
+                <div className="mb-8 flex items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border">
+                    {currentSchool?.logoBase64 ? (
+                        <img src={currentSchool.logoBase64} alt="Logo" className="w-16 h-16 rounded-xl object-contain bg-white shadow-sm border" />
+                    ) : (
+                        <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center text-white shadow-lg">
+                            <Building2 size={32}/>
+                        </div>
+                    )}
+                    <div>
+                        <h2 className="text-2xl md:text-3xl font-bold text-slate-800">สวัสดี, {currentUser?.name}</h2>
+                        <p className="text-slate-500 font-medium">{currentUser?.position} | {currentSchool?.name}</p>
+                    </div>
                 </div>
-                <div className="text-center md:text-left"><h2 className="text-3xl font-black">สวัสดี, {currentUser?.name}</h2><p className="text-slate-400 font-bold mt-1 text-sm md:text-base">{currentUser?.position} | {currentSchool?.name}</p></div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {modules.filter(m => m.visible).map((m) => {
-                    const Icon = m.icon;
-                    return (
-                        <button key={m.id} onClick={() => setCurrentView(m.id)} className="relative bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-2xl hover:-translate-y-2 transition-all group overflow-hidden">
-                            <div className="absolute -right-10 -bottom-10 w-40 h-40 rounded-full transition-transform duration-500 group-hover:scale-150" style={{ backgroundColor: m.blob }} />
-                            <div className="relative z-10 flex items-center gap-6"><div className={`w-16 h-16 ${m.color} text-white rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 shrink-0`}><Icon size={30}/></div><div className="text-left"><div className="flex items-center gap-2"><h4 className="font-black text-slate-800 text-lg">{m.title}</h4></div><p className="text-xs text-slate-400 mt-1 font-bold">{m.slogan}</p></div></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {modules.filter(m => m.visible).map((module) => (
+                        <button key={module.id} onClick={() => setCurrentView(module.id)} className={`group relative overflow-hidden rounded-3xl p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl bg-white border border-slate-100 shadow-lg ${module.shadow}`}>
+                            <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${module.color} opacity-10 rounded-bl-full transition-transform group-hover:scale-110`}></div>
+                            <div className="flex flex-col h-full justify-between items-start relative z-10">
+                                <div className="flex justify-between w-full items-start">
+                                    <div className={`p-4 rounded-2xl bg-gradient-to-br ${module.color} text-white shadow-md mb-6`}><module.icon size={32} /></div>
+                                    {module.badge && <div className="bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-md border-2 border-white">{module.badge}</div>}
+                                </div>
+                                <div className="text-left w-full">
+                                    <h3 className="text-xl font-bold text-slate-800 mb-1 group-hover:text-blue-700 transition-colors">{module.title}</h3>
+                                    <p className="text-slate-500 font-medium text-sm">{module.slogan}</p>
+                                </div>
+                                <div className="mt-4 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                                    <div className={`h-full bg-gradient-to-r ${module.color} w-0 group-hover:w-full transition-all duration-500 ease-out`}></div>
+                                </div>
+                            </div>
                         </button>
-                    );
-                })}
+                    ))}
+                </div>
+                <div className="mt-8 flex justify-end">
+                     <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ${isSupabaseConfigured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {isSupabaseConfigured ? <Database size={12}/> : <ServerOff size={12}/>} {isSupabaseConfigured ? 'SQL Online' : 'Local Mock Mode'}
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -234,12 +272,12 @@ const App: React.FC = () => {
             case SystemView.PROFILE: return <UserProfile currentUser={currentUser!} onUpdateUser={setCurrentUser} />;
             case SystemView.DIRECTOR_CALENDAR: return <DirectorCalendar currentUser={currentUser!} allTeachers={schoolTeachers} />;
             case SystemView.ACADEMIC: return <AcademicSystem currentUser={currentUser!} />;
-            case SystemView.DOCUMENTS: return <DocumentsSystem currentUser={currentUser!} allTeachers={schoolTeachers} focusDocId={focusItem?.view === SystemView.DOCUMENTS ? focusItem.id : null} onClearFocus={() => setFocusItem(null)} />;
+            case SystemView.DOCUMENTS: return <DocumentsSystem currentUser={currentUser!} currentSchool={currentSchool} allTeachers={schoolTeachers} focusDocId={focusItem?.view === SystemView.DOCUMENTS ? focusItem.id : null} onClearFocus={() => setFocusItem(null)} />;
             case SystemView.LEAVE: return <LeaveSystem currentUser={currentUser!} allTeachers={schoolTeachers} currentSchool={currentSchool} focusRequestId={focusItem?.view === SystemView.LEAVE ? focusItem.id : null} onClearFocus={() => setFocusItem(null)} />;
             case SystemView.FINANCE: return <FinanceSystem currentUser={currentUser!} allTeachers={schoolTeachers} />;
             case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser!} allTeachers={schoolTeachers} currentSchool={currentSchool} />;
             case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser!} />;
-            case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool} onUpdateSchool={handleUpdateSchool} onAddTeacher={handleAddTeacher} onEditTeacher={handleEditTeacher} onDeleteTeacher={handleDeleteTeacher} />;
+            case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool} onUpdateSchool={handleUpdateSchool} onAddTeacher={handleAddTeacher} onEditTeacher={handleEditTeacher} onDeleteTeacher={handleEditTeacher} />;
             default: return <DashboardCards />;
         }
     };
@@ -250,12 +288,24 @@ const App: React.FC = () => {
         <SuperAdminDashboard 
             schools={allSchools} 
             teachers={allTeachers} 
-            onCreateSchool={handleCreateSchool} 
+            onCreateSchool={async(s)=> {
+                if (isSupabaseConfigured && supabase) {
+                    await supabase.from('schools').upsert([{ id: s.id, name: s.name, district: s.district, province: s.province, is_suspended: false }]);
+                    setAllSchools([...allSchools, { ...s, isSuspended: false }]);
+                }
+            }} 
             onUpdateSchool={handleUpdateSchool} 
-            onDeleteSchool={handleDeleteSchool} 
+            onDeleteSchool={async(id)=> {
+                if (confirm(`ลบ?`)) {
+                    if (isSupabaseConfigured && supabase) {
+                        await supabase.from('schools').delete().eq('id', id);
+                        setAllSchools(allSchools.filter(s => s.id !== id));
+                    }
+                }
+            }} 
             onUpdateTeacher={handleEditTeacher} 
+            onDeleteTeacher={handleDeleteTeacher}
             onLogout={handleLogout} 
-            onDeleteTeacher={handleDeleteTeacher} 
         />
     );
 
@@ -265,22 +315,41 @@ const App: React.FC = () => {
 
     return (
         <div className="flex flex-col min-h-screen bg-slate-50 font-sarabun">
+            {notification && (
+                <div onClick={handleNotificationClick} className="fixed bottom-20 right-6 z-50 animate-slide-up print:hidden cursor-pointer">
+                    <div className={`border-l-4 shadow-2xl rounded-lg p-4 flex items-start gap-4 max-w-sm transition-transform hover:scale-105 bg-white ${notification.type === 'alert' ? 'border-red-500 ring-1 ring-red-100' : 'border-blue-500 ring-1 ring-blue-100'}`}>
+                        <div className={`p-2.5 rounded-full shrink-0 ${notification.type === 'alert' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}><Bell size={24}/></div>
+                        <div className="flex-1 min-w-0">
+                            <h4 className="font-bold text-slate-800 text-sm mb-1">{notification.type === 'alert' ? 'แจ้งเตือนด่วน' : 'แจ้งเตือนระบบ'}</h4>
+                            <p className="text-sm text-slate-600 leading-snug break-words">{notification.message}</p>
+                            {notification.linkTo && <p className="text-xs text-blue-600 mt-2 flex items-center gap-1 font-bold bg-blue-50 w-fit px-2 py-1 rounded">คลิกเพื่อเปิดดู <ExternalLink size={10}/></p>}
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); setNotification(null); }} className="text-slate-400 hover:text-slate-600 p-1 rounded-full"><X size={16}/></button>
+                    </div>
+                </div>
+            )}
             <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-200 shadow-sm print:hidden">
-                <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-                     <div className="flex items-center gap-4">
+                <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 flex items-center justify-center md:justify-between relative">
+                     <div className="absolute left-4 md:static flex items-center gap-2 md:gap-4">
                         {currentView !== SystemView.DASHBOARD && <button onClick={() => setCurrentView(SystemView.DASHBOARD)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"><ChevronLeft size={24} /></button>}
-                         <h1 className="text-xl font-black text-slate-700 tracking-tight uppercase flex items-center gap-2">
-                            {currentView === SystemView.DASHBOARD ? <><LayoutGrid className="text-blue-600" size={20}/> Dashboard</> : modules.find(m => m.id === currentView)?.title || 'Menu'}
+                         <h1 className="text-lg md:text-xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent flex items-center gap-2">
+                            {currentView === SystemView.DASHBOARD ? <><LayoutGrid className="text-slate-800 hidden md:block" size={24}/> Dashboard</> : modules.find(m => m.id === currentView)?.title || 'หน้าหลัก'}
                         </h1>
                     </div>
-                    <div className="flex items-center gap-4">
-                        <div className="hidden sm:block text-right"><p className="text-sm font-black leading-none">{currentUser.name}</p><p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mt-1">{currentUser.position}</p></div>
-                        <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-black text-xs shadow-lg ring-2 ring-white">{currentUser.name[0]}</div>
-                        <button onClick={handleLogout} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><LogOut size={22}/></button>
+                    <div className="absolute right-4 md:static flex items-center gap-4">
+                        <div className="hidden md:flex flex-col items-end mr-2 text-right">
+                            <span className="text-sm font-bold text-slate-800 leading-none">{currentUser.name}</span>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mt-1">{currentUser.position}</span>
+                        </div>
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold shadow-md border-2 border-white cursor-pointer hover:scale-105 transition-transform">{currentUser.name[0]}</div>
+                        <button onClick={handleLogout} className="text-slate-300 hover:text-red-500 transition-colors p-2"><LogOut size={22} /></button>
                     </div>
                 </div>
             </header>
-            <main className="flex-1 w-full">{currentView !== SystemView.DASHBOARD ? <div className="max-w-7xl mx-auto p-6 md:p-10 pb-24 animate-fade-in">{renderContent()}</div> : renderContent()}</main>
+            <main className="flex-1 w-full">{currentView !== SystemView.DASHBOARD ? <div className="max-w-7xl mx-auto p-4 md:p-8 pb-24 animate-fade-in">{renderContent()}</div> : renderContent()}</main>
+            <footer className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-sm border-t border-slate-200 py-3 px-6 z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] print:hidden">
+                <div className="max-w-7xl mx-auto flex justify-between items-center"><div className="flex items-center gap-2 text-slate-600"><Building2 size={18} className="text-blue-600"/><span className="font-bold text-sm md:text-base">{currentSchool?.name || 'SchoolOS System'}</span></div><div className="text-[10px] md:text-xs text-slate-400 font-bold">SMART SCHOOL MANAGEMENT v5.0</div></div>
+            </footer>
         </div>
     );
 };
