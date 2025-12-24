@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { School, Teacher } from '../types';
-import { Lock, User, Building, LogIn, UserPlus, ShieldAlert, Eye, EyeOff, Search, CheckCircle, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Lock, User, Building, LogIn, UserPlus, ShieldAlert, Eye, EyeOff, Search, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, GraduationCap } from 'lucide-react';
 
 interface LoginScreenProps {
     schools: School[];
@@ -15,11 +15,10 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
     const [mode, setMode] = useState<'LOGIN' | 'REGISTER' | 'SUPER_ADMIN'>('LOGIN');
     
     // Login State
-    // Removed loginSchoolId as per requirement
     const [loginUsername, setLoginUsername] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
     
-    // Register State (Multi-step)
+    // Register State
     const [regStep, setRegStep] = useState<1 | 2>(1);
     const [regSchoolId, setRegSchoolId] = useState('');
     const [foundSchool, setFoundSchool] = useState<School | null>(null);
@@ -33,28 +32,29 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
         e.preventDefault();
         setError('');
 
-        // 1. Check for Super Admin (Allow from ANY mode if username is 'admin')
-        if (loginUsername === 'admin') {
-            if (loginPassword === 'schoolos') {
-                onSuperAdminLogin();
-                return;
-            } else {
-                setError('รหัสผ่าน Super Admin ไม่ถูกต้อง');
-                return;
-            }
-        }
-
-        // 2. If explicitly in Super Admin mode but username is not admin
-        if (mode === 'SUPER_ADMIN') {
-            setError('ชื่อผู้ใช้งาน Super Admin ไม่ถูกต้อง (ต้องใช้ admin)');
+        // 1. Check for Super Admin
+        if (loginUsername === 'admin' && loginPassword === 'schoolos') {
+            onSuperAdminLogin();
             return;
         }
 
-        // 3. Regular Teacher Login (Find User globally)
+        // 2. Regular Teacher Login
         const user = teachers.find(t => t.id === loginUsername);
         
         if (!user) {
-            setError('ไม่พบข้อมูลผู้ใช้งาน (เลขบัตรประชาชนไม่ถูกต้อง)');
+            setError('ไม่พบข้อมูลผู้ใช้งาน (ตรวจสอบเลขบัตรประชาชน)');
+            return;
+        }
+
+        // 3. Check for Suspension
+        const school = schools.find(s => s.id === user.schoolId);
+        if (school?.isSuspended) {
+            setError('ขออภัย โรงเรียนของท่านถูกระงับการเข้าใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบกลาง');
+            return;
+        }
+
+        if (user.isSuspended) {
+            setError('บัญชีผู้ใช้ของท่านถูกระงับการใช้งาน กรุณาติดต่อผู้บริหารโรงเรียน');
             return;
         }
 
@@ -77,10 +77,14 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
 
         const school = schools.find(s => s.id === regSchoolId);
         if (school) {
+            if (school.isSuspended) {
+                setError('ขออภัย โรงเรียนนี้ถูกระงับการใช้งาน ไม่สามารถลงทะเบียนเพิ่มได้');
+                return;
+            }
             setFoundSchool(school);
             setRegStep(2);
         } else {
-            setError('ไม่สามารถติดตั้ง App ได้ ไม่มีข้อมูลโรงเรียนในระบบ กรุณาติดต่อ Super Admin เพื่อสร้างโรงเรียน');
+            setError('ไม่พบรหัสโรงเรียนนี้ในระบบ');
         }
     };
 
@@ -95,244 +99,165 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
 
         const existingUser = teachers.find(t => t.id === regUsername);
         if (existingUser) {
-            setError('เลขบัตรประชาชนนี้ลงทะเบียนไปแล้ว');
-            return;
-        }
-
-        if (!regFullName) {
-            setError('กรุณาระบุชื่อ-นามสกุล');
+            setError('เลขบัตรประชาชนนี้เคยลงทะเบียนไว้แล้ว');
             return;
         }
 
         if (foundSchool) {
             onRegister(foundSchool.id, regUsername, regFullName);
+            alert('ลงทะเบียนสำเร็จ! เข้าสู่ระบบด้วยรหัสเริ่มต้น: 123456');
+            setMode('LOGIN');
+            setLoginUsername(regUsername);
         }
     };
 
     return (
         <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sarabun overflow-y-auto">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden my-auto">
-                {/* Header */}
-                <div className="bg-slate-800 p-6 text-center text-white">
-                    <div className="w-16 h-16 bg-blue-500 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-lg">
-                        <span className="font-bold text-3xl">S</span>
+            <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden my-auto border-t-8 border-blue-600">
+                <div className="bg-slate-900 p-10 text-center text-white relative">
+                    <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-blue-500/20 transform rotate-3">
+                        <GraduationCap size={48} className="text-white" />
                     </div>
-                    <h1 className="text-2xl font-bold">SchoolOS</h1>
-                    <p className="text-slate-300 text-sm">ระบบบริหารจัดการโรงเรียนดิจิทัล</p>
+                    <h1 className="text-4xl font-black tracking-tight mb-2">SchoolOS</h1>
+                    <p className="text-blue-400 text-xs font-black uppercase tracking-[0.2em] mb-4">Smart Management Platform</p>
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+                        <p className="text-sm italic font-medium text-slate-300 leading-relaxed">
+                            "บริหารจัดการด้วยใจ มุ่งมั่นพัฒนาการศึกษาไทยสู่สากล"
+                        </p>
+                    </div>
                 </div>
 
-                {/* Tab Switcher */}
-                {mode !== 'SUPER_ADMIN' && (
-                    <div className="flex border-b">
-                        <button 
-                            onClick={() => { setMode('LOGIN'); setError(''); }}
-                            className={`flex-1 py-3 text-sm font-bold transition-colors ${mode === 'LOGIN' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-slate-500 hover:bg-slate-50'}`}
-                        >
-                            เข้าสู่ระบบ
-                        </button>
-                        <button 
-                            onClick={() => { setMode('REGISTER'); setError(''); setRegStep(1); setRegSchoolId(''); setFoundSchool(null); }}
-                            className={`flex-1 py-3 text-sm font-bold transition-colors ${mode === 'REGISTER' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-slate-500 hover:bg-slate-50'}`}
-                        >
-                            ติดตั้ง App / ลงทะเบียน
-                        </button>
-                    </div>
-                )}
+                <div className="flex border-b bg-slate-50">
+                    <button 
+                        onClick={() => { setMode('LOGIN'); setError(''); }}
+                        className={`flex-1 py-5 text-sm font-black transition-all ${mode === 'LOGIN' ? 'text-blue-600 border-b-4 border-blue-600 bg-white' : 'text-slate-400 hover:bg-slate-100'}`}
+                    >
+                        เข้าสู่ระบบ
+                    </button>
+                    <button 
+                        onClick={() => { setMode('REGISTER'); setError(''); setRegStep(1); }}
+                        className={`flex-1 py-5 text-sm font-black transition-all ${mode === 'REGISTER' ? 'text-blue-600 border-b-4 border-blue-600 bg-white' : 'text-slate-400 hover:bg-slate-100'}`}
+                    >
+                        ลงทะเบียนใหม่
+                    </button>
+                </div>
 
-                {mode === 'SUPER_ADMIN' && (
-                     <div className="bg-red-50 p-2 text-center text-red-600 text-sm font-bold border-b border-red-100">
-                        เข้าสู่ระบบ Super Admin
-                    </div>
-                )}
-
-                <div className="p-6">
+                <div className="p-8">
                     {error && (
-                        <div className="mb-4 bg-red-50 border border-red-200 text-red-600 text-sm p-3 rounded-lg flex items-start gap-2">
-                            <ShieldAlert size={16} className="shrink-0 mt-0.5"/>
-                            <span>{error}</span>
+                        <div className="mb-6 bg-red-50 border-2 border-red-100 text-red-600 text-sm p-4 rounded-2xl flex items-start gap-3 animate-shake shadow-sm">
+                            <AlertTriangle size={20} className="shrink-0"/>
+                            <span className="font-bold">{error}</span>
                         </div>
                     )}
 
-                    {/* --- LOGIN MODE --- */}
-                    {(mode === 'LOGIN' || mode === 'SUPER_ADMIN') && (
-                        <form onSubmit={handleLogin} className="space-y-4 animate-fade-in">
-                            {/* Note: School ID input removed for Login */}
-
+                    {mode === 'LOGIN' && (
+                        <form onSubmit={handleLogin} className="space-y-5 animate-fade-in">
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">
-                                    {mode === 'SUPER_ADMIN' ? 'Username' : 'เลขบัตรประจำตัวประชาชน'}
-                                </label>
-                                <div className="relative">
-                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                                <label className="block text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">เลขบัตรประชาชน / ชื่อผู้ใช้</label>
+                                <div className="relative group">
+                                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors" size={20}/>
                                     <input 
                                         type="text" 
                                         required
-                                        maxLength={mode === 'SUPER_ADMIN' ? 20 : 13}
-                                        placeholder={mode === 'SUPER_ADMIN' ? 'admin' : 'เลขบัตร 13 หลัก หรือ admin'}
+                                        placeholder="Citizen ID"
                                         value={loginUsername}
                                         onChange={(e) => setLoginUsername(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                                        className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold transition-all"
                                     />
                                 </div>
                             </div>
 
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">รหัสผ่าน</label>
-                                <div className="relative">
-                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                                <label className="block text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">รหัสผ่าน</label>
+                                <div className="relative group">
+                                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors" size={20}/>
                                     <input 
                                         type={showPassword ? "text" : "password"} 
                                         required
-                                        placeholder="รหัสผ่าน"
+                                        placeholder="Password"
                                         value={loginPassword}
                                         onChange={(e) => setLoginPassword(e.target.value)}
-                                        className="w-full pl-10 pr-10 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 focus:bg-white outline-none font-bold transition-all"
                                     />
                                     <button 
                                         type="button"
                                         onClick={() => setShowPassword(!showPassword)}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
                                     >
-                                        {showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                        {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
                                     </button>
                                 </div>
                             </div>
 
                             <button 
                                 type="submit" 
-                                className="w-full py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-900 font-bold shadow-lg flex items-center justify-center gap-2"
+                                className="w-full py-5 bg-blue-600 text-white rounded-2xl hover:bg-blue-700 font-black text-base shadow-xl shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-3"
                             >
-                                <LogIn size={20}/> เข้าสู่ระบบ
+                                <LogIn size={22}/> เข้าใช้งานระบบ
                             </button>
+                            
+                            <p className="text-center text-xs text-slate-400 font-bold mt-4">
+                                ระบบบริหารจัดการสถานศึกษาครบวงจร v5.0
+                            </p>
                         </form>
                     )}
 
-                    {/* --- REGISTER MODE (STEP 1: SCHOOL ID) --- */}
                     {mode === 'REGISTER' && regStep === 1 && (
-                        <form onSubmit={handleCheckSchool} className="space-y-4 animate-fade-in">
-                            <div className="text-center mb-6">
-                                <div className="bg-blue-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2 text-blue-600">
-                                    <Building size={24}/>
-                                </div>
-                                <h3 className="font-bold text-slate-800">ขั้นตอนที่ 1: ยืนยันโรงเรียน</h3>
-                                <p className="text-xs text-slate-500">กรุณาระบุรหัสโรงเรียน 8 หลัก เพื่อเริ่มต้นการติดตั้ง App</p>
+                        <form onSubmit={handleCheckSchool} className="space-y-6 animate-fade-in">
+                            <div className="text-center">
+                                <h3 className="font-black text-slate-800 text-xl mb-1">ยืนยันรหัสโรงเรียน</h3>
+                                <p className="text-sm text-slate-400 font-bold">ระบุรหัส 8 หลัก เพื่อเริ่มต้นการลงทะเบียน</p>
                             </div>
-
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">รหัสโรงเรียน</label>
-                                <div className="relative">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                                    <input 
-                                        type="text" 
-                                        required
-                                        maxLength={8}
-                                        placeholder="XXXXXXXX"
-                                        value={regSchoolId}
-                                        onChange={(e) => setRegSchoolId(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-3 border-2 border-slate-200 rounded-lg focus:border-blue-500 outline-none font-mono text-center text-lg tracking-widest"
-                                    />
-                                </div>
-                            </div>
-
-                            <button 
-                                type="submit" 
-                                className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold shadow-lg flex items-center justify-center gap-2"
-                            >
-                                ตรวจสอบ <ArrowRight size={20}/>
+                            <input 
+                                type="text" 
+                                required
+                                maxLength={8}
+                                placeholder="00000000"
+                                value={regSchoolId}
+                                onChange={(e) => setRegSchoolId(e.target.value)}
+                                className="w-full px-4 py-5 bg-slate-50 border-2 border-blue-100 rounded-2xl focus:border-blue-500 outline-none text-center text-4xl font-black tracking-widest text-blue-600 shadow-inner"
+                            />
+                            <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-100 hover:bg-blue-700 flex items-center justify-center gap-3 transition-all active:scale-95">
+                                ตรวจสอบรหัสโรงเรียน <ArrowRight size={22}/>
                             </button>
                         </form>
                     )}
 
-                    {/* --- REGISTER MODE (STEP 2: USER INFO) --- */}
                     {mode === 'REGISTER' && regStep === 2 && foundSchool && (
                         <form onSubmit={handleFinalRegister} className="space-y-4 animate-fade-in">
-                            <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 text-center">
-                                <div className="flex items-center justify-center gap-2 text-green-700 font-bold mb-1">
-                                    <CheckCircle size={20}/> พบข้อมูลในระบบ
-                                </div>
-                                <h3 className="font-bold text-lg text-slate-800">{foundSchool.name}</h3>
-                                <p className="text-xs text-slate-500">{foundSchool.district} {foundSchool.province}</p>
+                            <div className="bg-emerald-50 p-5 rounded-[1.5rem] text-center border-2 border-emerald-100 mb-4">
+                                <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest mb-1">ข้อมูลโรงเรียนที่พบ</p>
+                                <p className="font-black text-slate-800 text-lg">{foundSchool.name}</p>
                             </div>
-
-                            <div className="text-center mb-2">
-                                <h3 className="font-bold text-slate-800">ขั้นตอนที่ 2: ลงทะเบียนครู</h3>
-                            </div>
-
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">เลขบัตรประจำตัวประชาชน (Username)</label>
-                                <div className="relative">
-                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                                    <input 
-                                        type="text" 
-                                        required
-                                        maxLength={13}
-                                        placeholder="เลขบัตร 13 หลัก"
-                                        value={regUsername}
-                                        onChange={(e) => setRegUsername(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                                    />
-                                </div>
+                                <label className="block text-[11px] font-black text-slate-400 uppercase mb-2 ml-1">เลขบัตรประชาชน (13 หลัก)</label>
+                                <input 
+                                    type="text" required maxLength={13}
+                                    value={regUsername}
+                                    onChange={(e) => setRegUsername(e.target.value)}
+                                    className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-blue-500"
+                                    placeholder="0-0000-00000-00-0"
+                                />
                             </div>
-
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อ - นามสกุล</label>
-                                <div className="relative">
-                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-                                    <input 
-                                        type="text" 
-                                        required
-                                        placeholder="ระบุชื่อจริง นามสกุล"
-                                        value={regFullName}
-                                        onChange={(e) => setRegFullName(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    />
-                                </div>
+                                <label className="block text-[11px] font-black text-slate-400 uppercase mb-2 ml-1">ชื่อ - นามสกุล (ภาษาไทย)</label>
+                                <input 
+                                    type="text" required
+                                    value={regFullName}
+                                    onChange={(e) => setRegFullName(e.target.value)}
+                                    className="w-full px-5 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold outline-none focus:border-blue-500"
+                                    placeholder="กรอกชื่อและนามสกุล"
+                                />
                             </div>
-
-                            <div className="bg-blue-50 p-3 rounded-lg text-xs text-blue-800 border border-blue-100">
-                                <p className="font-bold mb-1">หมายเหตุ:</p>
-                                <ul className="list-disc pl-4 space-y-1">
-                                    <li>รหัสผ่านเริ่มต้นคือ <strong>123456</strong> (อัตโนมัติ)</li>
-                                    <li>ท่านจะต้องเปลี่ยนรหัสผ่านในการเข้าใช้งานครั้งแรก</li>
-                                </ul>
-                            </div>
-
-                            <div className="flex gap-3">
-                                <button 
-                                    type="button" 
-                                    onClick={() => { setRegStep(1); setFoundSchool(null); }}
-                                    className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 font-bold"
-                                >
-                                    <ArrowLeft size={20} className="mx-auto"/>
-                                </button>
-                                <button 
-                                    type="submit" 
-                                    className="flex-[3] py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold shadow-lg flex items-center justify-center gap-2"
-                                >
-                                    <UserPlus size={20}/> ยืนยันการติดตั้ง
-                                </button>
+                            <div className="flex gap-3 pt-4">
+                                <button type="button" onClick={() => setRegStep(1)} className="p-5 bg-slate-100 text-slate-500 rounded-2xl font-black hover:bg-slate-200 transition-colors"><ArrowLeft size={22}/></button>
+                                <button type="submit" className="flex-1 py-5 bg-emerald-600 text-white rounded-2xl font-black shadow-xl shadow-emerald-50 hover:bg-emerald-700 transition-all active:scale-95">ยืนยันลงทะเบียน</button>
                             </div>
                         </form>
                     )}
-
-                    <div className="mt-6 pt-6 border-t border-slate-100 text-center">
-                        {mode === 'SUPER_ADMIN' ? (
-                            <button onClick={() => setMode('LOGIN')} className="text-sm text-slate-500 hover:text-blue-600 underline">
-                                กลับหน้าหลัก
-                            </button>
-                        ) : (
-                            <button onClick={() => setMode('SUPER_ADMIN')} className="text-xs text-slate-300 hover:text-slate-500">
-                                สำหรับผู้ดูแลระบบสูงสุด (Super Admin)
-                            </button>
-                        )}
-                    </div>
                 </div>
             </div>
-            
-            {/* Version Info */}
-            <div className="fixed bottom-4 text-xs text-slate-400 text-center w-full pointer-events-none">
-                SchoolOS v1.1.0 | รองรับการใช้งาน Mobile & Desktop
-            </div>
+            <style>{`@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } } .animate-shake { animation: shake 0.3s ease-in-out; }`}</style>
         </div>
     );
 };

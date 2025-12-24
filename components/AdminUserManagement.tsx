@@ -3,12 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
 import { 
     Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, 
-    Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, 
-    MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, 
-    Calendar, RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut, 
-    Send, Globe, Copy, Check, Cloud 
+    Link as LinkIcon, UploadCloud, ImageIcon, 
+    MapPin, Crosshair, RefreshCw, UserCheck, UserX, Send, Globe, Power, PowerOff,
+    Cloud, Terminal, FileSignature, LayoutGrid
 } from 'lucide-react';
-import { db, isConfigured, doc, getDoc, setDoc } from '../firebaseConfig';
+import { supabase, isConfigured } from '../supabaseClient';
 import { ACADEMIC_POSITIONS } from '../constants';
 
 interface AdminUserManagementProps {
@@ -24,6 +23,7 @@ interface AdminUserManagementProps {
 const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
     { id: 'SYSTEM_ADMIN', label: 'ผู้ดูแลระบบ (Admin)' },
     { id: 'DIRECTOR', label: 'ผู้อำนวยการ (Director)' },
+    { id: 'VICE_DIRECTOR', label: 'รองผู้อำนวยการ (Vice Director)' },
     { id: 'DOCUMENT_OFFICER', label: 'เจ้าหน้าที่ธุรการ' },
     { id: 'FINANCE_BUDGET', label: 'การเงิน (งบประมาณ)' },
     { id: 'FINANCE_NONBUDGET', label: 'การเงิน (นอกงบประมาณ)' },
@@ -33,103 +33,81 @@ const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
 
 const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onAddTeacher, onEditTeacher, onDeleteTeacher, currentSchool, onUpdateSchool }) => {
     const [activeTab, setActiveTab] = useState<'USERS' | 'SETTINGS' | 'SCHOOL_SETTINGS' | 'CLOUD_SETUP'>('USERS');
-    const [copied, setCopied] = useState(false);
-    
-    // User Management State
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<Teacher>>({});
     const [isAdding, setIsAdding] = useState(false);
-
-    // System Settings State
-    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '', officialGarudaBase64: '', telegramBotToken: '', appBaseUrl: '' });
+    const [config, setConfig] = useState<SystemConfig>({ 
+        driveFolderId: '', scriptUrl: '', schoolName: '', 
+        directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, 
+        schoolLogoBase64: '', officialGarudaBase64: '', telegramBotToken: '', appBaseUrl: '' 
+    });
     const [isLoadingConfig, setIsLoadingConfig] = useState(false);
-    
-    // School Settings State (Local)
     const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
     const [isGettingLocation, setIsGettingLocation] = useState(false);
+    const [copied, setCopied] = useState(false);
 
-    // Google Apps Script Code
     const gasCode = `/**
- * SchoolOS - Cloud Storage Bridge (Google Drive)
- * สคริปต์สำหรับรับไฟล์จาก App และบันทึกลงใน Google Drive
+ * SchoolOS - Cloud Storage Bridge (Google Drive) v7.0
  */
 function doPost(e) {
+  var lock = LockService.getScriptLock();
   try {
+    lock.waitLock(15000);
+    if (!e.postData || !e.postData.contents) { throw new Error("No data received"); }
     var data = JSON.parse(e.postData.contents);
-    var folderId = data.folderId; // ID ของโฟลเดอร์โรงเรียน
-    var fileName = data.fileName; 
-    var base64Data = data.fileData; 
-    var mimeType = data.mimeType;
-
-    // ค้นหาโฟลเดอร์
+    var folderId = data.folderId;
+    var base64Data = data.fileData;
+    var fileName = (data.fileName || "file_" + new Date().getTime()).replace(/[^a-zA-Z0-9.\\-_ก-ฮะ-าำิ-ูเ-์ ]/g, "_");
+    var mimeType = data.mimeType || "application/octet-stream";
+    if (!base64Data || !folderId) { throw new Error("Missing fileData or folderId"); }
+    var cleanBase64 = base64Data.toString().replace(/[\\s\\n\\r]/g, "");
+    var decoded = Utilities.base64Decode(cleanBase64);
+    var blob = Utilities.newBlob(decoded, mimeType, fileName);
     var folder = DriveApp.getFolderById(folderId);
-    
-    // แปลง base64 เป็น Blob
-    var bytes = Utilities.base64Decode(base64Data);
-    var blob = Utilities.newBlob(bytes, mimeType, fileName);
-    
-    // บันทึกไฟล์
     var file = folder.createFile(blob);
-    
-    // ตั้งค่าให้คนที่มีลิงก์เข้าถึงได้ (View Only)
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-
-    return ContentService.createTextOutput(JSON.stringify({
-      'status': 'success',
-      'url': file.getUrl(),
+    return ContentService.createTextOutput(JSON.stringify({ 
+      'status': 'success', 
+      'url': file.getUrl(), 
       'id': file.getId(),
-      'downloadUrl': "https://docs.google.com/uc?export=download&id=" + file.getId()
+      'viewUrl': "https://drive.google.com/uc?export=view&id=" + file.getId() 
     })).setMimeType(ContentService.MimeType.JSON);
-
-  } catch (f) {
-    return ContentService.createTextOutput(JSON.stringify({
-      'status': 'error',
-      'message': f.toString()
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ 
+      'status': 'error', 
+      'message': error.toString() 
     })).setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
   }
-}
-
-// สำหรับทดสอบสถานะ API
-function doGet(e) {
-  return ContentService.createTextOutput("SchoolOS API is Online").setMimeType(ContentService.MimeType.TEXT);
 }`;
 
-    const handleCopyCode = () => {
-        navigator.clipboard.writeText(gasCode);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
+    useEffect(() => { if (currentSchool) setSchoolForm(currentSchool); }, [currentSchool]);
 
-    // Init School Form
-    useEffect(() => {
-        if (currentSchool) {
-            setSchoolForm(currentSchool);
-        }
-    }, [currentSchool]);
-
-    // Load Config - Isolated by School ID
     useEffect(() => {
         const fetchConfig = async () => {
-             if (isConfigured && db && currentSchool?.id) {
-                 try {
-                     // Updated Path for School Isolation
-                     const docRef = doc(db, "schools", currentSchool.id, "settings", "config");
-                     const docSnap = await getDoc(docRef);
-                     if (docSnap.exists()) {
-                         setConfig(docSnap.data() as SystemConfig);
-                     } else {
-                         // Default values if first time
-                         setConfig(prev => ({ ...prev, schoolName: currentSchool.name }));
-                     }
-                 } catch (e) {
-                     console.error("Config fetch error", e);
+             if (isConfigured && supabase && currentSchool?.id) {
+                 const { data } = await supabase.from('school_configs').select('*').eq('school_id', currentSchool.id).single();
+                 if (data) {
+                     setConfig({
+                         driveFolderId: data.drive_folder_id || '', 
+                         scriptUrl: data.script_url || '', 
+                         schoolName: currentSchool.name,
+                         directorSignatureBase64: data.director_signature_base_64 || '', 
+                         directorSignatureScale: data.director_signature_scale || 1,
+                         directorSignatureYOffset: data.director_signature_y_offset || 0, 
+                         // Fix: change currentSchool.logo_base_64 to currentSchool.logoBase64 (camelCase match School interface)
+                         schoolLogoBase64: currentSchool.logoBase64 || '',
+                         officialGarudaBase64: data.official_garuda_base_64 || '', 
+                         telegramBotToken: data.telegram_bot_token || '',
+                         appBaseUrl: data.app_base_url || ''
+                     });
                  }
              }
         };
         fetchConfig();
-    }, [currentSchool.id]);
+    }, [currentSchool?.id]);
 
-    // Helper: Resize Image
     const resizeImage = (file: File, maxWidth: number = 300): Promise<string> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -137,350 +115,179 @@ function doGet(e) {
                 const img = new Image();
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    let width = img.width;
-                    let height = img.height;
-
-                    if (width > maxWidth) {
-                        height = Math.round((height * maxWidth) / width);
-                        width = maxWidth;
-                    }
-
-                    canvas.width = width;
-                    canvas.height = height;
+                    let width = img.width, height = img.height;
+                    if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
+                    canvas.width = width; canvas.height = height;
                     const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                        ctx.drawImage(img, 0, 0, width, height);
-                        resolve(canvas.toDataURL('image/png', 0.8)); // Compress
-                    } else {
-                        reject(new Error("Canvas context error"));
-                    }
+                    if (ctx) { ctx.drawImage(img, 0, 0, width, height); resolve(canvas.toDataURL('image/png', 0.8)); }
+                    else reject(new Error("Canvas error"));
                 };
-                img.onerror = () => reject(new Error("Image load error"));
                 img.src = event.target?.result as string;
             };
-            reader.onerror = error => reject(error);
             reader.readAsDataURL(file);
         });
     };
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, field: keyof SystemConfig) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            try {
-                // Resize image to prevent large payload issues
-                const base64 = await resizeImage(file, 400); 
-                setConfig(prev => ({ ...prev, [field]: base64 }));
-            } catch (error) {
-                console.error("Error resizing image", error);
-                alert("เกิดข้อผิดพลาดในการประมวลผลรูปภาพ");
+        if (e.target.files?.[0]) {
+            try { 
+                const base64 = await resizeImage(e.target.files[0], 400); 
+                setConfig(prev => ({ ...prev, [field]: base64 })); 
             }
+            catch (error) { alert("Error processing image"); }
         }
+    };
+
+    const handleToggleSuspended = async (teacher: Teacher) => {
+        if (!isConfigured || !supabase) return;
+        const newStatus = !teacher.isSuspended;
+        if (!confirm(`ยืนยันการ${newStatus ? 'ระงับ' : 'เปิด'}การใช้งานของ: ${teacher.name}?\n*เมื่อระงับ ครูท่านนี้จะเข้าใช้งานระบบไม่ได้ชั่วคราว`)) return;
+        
+        const { error } = await supabase.from('profiles').update({ is_suspended: newStatus }).eq('id', teacher.id);
+        if (!error) {
+            onEditTeacher({ ...teacher, isSuspended: newStatus });
+        } else {
+            alert("ผิดพลาด: " + error.message);
+        }
+    };
+
+    const handleUserSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editForm.id || !editForm.name) return;
+        const tData = editForm as Teacher;
+        if (isConfigured && supabase) {
+            const payload = {
+                id: tData.id, 
+                school_id: currentSchool.id, 
+                name: tData.name, 
+                password: tData.password || '123456',
+                position: tData.position, 
+                roles: tData.roles, 
+                signature_base64: tData.signatureBase64,
+                telegram_chat_id: tData.telegramChatId, 
+                is_suspended: tData.isSuspended || false
+            };
+            const { error } = await supabase.from('profiles').upsert([payload]);
+            if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+        }
+        if (isAdding) onAddTeacher(tData); else onEditTeacher(tData);
+        setIsAdding(false); setEditingId(null); setEditForm({});
     };
 
     const handleSaveConfig = async () => {
         if (!currentSchool?.id) return;
         setIsLoadingConfig(true);
-        // Ensure no trailing slash
-        let cleanUrl = config.appBaseUrl || '';
-        if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
-        const newConfig = { ...config, appBaseUrl: cleanUrl, schoolName: currentSchool.name };
-
+        const payload = {
+            school_id: currentSchool.id, 
+            drive_folder_id: config.driveFolderId, 
+            script_url: config.scriptUrl,
+            telegram_bot_token: config.telegramBotToken, 
+            app_base_url: config.appBaseUrl,
+            official_garuda_base_64: config.officialGarudaBase64, 
+            director_signature_base_64: config.directorSignatureBase64,
+            director_signature_scale: config.directorSignatureScale, 
+            director_signature_y_offset: config.directorSignatureYOffset
+        };
         try {
-            if (isConfigured && db) {
-                // Updated Path for School Isolation
-                const docRef = doc(db, "schools", currentSchool.id, "settings", "config");
-                await setDoc(docRef, newConfig);
-                alert("บันทึกการตั้งค่าเฉพาะโรงเรียนของท่านเรียบร้อยแล้ว");
-            } else {
-                // Mock Save
-                setTimeout(() => {
-                    alert("บันทึกการตั้งค่าเรียบร้อย (Offline Mode)");
-                }, 500);
+            if (isConfigured && supabase) {
+                // Update school logo in schools table too
+                if (config.schoolLogoBase64) {
+                    await supabase.from('schools').update({ logo_base_64: config.schoolLogoBase64 }).eq('id', currentSchool.id);
+                    onUpdateSchool({ ...currentSchool, logoBase64: config.schoolLogoBase64 });
+                }
+                const { error } = await supabase.from('school_configs').upsert([payload]);
+                if (error) throw error;
+                alert("บันทึกการตั้งค่าทั้งหมดสำเร็จ");
             }
-            setConfig(newConfig);
-        } catch (error) {
-            console.error("Save config error", error);
-            alert("เกิดข้อผิดพลาดในการบันทึก: " + (error as Error).message);
-        } finally {
-            setIsLoadingConfig(false);
+        } catch (error: any) { alert("บันทึกล้มเหลว: " + error.message); }
+        finally { setIsLoadingConfig(false); }
+    };
+
+    const handleDelete = async (id: string) => {
+        if (!confirm("ยืนยันการลบข้อมูลบุคลากรรายนี้? การลบจะมีผลทันทีและไม่สามารถกู้คืนได้")) return;
+        if (isConfigured && supabase) {
+            const { error } = await supabase.from('profiles').delete().eq('id', id);
+            if (error) { alert("ลบไม่สำเร็จ: " + error.message); return; }
         }
-    };
-
-    const handleSaveSchool = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (schoolForm.id) {
-            onUpdateSchool(schoolForm as School);
-            alert("บันทึกข้อมูลโรงเรียนเรียบร้อยแล้ว");
-        }
-    };
-
-    const handleUserSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!editForm.id || !editForm.name) return;
-
-        const teacherData = editForm as Teacher;
-
-        if (isAdding) {
-            // Check ID
-            if (teachers.find(t => t.id === teacherData.id)) {
-                alert("รหัสประชาชนนี้มีอยู่ในระบบแล้ว");
-                return;
-            }
-            onAddTeacher(teacherData);
-        } else {
-            onEditTeacher(teacherData);
-        }
-        setIsAdding(false);
-        setEditingId(null);
-        setEditForm({});
-    };
-
-    const startEdit = (t: Teacher) => {
-        setEditingId(t.id);
-        setEditForm({ ...t });
-        setIsAdding(false);
-    };
-
-    const startAdd = () => {
-        setIsAdding(true);
-        setEditForm({
-            id: '',
-            name: '',
-            position: 'ครู',
-            roles: ['TEACHER'],
-            password: '123456', // Default
-            schoolId: currentSchool.id
-        });
-    };
-
-    const toggleRole = (role: TeacherRole) => {
-        const currentRoles = editForm.roles || [];
-        if (currentRoles.includes(role)) {
-            setEditForm({ ...editForm, roles: currentRoles.filter(r => r !== role) });
-        } else {
-            setEditForm({ ...editForm, roles: [...currentRoles, role] });
-        }
-    };
-
-    const getLocation = () => {
-        setIsGettingLocation(true);
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition((pos) => {
-                setSchoolForm({
-                    ...schoolForm,
-                    lat: pos.coords.latitude,
-                    lng: pos.coords.longitude
-                });
-                setIsGettingLocation(false);
-            }, (err) => {
-                alert("ไม่สามารถระบุตำแหน่งได้: " + err.message);
-                setIsGettingLocation(false);
-            });
-        } else {
-            alert("Browser ไม่รองรับ Geolocation");
-            setIsGettingLocation(false);
-        }
+        onDeleteTeacher(id);
     };
 
     return (
-        <div className="space-y-6 animate-fade-in">
-            {/* Header */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="flex items-center gap-3">
-                    <div className="p-3 bg-slate-800 text-white rounded-lg">
+        <div className="space-y-6 animate-fade-in pb-10">
+            <div className="bg-white p-4 rounded-[1.5rem] shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="flex items-center gap-4">
+                    <div className="p-4 bg-slate-800 text-white rounded-2xl shadow-xl shadow-slate-200">
                         <Settings size={24}/>
                     </div>
                     <div>
-                        <h2 className="text-xl font-bold text-slate-800">ผู้ดูแลระบบ</h2>
-                        <p className="text-slate-500 text-sm">จัดการผู้ใช้งานและตั้งค่าระบบโรงเรียน {currentSchool.name}</p>
+                        <h2 className="text-xl font-black text-slate-800 tracking-tight">ผู้ดูแลระบบโรงเรียน</h2>
+                        <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">{currentSchool.name}</p>
                     </div>
                 </div>
-                <div className="flex bg-slate-100 p-1 rounded-lg overflow-x-auto max-w-full">
-                    <button 
-                        onClick={() => setActiveTab('USERS')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'USERS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        ผู้ใช้งาน
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('SCHOOL_SETTINGS')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        ตั้งค่าโรงเรียน
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('SETTINGS')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'SETTINGS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        ตั้งค่าระบบ
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('CLOUD_SETUP')}
-                        className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'CLOUD_SETUP' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        เชื่อมต่อ Cloud
-                    </button>
+                <div className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto w-full md:w-auto border shadow-inner">
+                    <button onClick={() => setActiveTab('USERS')} className={`px-5 py-2 rounded-lg text-sm font-black shrink-0 transition-all ${activeTab === 'USERS' ? 'bg-white text-blue-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>ผู้ใช้งาน</button>
+                    <button onClick={() => setActiveTab('SCHOOL_SETTINGS')} className={`px-5 py-2 rounded-lg text-sm font-black shrink-0 transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-white text-blue-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>พิกัดโรงเรียน</button>
+                    <button onClick={() => setActiveTab('SETTINGS')} className={`px-5 py-2 rounded-lg text-sm font-black shrink-0 transition-all ${activeTab === 'SETTINGS' ? 'bg-white text-blue-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>ตั้งค่าระบบ</button>
+                    <button onClick={() => setActiveTab('CLOUD_SETUP')} className={`px-5 py-2 rounded-lg text-sm font-black shrink-0 transition-all ${activeTab === 'CLOUD_SETUP' ? 'bg-white text-orange-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>Cloud (Drive)</button>
                 </div>
             </div>
 
-            {/* Content */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                
-                {/* --- USERS TAB --- */}
+            <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 min-h-[600px]">
                 {activeTab === 'USERS' && (
                     <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                            <h3 className="font-bold text-lg flex items-center gap-2">
-                                <Users className="text-blue-600"/> รายชื่อบุคลากร ({teachers.length})
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <h3 className="font-black text-2xl flex items-center gap-3 text-slate-800">
+                                <Users className="text-blue-600" size={28}/> 
+                                รายชื่อบุคลากร ({teachers.length})
                             </h3>
-                            <button onClick={startAdd} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2 shadow-sm">
-                                <UserPlus size={18}/> เพิ่มบุคลากร
+                            <button onClick={() => { setIsAdding(true); setEditForm({id:'', name:'', position:'ครู', roles:['TEACHER'], password:'123456', schoolId: currentSchool.id}); }} className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 font-black flex items-center justify-center gap-2 shadow-lg shadow-blue-100 transition-all active:scale-95">
+                                <UserPlus size={20}/> เพิ่มบุคลากรใหม่
                             </button>
                         </div>
-
-                        {/* User Form Modal */}
-                        {(isAdding || editingId) && (
-                            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                                <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 animate-scale-up">
-                                    <div className="flex justify-between items-center mb-6 border-b pb-4">
-                                        <h3 className="text-xl font-bold text-slate-800">
-                                            {isAdding ? 'เพิ่มบุคลากรใหม่' : 'แก้ไขข้อมูลบุคลากร'}
-                                        </h3>
-                                        <button onClick={() => { setIsAdding(false); setEditingId(null); }} className="text-slate-400 hover:text-slate-600">
-                                            <X size={24}/>
-                                        </button>
-                                    </div>
-
-                                    <form onSubmit={handleUserSubmit} className="space-y-4">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-sm font-bold text-slate-700 mb-1">เลขบัตรประชาชน (ID)</label>
-                                                <input 
-                                                    type="text" 
-                                                    required 
-                                                    maxLength={13}
-                                                    disabled={!isAdding}
-                                                    value={editForm.id || ''}
-                                                    onChange={e => setEditForm({...editForm, id: e.target.value})}
-                                                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${!isAdding ? 'bg-slate-100 text-slate-500' : ''}`}
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อ - นามสกุล</label>
-                                                <input 
-                                                    type="text" 
-                                                    required 
-                                                    value={editForm.name || ''}
-                                                    onChange={e => setEditForm({...editForm, name: e.target.value})}
-                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-bold text-slate-700 mb-1">ตำแหน่ง</label>
-                                                <input 
-                                                    type="text" 
-                                                    value={editForm.position || ''}
-                                                    onChange={e => setEditForm({...editForm, position: e.target.value})}
-                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-bold text-slate-700 mb-1">รหัสผ่าน</label>
-                                                <input 
-                                                    type="text" 
-                                                    value={editForm.password || ''}
-                                                    onChange={e => setEditForm({...editForm, password: e.target.value})}
-                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                                                    placeholder="Reset Password"
-                                                />
-                                            </div>
-                                            <div className="md:col-span-2">
-                                                <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1">
-                                                    <Send size={14}/> Telegram Chat ID
-                                                </label>
-                                                <input 
-                                                    type="text" 
-                                                    value={editForm.telegramChatId || ''}
-                                                    onChange={e => setEditForm({...editForm, telegramChatId: e.target.value})}
-                                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                                                    placeholder="กรอก Chat ID ของผู้ใช้งาน"
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-bold text-slate-700 mb-2">สิทธิ์การใช้งาน (Roles)</label>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                                {AVAILABLE_ROLES.map(role => (
-                                                    <label key={role.id} className="flex items-center gap-2 cursor-pointer hover:bg-white p-2 rounded transition-colors">
-                                                        <div onClick={() => toggleRole(role.id)} className={`text-blue-600 ${editForm.roles?.includes(role.id) ? '' : 'text-slate-300'}`}>
-                                                            {editForm.roles?.includes(role.id) ? <CheckSquare size={20}/> : <Square size={20}/>}
-                                                        </div>
-                                                        <span className={`text-sm ${editForm.roles?.includes(role.id) ? 'font-bold text-slate-800' : 'text-slate-500'}`}>
-                                                            {role.label}
-                                                        </span>
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div className="pt-4 flex gap-3">
-                                            <button type="button" onClick={() => { setIsAdding(false); setEditingId(null); }} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-lg hover:bg-slate-200">
-                                                ยกเลิก
-                                            </button>
-                                            <button type="submit" className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-lg">
-                                                บันทึกข้อมูล
-                                            </button>
-                                        </div>
-                                    </form>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Teachers Table */}
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-slate-50 text-slate-500 uppercase">
+                        
+                        <div className="overflow-x-auto rounded-[1.5rem] border border-slate-100">
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-50 text-slate-400 font-black text-[10px] uppercase tracking-widest border-b">
                                     <tr>
-                                        <th className="px-4 py-3 rounded-tl-lg">ชื่อ - สกุล</th>
-                                        <th className="px-4 py-3">ตำแหน่ง</th>
-                                        <th className="px-4 py-3">สิทธิ์การใช้งาน</th>
-                                        <th className="px-4 py-3 rounded-tr-lg text-right">จัดการ</th>
+                                        <th className="p-5">บุคลากร</th>
+                                        <th className="p-5">ตำแหน่ง / สิทธิ์</th>
+                                        <th className="p-5 text-center">สถานะ</th>
+                                        <th className="p-5 text-right">จัดการ</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-100">
+                                <tbody className="divide-y divide-slate-50">
                                     {teachers.map(t => (
-                                        <tr key={t.id} className="hover:bg-slate-50 transition-colors">
-                                            <td className="px-4 py-3 font-medium text-slate-800">
-                                                {t.name}
-                                                <div className="text-xs text-slate-400 font-mono">{t.id}</div>
-                                                {t.telegramChatId && (
-                                                    <div className="text-[10px] text-blue-500 flex items-center gap-1 mt-0.5">
-                                                        <Send size={10}/> Telegram Connected
+                                        <tr key={t.id} className={`group hover:bg-slate-50 transition-colors ${t.isSuspended ? 'bg-red-50/20 opacity-75' : ''}`}>
+                                            <td className="p-5">
+                                                <div className="flex items-center gap-4">
+                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shadow-sm ${t.isSuspended ? 'bg-slate-200 text-slate-400' : 'bg-blue-100 text-blue-600'}`}>
+                                                        {t.name[0]}
                                                     </div>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-slate-600">{t.position}</td>
-                                            <td className="px-4 py-3">
-                                                <div className="flex flex-wrap gap-1">
-                                                    {t.roles.map(r => (
-                                                        <span key={r} className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-bold border border-blue-100">
-                                                            {AVAILABLE_ROLES.find(ar => ar.id === r)?.label || r}
-                                                        </span>
-                                                    ))}
+                                                    <div>
+                                                        <div className="font-black text-slate-700 group-hover:text-blue-600 transition-colors">{t.name}</div>
+                                                        <div className="text-[10px] text-slate-400 font-bold font-mono uppercase tracking-tighter">ID: {t.id}</div>
+                                                    </div>
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-3 text-right">
+                                            <td className="p-5">
+                                                <div className="font-bold text-slate-600 text-sm mb-1">{t.position}</div>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {t.roles.map(r => <span key={r} className="px-2 py-0.5 bg-white text-slate-500 rounded-md text-[9px] font-black border border-slate-200 uppercase">{AVAILABLE_ROLES.find(ar=>ar.id===r)?.label || r}</span>)}
+                                                </div>
+                                            </td>
+                                            <td className="p-5 text-center">
+                                                <button 
+                                                    onClick={() => handleToggleSuspended(t)}
+                                                    className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all shadow-sm ${t.isSuspended ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-emerald-100 text-emerald-700 hover:bg-red-50 hover:text-red-600'}`}
+                                                    title={t.isSuspended ? 'คลิกเพื่อเปิดใช้งาน' : 'คลิกเพื่อระงับการใช้งาน'}
+                                                >
+                                                    {t.isSuspended ? 'Suspended' : 'Normal'}
+                                                </button>
+                                            </td>
+                                            <td className="p-5 text-right">
                                                 <div className="flex justify-end gap-2">
-                                                    <button onClick={() => startEdit(t)} className="p-1.5 text-blue-600 bg-blue-50 rounded hover:bg-blue-100">
-                                                        <Edit size={16}/>
-                                                    </button>
-                                                    <button 
-                                                        onClick={() => { if(confirm('ยืนยันลบผู้ใช้งานนี้?')) onDeleteTeacher(t.id); }}
-                                                        className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100"
-                                                    >
-                                                        <Trash2 size={16}/>
-                                                    </button>
+                                                    <button onClick={() => { setEditingId(t.id); setEditForm({...t}); setIsAdding(false); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><Edit size={18}/></button>
+                                                    <button onClick={() => handleDelete(t.id)} className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"><Trash2 size={18}/></button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -491,336 +298,170 @@ function doGet(e) {
                     </div>
                 )}
 
-                {/* --- SCHOOL SETTINGS TAB --- */}
                 {activeTab === 'SCHOOL_SETTINGS' && (
-                     <div className="space-y-6">
-                        <div className="flex items-center gap-2 mb-4 border-b pb-4">
-                            <MapPin className="text-orange-500"/>
-                            <h3 className="font-bold text-lg text-slate-800">ตั้งค่าข้อมูลโรงเรียน</h3>
-                        </div>
-
-                        <form onSubmit={handleSaveSchool} className="space-y-4 max-w-3xl">
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อโรงเรียน</label>
-                                    <input 
-                                        type="text" 
-                                        value={schoolForm.name || ''}
-                                        onChange={e => setSchoolForm({...schoolForm, name: e.target.value})}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    />
+                    <div className="space-y-8 animate-fade-in max-w-4xl">
+                        <div className="flex items-center gap-3 border-b pb-4"><MapPin className="text-orange-500" size={28}/><h3 className="font-black text-2xl text-slate-800">ขอบเขตพื้นที่ลงเวลา (GPS)</h3></div>
+                        <form onSubmit={(e) => { e.preventDefault(); onUpdateSchool(schoolForm as School); alert("บันทึกพิกัดสำเร็จ"); }} className="space-y-6">
+                             <div className="bg-orange-50 p-8 rounded-[2rem] border-2 border-orange-100 space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div className="space-y-2"><label className="block text-xs font-black text-orange-700 uppercase tracking-widest ml-1">ละติจูด (Lat)</label><input type="number" step="any" value={schoolForm.lat || ''} onChange={e => setSchoolForm({...schoolForm, lat: parseFloat(e.target.value)})} className="w-full px-5 py-3 border-2 border-orange-200 rounded-2xl outline-none focus:border-orange-500 font-bold bg-white"/></div>
+                                    <div className="space-y-2"><label className="block text-xs font-black text-orange-700 uppercase tracking-widest ml-1">ลองจิจูด (Lng)</label><input type="number" step="any" value={schoolForm.lng || ''} onChange={e => setSchoolForm({...schoolForm, lng: parseFloat(e.target.value)})} className="w-full px-5 py-3 border-2 border-orange-200 rounded-2xl outline-none focus:border-orange-500 font-bold bg-white"/></div>
+                                    <div className="flex items-end"><button type="button" onClick={() => { setIsGettingLocation(true); navigator.geolocation.getCurrentPosition(p => { setSchoolForm({...schoolForm, lat: p.coords.latitude, lng: p.coords.longitude}); setIsGettingLocation(false); }, () => { alert("กรุณาเปิด GPS"); setIsGettingLocation(false); }); }} disabled={isGettingLocation} className="w-full py-4 bg-orange-600 text-white rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-orange-100 hover:bg-orange-700 transition-all active:scale-95">{isGettingLocation ? <RefreshCw className="animate-spin"/> : <Crosshair size={20}/>} ดึงพิกัดปัจจุบัน</button></div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">รหัสโรงเรียน</label>
-                                    <input 
-                                        type="text" 
-                                        disabled
-                                        value={schoolForm.id || ''}
-                                        className="w-full px-3 py-2 border rounded-lg bg-slate-100 text-slate-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">อำเภอ</label>
-                                    <input 
-                                        type="text" 
-                                        value={schoolForm.district || ''}
-                                        onChange={e => setSchoolForm({...schoolForm, district: e.target.value})}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">จังหวัด</label>
-                                    <input 
-                                        type="text" 
-                                        value={schoolForm.province || ''}
-                                        onChange={e => setSchoolForm({...schoolForm, province: e.target.value})}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2"><label className="block text-xs font-black text-slate-500 uppercase tracking-widest ml-1">รัศมีที่อนุญาต (เมตร)</label><input type="number" value={schoolForm.radius || 500} onChange={e => setSchoolForm({...schoolForm, radius: parseInt(e.target.value)})} className="w-full px-5 py-3 border-2 border-slate-200 rounded-2xl outline-none focus:border-blue-500 font-bold bg-white" placeholder="ค่าเริ่มต้น 500"/></div>
+                                    <div className="space-y-2"><label className="block text-xs font-black text-slate-500 uppercase tracking-widest ml-1">เวลาที่ถือว่ามาสาย (HH:MM)</label><input type="time" value={schoolForm.lateTimeThreshold || '08:30'} onChange={e => setSchoolForm({...schoolForm, lateTimeThreshold: e.target.value})} className="w-full px-5 py-3 border-2 border-slate-200 rounded-2xl outline-none focus:border-blue-500 font-bold bg-white"/></div>
                                 </div>
                              </div>
-
-                             <div className="bg-orange-50 p-6 rounded-xl border border-orange-200">
-                                <h4 className="font-bold text-orange-800 mb-4 flex items-center gap-2">
-                                    <Target size={20}/> การตั้งค่าพิกัด GPS (สำหรับลงเวลา)
-                                </h4>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-orange-700 mb-1">ละติจูด (Lat)</label>
-                                        <input 
-                                            type="number" 
-                                            step="any"
-                                            value={schoolForm.lat || ''}
-                                            onChange={e => setSchoolForm({...schoolForm, lat: parseFloat(e.target.value)})}
-                                            className="w-full px-3 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-orange-700 mb-1">ลองจิจูด (Lng)</label>
-                                        <input 
-                                            type="number" 
-                                            step="any"
-                                            value={schoolForm.lng || ''}
-                                            onChange={e => setSchoolForm({...schoolForm, lng: parseFloat(e.target.value)})}
-                                            className="w-full px-3 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                                        />
-                                    </div>
-                                    <div className="flex items-end">
-                                        <button 
-                                            type="button" 
-                                            onClick={getLocation}
-                                            disabled={isGettingLocation}
-                                            className="w-full py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-bold flex items-center justify-center gap-2 shadow-sm"
-                                        >
-                                            {isGettingLocation ? <RefreshCw className="animate-spin"/> : <Crosshair size={18}/>}
-                                            ดึงพิกัดปัจจุบัน
-                                        </button>
-                                    </div>
-                                </div>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-orange-700 mb-1">รัศมีที่อนุญาต (เมตร)</label>
-                                        <input 
-                                            type="number" 
-                                            value={schoolForm.radius || 500}
-                                            onChange={e => setSchoolForm({...schoolForm, radius: parseInt(e.target.value)})}
-                                            className="w-full px-3 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-orange-700 mb-1">เวลาเข้าสาย (HH:MM)</label>
-                                        <div className="relative">
-                                            <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-orange-400" size={16}/>
-                                            <input 
-                                                type="time" 
-                                                value={schoolForm.lateTimeThreshold || '08:30'}
-                                                onChange={e => setSchoolForm({...schoolForm, lateTimeThreshold: e.target.value})}
-                                                className="w-full pl-10 pr-3 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                             </div>
-
-                             <div className="flex justify-end pt-4">
-                                <button type="submit" className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg flex items-center gap-2">
-                                    <Save size={20}/> บันทึกการตั้งค่าโรงเรียน
-                                </button>
-                             </div>
+                             <div className="flex justify-end"><button type="submit" className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black shadow-xl shadow-blue-100 flex items-center gap-2 hover:bg-blue-700 transition-all active:scale-95 uppercase tracking-widest"><Save size={20}/> บันทึกการตั้งค่าพิกัด</button></div>
                         </form>
-                     </div>
+                    </div>
                 )}
 
-                {/* --- SYSTEM SETTINGS TAB --- */}
                 {activeTab === 'SETTINGS' && (
-                    <div className="space-y-6">
-                        <div className="flex items-center gap-2 mb-4 border-b pb-4">
-                            <Database className="text-purple-600"/>
-                            <h3 className="font-bold text-lg text-slate-800">ตั้งค่าระบบเฉพาะโรงเรียน (School-Isolated Config)</h3>
+                    <div className="space-y-10 animate-fade-in">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                            <div className="space-y-6">
+                                <div className="bg-indigo-50 p-8 rounded-[2.5rem] border-2 border-indigo-100 shadow-sm space-y-6">
+                                    <h4 className="font-black text-indigo-900 text-xl flex items-center gap-3"><Send size={24}/> การแจ้งเตือน & URL</h4>
+                                    <div className="space-y-4">
+                                        <div><label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1.5 ml-1">Telegram Bot Token</label><input type="text" value={config.telegramBotToken || ''} onChange={e => setConfig({...config, telegramBotToken: e.target.value})} className="w-full px-5 py-3 border-2 border-white rounded-2xl font-mono text-xs focus:border-indigo-500 outline-none bg-white/60 shadow-inner" placeholder="0000000000:AA..."/></div>
+                                        <div><label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1.5 ml-1">App Base URL</label><input type="text" value={config.appBaseUrl || ''} onChange={e => setConfig({...config, appBaseUrl: e.target.value})} className="w-full px-5 py-3 border-2 border-white rounded-2xl font-mono text-xs focus:border-indigo-500 outline-none bg-white/60 shadow-inner" placeholder="https://your-app.vercel.app"/></div>
+                                    </div>
+                                    <div className="p-4 bg-white/80 rounded-xl border border-indigo-100 text-[10px] text-indigo-800 leading-relaxed font-bold">
+                                        💡 แจ้งเตือนงานสารบรรณและการลา จะถูกส่งไปที่ Telegram ของผู้อำนวยการและบุคลากรผ่าน Token ชุดนี้
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100 space-y-6">
+                                <h4 className="font-black text-slate-800 text-xl flex items-center gap-3"><ImageIcon size={24}/> ตราโรงเรียน & เอกสาร</h4>
+                                <div className="flex flex-col sm:flex-row items-center gap-8">
+                                    <div className="w-40 h-40 border-4 border-white rounded-[2rem] flex items-center justify-center bg-white overflow-hidden shrink-0 shadow-xl relative group">
+                                        {config.schoolLogoBase64 ? <img src={config.schoolLogoBase64} className="w-full h-full object-contain p-2"/> : <ImageIcon className="text-slate-200" size={64}/>}
+                                        <label className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer"><UploadCloud className="text-white" size={32}/><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'schoolLogoBase64')} className="hidden"/></label>
+                                    </div>
+                                    <div className="flex-1 space-y-2">
+                                        <h5 className="font-black text-slate-700 uppercase text-xs tracking-widest">School Logo</h5>
+                                        <p className="text-xs text-slate-500 leading-relaxed font-bold">ใช้สำหรับหัวจดหมาย, รายงาน และสลิปการเงิน รูปภาพที่อัปโหลดจะถูกปรับขนาดให้เหมาะสมอัตโนมัติ</p>
+                                        <p className="text-blue-600 text-xs font-black hover:underline uppercase tracking-tighter cursor-pointer" onClick={() => setConfig({...config, schoolLogoBase64: ''})}>Remove Logo</p>
+                                    </div>
+                                </div>
+                                <hr className="border-slate-200"/>
+                                <div className="flex flex-col sm:flex-row items-center gap-8">
+                                    <div className="w-40 h-40 border-4 border-white rounded-[2rem] flex items-center justify-center bg-white overflow-hidden shrink-0 shadow-xl relative group">
+                                        {config.officialGarudaBase64 ? <img src={config.officialGarudaBase64} className="w-full h-full object-contain p-2"/> : <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Emblem_of_the_Ministry_of_Education_of_Thailand.svg/1200px-Emblem_of_the_Ministry_of_Education_of_Thailand.svg.png" className="w-full h-full object-contain p-2 opacity-20"/>}
+                                        <label className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer"><UploadCloud className="text-white" size={32}/><input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'officialGarudaBase64')} className="hidden"/></label>
+                                    </div>
+                                    <div className="flex-1 space-y-2">
+                                        <h5 className="font-black text-slate-700 uppercase text-xs tracking-widest">Official Garuda</h5>
+                                        <p className="text-xs text-slate-500 leading-relaxed font-bold">ตราครุฑสำหรับหนังสือราชการ (เวียน/คำสั่ง) หากไม่ระบุระบบจะใช้ตรามาตรฐาน สพฐ. เป็นค่าเริ่มต้น</p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        {/* Telegram Config */}
-                        <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mb-6">
-                            <h4 className="font-bold text-blue-800 mb-4 flex items-center gap-2">
-                                <Send size={20}/> การตั้งค่า Telegram Notification
+                        <div className="bg-purple-50 rounded-[3rem] border-2 border-purple-100 p-10 space-y-8">
+                            <h4 className="font-black text-purple-900 text-2xl flex items-center gap-4 border-b border-purple-200 pb-6">
+                                <FileSignature className="text-purple-600" size={32}/> 
+                                ลายเซ็นผู้อำนวยการ (Digital Signature)
                             </h4>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Telegram Bot Token (จาก @BotFather)</label>
-                                    <input 
-                                        type="text" 
-                                        value={config.telegramBotToken || ''}
-                                        onChange={e => setConfig({...config, telegramBotToken: e.target.value})}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
-                                        placeholder="123456789:ABCDefGhIJKlmNoPQRstUvwxyz..."
-                                    />
-                                    <p className="text-xs text-blue-500 mt-1">
-                                        ใช้สำหรับส่งการแจ้งเตือนหนังสือราชการไปยังบุคลากรผ่าน Telegram (ข้อมูลเป็นความลับเฉพาะโรงเรียนท่าน)
-                                    </p>
+                            <div className="flex flex-col xl:flex-row gap-12">
+                                <div className="w-full xl:w-96 h-48 border-4 border-dashed border-purple-200 rounded-[2.5rem] flex items-center justify-center bg-white/50 overflow-hidden shadow-inner relative">
+                                    {config.directorSignatureBase64 ? (
+                                        <img 
+                                            src={config.directorSignatureBase64} 
+                                            className="object-contain" 
+                                            style={{ transform: `scale(${config.directorSignatureScale}) translateY(${config.directorSignatureYOffset}px)` }}
+                                        />
+                                    ) : (
+                                        <div className="text-center space-y-2"><FileSignature className="mx-auto text-purple-200" size={48}/><p className="text-xs font-black text-purple-300 uppercase tracking-widest">No Signature Uploaded</p></div>
+                                    )}
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">App Base URL (สำหรับส่งลิงก์ในแชท)</label>
-                                    <input 
-                                        type="text" 
-                                        value={config.appBaseUrl || ''}
-                                        onChange={e => setConfig({...config, appBaseUrl: e.target.value})}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
-                                        placeholder="https://your-app.vercel.app"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-purple-50 p-6 rounded-xl border border-purple-200 mb-6">
-                            <h4 className="font-bold text-purple-800 mb-4 flex items-center gap-2">
-                                <LinkIcon size={20}/> การเชื่อมต่อ Google Drive (สำหรับอัปโหลดไฟล์)
-                            </h4>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Google Apps Script Web App URL</label>
-                                    <input 
-                                        type="text" 
-                                        value={config.scriptUrl}
-                                        onChange={e => setConfig({...config, scriptUrl: e.target.value})}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none font-mono text-xs"
-                                        placeholder="https://script.google.com/macros/s/..."
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">Google Drive Folder ID</label>
-                                    <input 
-                                        type="text" 
-                                        value={config.driveFolderId}
-                                        onChange={e => setConfig({...config, driveFolderId: e.target.value})}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none font-mono text-xs"
-                                        placeholder="1234567890abcdef..."
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white rounded-xl border border-slate-200 p-6">
-                            <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                <ImageIcon size={20}/> ตั้งค่าลายเซ็นและตราสัญลักษณ์ (สำหรับออกเอกสาร PDF)
-                            </h4>
-                            <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg mb-4 text-xs flex items-start gap-2 border border-yellow-200">
-                                <AlertCircle size={16} className="shrink-0 mt-0.5"/>
-                                <span>ระบบจะย่อขนาดรูปภาพอัตโนมัติ (ไม่เกิน 400px) เพื่อประหยัดพื้นที่จัดเก็บและลดข้อผิดพลาดในการบันทึก</span>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                {/* School Logo */}
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">ตราโรงเรียน (Logo)</label>
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-24 h-24 border border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
-                                            {config.schoolLogoBase64 ? (
-                                                <img src={config.schoolLogoBase64} className="w-full h-full object-contain" alt="School Logo"/>
-                                            ) : <ImageIcon className="text-slate-300"/>}
+                                <div className="flex-1 space-y-8">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-purple-100 space-y-4">
+                                            <div className="flex justify-between items-center"><label className="text-[11px] font-black text-purple-400 uppercase tracking-widest">ขนาด (Signature Scale)</label><span className="text-xs font-black text-purple-600 bg-purple-50 px-2 py-1 rounded-lg">{config.directorSignatureScale}x</span></div>
+                                            <input type="range" min="0.5" max="2" step="0.1" value={config.directorSignatureScale} onChange={e => setConfig({...config, directorSignatureScale: parseFloat(e.target.value)})} className="w-full accent-purple-600"/>
+                                            <div className="text-[9px] text-slate-400 font-bold italic">* ปรับขนาดเพื่อให้ลายเซ็นดูเหมาะสมกับช่องลงนามในไฟล์ PDF</div>
                                         </div>
-                                        <div className="flex-1">
-                                            <input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'schoolLogoBase64')} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-purple-100 space-y-4">
+                                            <div className="flex justify-between items-center"><label className="text-[11px] font-black text-purple-400 uppercase tracking-widest">ตำแหน่งแนวตั้ง (Y-Offset)</label><span className="text-xs font-black text-purple-600 bg-purple-50 px-2 py-1 rounded-lg">{config.directorSignatureYOffset}px</span></div>
+                                            <input type="range" min="-50" max="50" step="1" value={config.directorSignatureYOffset} onChange={e => setConfig({...config, directorSignatureYOffset: parseInt(e.target.value)})} className="w-full accent-purple-600"/>
+                                            <div className="text-[9px] text-slate-400 font-bold italic">* ใช้สำหรับขยับลายเซ็นขึ้น-ลง เพื่อให้ตรงตำแหน่งบรรทัด</div>
                                         </div>
                                     </div>
-                                </div>
-
-                                {/* Official Garuda */}
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">ตราครุฑ (สำหรับหนังสือราชการ)</label>
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-24 h-24 border border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
-                                            {config.officialGarudaBase64 ? (
-                                                <img src={config.officialGarudaBase64} className="w-full h-full object-contain" alt="Garuda Logo"/>
-                                            ) : <ImageIcon className="text-slate-300"/>}
-                                        </div>
-                                        <div className="flex-1">
-                                            <input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'officialGarudaBase64')} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <hr className="my-6 border-slate-100"/>
-
-                            {/* Director Signature Config */}
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-2">ลายเซ็นผู้อำนวยการ (ดิจิทัล)</label>
-                                <div className="flex flex-col md:flex-row gap-6">
-                                    <div className="w-full md:w-64 h-24 border border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden shrink-0">
-                                         {config.directorSignatureBase64 ? (
-                                                <img 
-                                                    src={config.directorSignatureBase64} 
-                                                    className="object-contain" 
-                                                    alt="Director Signature"
-                                                    style={{ 
-                                                        transform: `scale(${config.directorSignatureScale}) translateY(${config.directorSignatureYOffset}px)` 
-                                                    }}
-                                                />
-                                            ) : <span className="text-xs text-slate-400">Preview</span>}
-                                    </div>
-                                    <div className="space-y-4 flex-1">
-                                        <input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'directorSignatureBase64')} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                                        
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
-                                                    <Maximize size={12}/> ขนาด (Scale)
-                                                </label>
-                                                <input 
-                                                    type="range" min="0.5" max="2" step="0.1"
-                                                    value={config.directorSignatureScale}
-                                                    onChange={e => setConfig({...config, directorSignatureScale: parseFloat(e.target.value)})}
-                                                    className="w-full"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
-                                                    <MoveVertical size={12}/> ตำแหน่งแนวตั้ง (Y-Offset)
-                                                </label>
-                                                <input 
-                                                    type="range" min="-50" max="50" step="1"
-                                                    value={config.directorSignatureYOffset}
-                                                    onChange={e => setConfig({...config, directorSignatureYOffset: parseInt(e.target.value)})}
-                                                    className="w-full"
-                                                />
-                                            </div>
-                                        </div>
+                                    <div className="flex gap-4">
+                                        <label className="flex-1 cursor-pointer bg-purple-600 text-white py-5 rounded-2xl font-black shadow-xl shadow-purple-100 flex items-center justify-center gap-3 hover:bg-purple-700 transition-all active:scale-95 uppercase tracking-widest text-sm">
+                                            <UploadCloud size={20}/> เลือกไฟล์ภาพลายเซ็น (PNG/JPG)
+                                            <input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'directorSignatureBase64')} className="hidden"/>
+                                        </label>
+                                        <button onClick={() => setConfig({...config, directorSignatureBase64: ''})} className="px-8 bg-white text-red-500 rounded-2xl font-black border-2 border-red-50 hover:bg-red-50 transition-all uppercase tracking-widest text-xs">Clear</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="flex justify-end pt-4">
-                            <button 
-                                onClick={handleSaveConfig}
-                                disabled={isLoadingConfig}
-                                className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg flex items-center gap-2 disabled:opacity-50"
-                            >
-                                {isLoadingConfig ? <RefreshCw className="animate-spin" size={20}/> : <Save size={20}/>} 
-                                บันทึกการตั้งค่าระบบ
+                        <div className="flex justify-end pt-6 border-t">
+                            <button onClick={handleSaveConfig} disabled={isLoadingConfig} className="bg-slate-800 text-white px-16 py-6 rounded-[2rem] font-black shadow-2xl shadow-slate-300 flex items-center gap-4 disabled:opacity-50 hover:bg-black transition-all active:scale-95 uppercase tracking-widest text-lg">
+                                {isLoadingConfig ? <RefreshCw className="animate-spin" size={24}/> : <Save size={24}/>} 
+                                บันทึกการตั้งค่าระบบโรงเรียน
                             </button>
                         </div>
                     </div>
                 )}
 
-                {/* --- CLOUD SETUP TAB --- */}
                 {activeTab === 'CLOUD_SETUP' && (
-                    <div className="space-y-6 animate-fade-in">
-                        <div className="bg-orange-50 border border-orange-200 rounded-xl p-6">
-                            <h3 className="text-xl font-bold text-orange-800 mb-4 flex items-center gap-2">
-                                <Cloud className="text-orange-600"/> คู่มือติดตั้งระบบเก็บไฟล์ Cloud (Google Drive)
-                            </h3>
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                <div className="space-y-4">
-                                    <p className="text-slate-700 text-sm leading-relaxed">
-                                        เพื่อให้โรงเรียนของท่านสามารถอัปโหลดไฟล์เอกสารและลายเซ็นได้ แอดมินต้องสร้างสคริปต์สะพานเชื่อมต่อไว้ในบัญชี Google ของโรงเรียนตามขั้นตอนดังนี้:
-                                    </p>
-                                    <ol className="space-y-3 text-sm text-slate-600 list-decimal pl-5">
-                                        <li>เข้าสู่ระบบ <a href="https://script.google.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold underline">Google Apps Script</a></li>
-                                        <li>คลิก <b>"New Project"</b></li>
-                                        <li>คัดลอกโค้ดทางด้านขวาไปวางทับโค้ดเดิมทั้งหมด</li>
-                                        <li>คลิก <b>"Deploy"</b> เลือก <b>"New Deployment"</b></li>
-                                        <li>เลือกประเภทเป็น <b>"Web App"</b></li>
-                                        <li>ตั้งค่า <b>Execute as: Me</b> และ <b>Who has access: Anyone</b></li>
-                                        <li>คลิก Deploy และคัดลอก <b>Web App URL</b> มาวางในหน้า "ตั้งค่าระบบ"</li>
-                                    </ol>
-                                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800">
-                                        <AlertCircle className="inline mr-1" size={14}/> <b>หมายเหตุ:</b> ในการ Deploy ครั้งแรก ท่านต้องกด "Advanced" และ "Go to Project (unsafe)" เพื่ออนุญาตสิทธิ์เข้าถึง Drive
+                    <div className="space-y-8 animate-fade-in max-w-6xl">
+                        <div className="bg-orange-50 border-2 border-orange-100 rounded-[2.5rem] p-10 space-y-8 relative overflow-hidden">
+                            <div className="absolute -top-10 -right-10 w-40 h-40 bg-orange-100 rounded-full blur-3xl opacity-50"></div>
+                            <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                                <div>
+                                    <h3 className="text-3xl font-black text-orange-900 flex items-center gap-4">
+                                        <Cloud className="text-orange-600" size={36}/>
+                                        Google Drive API Setup
+                                    </h3>
+                                    <p className="text-orange-700 font-bold mt-2">เชื่อมต่อพื้นที่เก็บข้อมูลถาวรสำหรับอัปโหลดไฟล์ (PDF/รูปภาพ/เอกสารแนบ)</p>
+                                </div>
+                                <div className="bg-orange-600 text-white px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest animate-pulse shadow-lg">Required for Uploads</div>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+                                <div className="lg:col-span-5 space-y-6">
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-black text-orange-800 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                            <Globe size={14}/> Google Apps Script Web App URL
+                                        </label>
+                                        <input type="text" value={config.scriptUrl} onChange={e => setConfig({...config, scriptUrl: e.target.value})} className="w-full px-6 py-4 border-2 border-white rounded-2xl font-mono text-xs focus:border-orange-500 outline-none bg-white shadow-sm" placeholder="https://script.google.com/macros/s/.../exec"/>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-black text-orange-800 uppercase tracking-widest ml-1 flex items-center gap-2">
+                                            <LinkIcon size={14}/> Google Drive Folder ID
+                                        </label>
+                                        <input type="text" value={config.driveFolderId} onChange={e => setConfig({...config, driveFolderId: e.target.value})} className="w-full px-6 py-4 border-2 border-white rounded-2xl font-mono text-xs focus:border-orange-500 outline-none bg-white shadow-sm" placeholder="1w2x3y4z..."/>
+                                    </div>
+                                    <div className="bg-white/80 p-6 rounded-3xl border border-orange-100 shadow-inner">
+                                        <h4 className="font-black text-orange-900 text-sm mb-3 flex items-center gap-2">📌 ขั้นตอนการติดตั้ง</h4>
+                                        <ol className="text-[11px] text-orange-800 font-bold space-y-3 list-decimal pl-4">
+                                            <li>คัดลอกโค้ด <span className="bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono">GAS Bridge</span> ฝั่งขวา</li>
+                                            <li>เปิด <a href="https://script.google.com" target="_blank" className="underline text-orange-600">Google Apps Script</a> และสร้างโปรเจกต์ใหม่</li>
+                                            <li>วางโค้ดที่คัดลอกและกด <span className="bg-orange-600 text-white px-1.5 py-0.5 rounded">Deploy</span> เป็น <span className="font-black">Web App</span></li>
+                                            <li>เลือก Execute as: <span className="underline">Me</span> และ Access: <span className="underline">Anyone</span></li>
+                                            <li>คัดลอก URL และ Folder ID มาใส่ในช่องด้านบน</li>
+                                        </ol>
                                     </div>
                                 </div>
-
-                                <div className="space-y-2">
-                                    <div className="flex justify-between items-center px-1">
-                                        <span className="text-xs font-bold text-slate-500 uppercase">Google Apps Script Code</span>
-                                        <button 
-                                            onClick={handleCopyCode} 
-                                            className="text-xs flex items-center gap-1 font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded transition-colors"
-                                        >
-                                            {copied ? <><Check size={14}/> คัดลอกแล้ว</> : <><Copy size={14}/> คัดลอกโค้ด</>}
+                                <div className="lg:col-span-7 flex flex-col space-y-4">
+                                    <div className="flex justify-between items-end">
+                                        <div className="flex items-center gap-2 font-black text-orange-900 text-xs uppercase tracking-widest px-2">
+                                            <Terminal size={16}/> GAS Bridge Code (v7.0 Stable)
+                                        </div>
+                                        <button onClick={() => { navigator.clipboard.writeText(gasCode); setCopied(true); setTimeout(()=>setCopied(false), 2000); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-md active:scale-95 ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-white hover:bg-black'}`}>
+                                            {copied ? 'Copied Successfully!' : 'Click to Copy Code'}
                                         </button>
                                     </div>
-                                    <div className="bg-slate-900 rounded-xl p-4 overflow-hidden relative">
-                                        <pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-[350px] custom-scrollbar leading-relaxed">
+                                    <div className="bg-slate-900 rounded-[2rem] p-8 shadow-2xl flex-1 border-4 border-slate-800">
+                                        <pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-[350px] leading-relaxed custom-scrollbar">
                                             {gasCode}
                                         </pre>
                                     </div>
@@ -830,6 +471,77 @@ function doGet(e) {
                     </div>
                 )}
             </div>
+
+            {/* User Edit Modal */}
+            {(isAdding || editingId) && (
+                <div className="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+                    <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-2xl p-10 animate-scale-up relative border-4 border-blue-500/20">
+                        <div className="flex justify-between items-center mb-8">
+                            <div>
+                                <h3 className="text-3xl font-black text-slate-800">{isAdding ? 'ลงทะเบียนบุคลากร' : 'แก้ไขข้อมูลบุคลากร'}</h3>
+                                <p className="text-slate-400 font-bold text-sm uppercase tracking-widest">Personnel Data Management</p>
+                            </div>
+                            <button onClick={() => { setIsAdding(false); setEditingId(null); }} className="p-3 hover:bg-slate-100 rounded-full transition-colors text-slate-400"><X size={28}/></button>
+                        </div>
+                        <form onSubmit={handleUserSubmit} className="space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-1">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">เลขบัตรประชาชน (Login ID)</label>
+                                    <input type="text" required disabled={!isAdding} value={editForm.id || ''} onChange={e => setEditForm({...editForm, id: e.target.value})} className="w-full px-5 py-4 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-black text-lg disabled:bg-slate-200 disabled:text-slate-500"/>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">ชื่อ - นามสกุล</label>
+                                    <input type="text" required value={editForm.name || ''} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full px-5 py-4 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-black text-lg"/>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">ตำแหน่งราชการ</label>
+                                    <select value={editForm.position || ''} onChange={e => setEditForm({...editForm, position: e.target.value})} className="w-full px-5 py-4 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold bg-slate-50">
+                                        {ACADEMIC_POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
+                                    </select>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">รหัสผ่าน (Password)</label>
+                                    <input type="text" value={editForm.password || ''} onChange={e => setEditForm({...editForm, password: e.target.value})} className="w-full px-5 py-4 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-black text-lg font-mono" placeholder="123456"/>
+                                </div>
+                                <div className="md:col-span-2 space-y-1">
+                                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Telegram Chat ID (ส่วนตัว)</label>
+                                    <input type="text" value={editForm.telegramChatId || ''} onChange={e => setEditForm({...editForm, telegramChatId: e.target.value})} className="w-full px-5 py-4 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-mono text-sm" placeholder="ID สำหรับรับแจ้งเตือนงานสารบรรณ/การลา ส่วนตัว"/>
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">สิทธิ์การเข้าถึงฟังก์ชัน (Roles)</label>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 bg-slate-50 p-6 rounded-3xl border-2 border-slate-100">
+                                    {AVAILABLE_ROLES.map(role => (
+                                        <label key={role.id} className={`flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all border-2 ${editForm.roles?.includes(role.id) ? 'bg-blue-600 text-white border-blue-500 shadow-md' : 'bg-white text-slate-500 border-slate-100 hover:border-blue-200'}`}>
+                                            <input 
+                                                type="checkbox" 
+                                                checked={editForm.roles?.includes(role.id)} 
+                                                onChange={() => {
+                                                    const roles = editForm.roles || [];
+                                                    setEditForm({...editForm, roles: roles.includes(role.id) ? roles.filter(r => r !== role.id) : [...roles, role.id]});
+                                                }}
+                                                className="hidden"
+                                            />
+                                            <div className={`w-5 h-5 rounded-md flex items-center justify-center border-2 ${editForm.roles?.includes(role.id) ? 'bg-white text-blue-600 border-white' : 'bg-slate-50 border-slate-200'}`}>
+                                                {editForm.roles?.includes(role.id) && <CheckSquare size={14}/>}
+                                            </div>
+                                            <span className="text-[10px] font-black uppercase tracking-tight leading-none">{role.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="pt-6 flex gap-4">
+                                <button type="button" onClick={() => { setIsAdding(false); setEditingId(null); }} className="flex-1 py-5 bg-slate-100 text-slate-600 rounded-2xl font-black hover:bg-slate-200 transition-all uppercase tracking-widest">ยกเลิก</button>
+                                <button type="submit" className="flex-2 py-5 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-100 flex items-center justify-center gap-3 hover:bg-blue-700 transition-all active:scale-95 uppercase tracking-widest">
+                                    <Save size={20}/> บันทึกข้อมูลบุคลากร
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+            
+            <style>{`.custom-scrollbar::-webkit-scrollbar { width: 6px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }`}</style>
         </div>
     );
 };
