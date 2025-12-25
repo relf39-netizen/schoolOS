@@ -60,7 +60,7 @@ const App: React.FC = () => {
                 if (profiles) setAllTeachers(profiles.map(p => ({
                     id: p.id, schoolId: p.school_id, name: p.name, password: p.password,
                     position: p.position, roles: p.roles as TeacherRole[], 
-                    signature_base64: p.signature_base_64, telegram_chat_id: p.telegram_chat_id,
+                    signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
                     isSuspended: p.is_suspended
                 })));
                 
@@ -75,6 +75,40 @@ const App: React.FC = () => {
         };
         loadData();
     }, []);
+
+    // Real-time Pending Leave Count via Supabase
+    useEffect(() => {
+        if (!currentUser || !isSupabaseConfigured || !supabase) return;
+
+        const fetchPendingCount = async () => {
+            const { count, error } = await supabase
+                .from('leave_requests')
+                .select('*', { count: 'exact', head: true })
+                .eq('school_id', currentUser.schoolId)
+                .eq('status', 'Pending');
+            
+            if (!error) setPendingLeaveCount(count || 0);
+        };
+
+        fetchPendingCount();
+
+        // Subscribe to changes in leave_requests
+        const channel = supabase
+            .channel('leave_changes')
+            .on('postgres_changes', { 
+                event: '*', 
+                schema: 'public', 
+                table: 'leave_requests',
+                filter: `school_id=eq.${currentUser.schoolId}` 
+            }, () => {
+                fetchPendingCount();
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [currentUser?.schoolId]);
 
     useEffect(() => {
         if (!isDataLoaded) return;
@@ -111,23 +145,6 @@ const App: React.FC = () => {
             window.history.replaceState({}, document.title, window.location.pathname);
         }
     }, [currentUser, pendingDeepLink]);
-
-    // Real-time Notifications via Firebase (if configured)
-    useEffect(() => {
-        if (!currentUser || !isConfigured || !db) return;
-        
-        // Listen for pending leaves
-        const qLeave = query(
-            collection(db, "leave_requests"), 
-            where("status", "==", "Pending"),
-            where("schoolId", "==", currentUser.schoolId) 
-        );
-        const unsubLeave = onSnapshot(qLeave, (snapshot) => {
-            setPendingLeaveCount(snapshot.size);
-        });
-
-        return () => { unsubLeave(); };
-    }, [currentUser]);
 
     const handleLogin = (user: Teacher) => {
         setCurrentUser(user);
@@ -167,7 +184,7 @@ const App: React.FC = () => {
 
     const handleUpdateSchool = async (s: School) => {
         if (isSupabaseConfigured && supabase) {
-            await supabase.from('schools').upsert([{ id: s.id, name: s.name, district: s.district, province: s.province, lat: s.lat, lng: s.lng, radius: s.radius, late_time_threshold: s.late_time_threshold, is_suspended: s.isSuspended || false }]);
+            await supabase.from('schools').upsert([{ id: s.id, name: s.name, district: s.district, province: s.province, lat: s.lat, lng: s.lng, radius: s.radius, late_time_threshold: s.lateTimeThreshold, is_suspended: s.isSuspended || false }]);
             setAllSchools(allSchools.map(sch => sch.id === s.id ? s : sch));
         }
     };
@@ -179,12 +196,11 @@ const App: React.FC = () => {
         }
     };
 
-    // Fix: Corrected property name from 'is_suspended' to 'isSuspended' to match Teacher type
     const handleEditTeacher = async (t: Teacher) => { 
         if (isSupabaseConfigured && supabase) {
             await supabase.from('profiles').upsert([{
                 id: t.id, school_id: t.schoolId, name: t.name, password: t.password,
-                position: t.position, roles: t.roles, signature_base64: t.signatureBase64,
+                position: t.position, roles: t.roles, signature_base_64: t.signatureBase64,
                 telegram_chat_id: t.telegramChatId, is_suspended: t.isSuspended || false
             }]);
             setAllTeachers(allTeachers.map(teacher => teacher.id === t.id ? t : teacher));
@@ -215,7 +231,7 @@ const App: React.FC = () => {
         { id: SystemView.ACADEMIC, title: 'งานวิชาการ', slogan: 'สถิตินักเรียน / ผลสอบ O-NET', icon: GraduationCap, color: 'from-indigo-600 to-violet-500', shadow: 'shadow-indigo-200', visible: true },
         { id: SystemView.DOCUMENTS, title: 'งานสารบรรณ', slogan: 'รับ-ส่ง รวดเร็ว ทันใจ', icon: FileText, color: 'from-blue-500 to-cyan-400', shadow: 'shadow-blue-200', visible: true },
         { id: SystemView.PLAN, title: 'แผนปฏิบัติการ', slogan: 'วางแผนแม่นยำ สู่ความสำเร็จ', icon: CalendarRange, color: 'from-violet-500 to-fuchsia-400', shadow: 'shadow-violet-200', visible: true },
-        { id: SystemView.LEAVE, title: 'ระบบการลา', slogan: 'โปร่งใส ตรวจสอบง่าย', icon: Users, color: 'from-emerald-500 to-teal-400', shadow: 'shadow-emerald-200', visible: true, badge: pendingLeaveCount > 0 ? `มีใบลา ${pendingLeaveCount} ใบ` : null },
+        { id: SystemView.LEAVE, title: 'ระบบการลา', slogan: 'โปร่งใส ตรวจสอบง่าย', icon: Users, color: 'from-emerald-500 to-teal-400', shadow: 'shadow-emerald-200', visible: true, badge: pendingLeaveCount > 0 ? `รอพิจารณา ${pendingLeaveCount} รายการ` : null },
         { id: SystemView.FINANCE, title: 'ระบบการเงิน', slogan: 'คุมงบประมาณ อย่างมีประสิทธิภาพ', icon: Activity, color: 'from-amber-500 to-orange-400', shadow: 'shadow-amber-200', visible: currentUser?.roles.includes('DIRECTOR') || currentUser?.roles.includes('FINANCE_BUDGET') || currentUser?.roles.includes('FINANCE_NONBUDGET') },
         { id: SystemView.ATTENDANCE, title: 'ลงเวลาทำงาน', slogan: 'เช็คเวลาแม่นยำ ด้วย GPS', icon: Clock, color: 'from-rose-500 to-pink-400', shadow: 'shadow-rose-200', visible: true },
         { id: SystemView.ADMIN_USERS, title: 'ผู้ดูแลระบบ', slogan: 'ตั้งค่าระบบ และผู้ใช้งาน', icon: Settings, color: 'from-slate-600 to-slate-400', shadow: 'shadow-slate-200', visible: currentUser?.roles.includes('SYSTEM_ADMIN') || currentUser?.roles.includes('DIRECTOR') }
@@ -244,7 +260,7 @@ const App: React.FC = () => {
                             <div className="flex flex-col h-full justify-between items-start relative z-10">
                                 <div className="flex justify-between w-full items-start">
                                     <div className={`p-4 rounded-2xl bg-gradient-to-br ${module.color} text-white shadow-md mb-6`}><module.icon size={32} /></div>
-                                    {module.badge && <div className="bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-md border-2 border-white">{module.badge}</div>}
+                                    {module.badge && <div className="bg-red-500 text-white text-[10px] font-black px-3 py-1.5 rounded-full animate-pulse shadow-lg border-2 border-white">{module.badge}</div>}
                                 </div>
                                 <div className="text-left w-full">
                                     <h3 className="text-xl font-bold text-slate-800 mb-1 group-hover:text-blue-700 transition-colors">{module.title}</h3>
@@ -277,7 +293,7 @@ const App: React.FC = () => {
             case SystemView.FINANCE: return <FinanceSystem currentUser={currentUser!} allTeachers={schoolTeachers} />;
             case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser!} allTeachers={schoolTeachers} currentSchool={currentSchool} />;
             case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser!} />;
-            case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool} onUpdateSchool={handleUpdateSchool} onAddTeacher={handleAddTeacher} onEditTeacher={handleEditTeacher} onDeleteTeacher={handleEditTeacher} />;
+            case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool} onUpdateSchool={handleUpdateSchool} onAddTeacher={handleAddTeacher} onEditTeacher={handleEditTeacher} onDeleteTeacher={handleDeleteTeacher} />;
             default: return <DashboardCards />;
         }
     };

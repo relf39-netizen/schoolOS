@@ -1,4 +1,5 @@
-import React, { ReactNode, ErrorInfo } from 'react';
+
+import React, { Component, ReactNode, ErrorInfo } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 
@@ -12,8 +13,10 @@ interface ErrorBoundaryState {
 }
 
 // Error Boundary Component to catch crashes
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = {
+// Fix: Use Component directly from react to ensure proper type recognition of inherited members (props/state)
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  // Initialize state directly as a class property for better type inference and to resolve 'Property state does not exist' errors
+  state: ErrorBoundaryState = {
     hasError: false,
     error: null
   };
@@ -45,6 +48,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
       );
     }
 
+    // Fix: Return children from this.props (now properly recognized via generic extension)
     return this.props.children;
   }
 }

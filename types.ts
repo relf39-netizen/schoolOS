@@ -36,8 +36,8 @@ export interface School {
   radius?: number;     
   lateTimeThreshold?: string; 
   academicYearStart?: string; 
-  academicYearEnd?: string;
-  isSuspended?: boolean; // New: ระงับการใช้งานโรงเรียน
+  academic_year_end?: string;
+  isSuspended?: boolean;
 }
 
 export interface Attachment {
@@ -73,7 +73,7 @@ export interface DocumentItem {
 
 export interface LeaveRequest {
   id: string;
-  schoolId?: string;
+  schoolId: string;
   teacherId: string;
   teacherName: string;
   teacherPosition?: string; 
@@ -82,6 +82,7 @@ export interface LeaveRequest {
   endDate: string;
   startTime?: string;
   endTime?: string;
+  substituteName?: string; // เพิ่มฟิลด์ครูสอนแทน
   reason: string;
   contactInfo?: string; 
   mobilePhone?: string; 
@@ -163,7 +164,7 @@ export interface Teacher {
   isFirstLogin?: boolean; 
   signatureBase64?: string; 
   telegramChatId?: string; 
-  isSuspended?: boolean; // New: ระงับการใช้งานรายบุคคล
+  isSuspended?: boolean;
 }
 
 export type ProjectStatus = 'Draft' | 'Approved' | 'Completed';
