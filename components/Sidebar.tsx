@@ -3,6 +3,8 @@ import React from 'react';
 import { SystemView, Teacher } from '../types';
 import { Home, FileText, UserMinus, DollarSign, MapPin, LogOut, X, CalendarRange, Settings, UserCircle, GraduationCap, Calendar } from 'lucide-react';
 
+const APP_LOGO_URL = "https://img2.pic.in.th/pic/9c2e0f8ba684e3441fc58d880fdf143d.png";
+
 interface SidebarProps {
     currentView: SystemView;
     onChangeView: (view: SystemView) => void;
@@ -11,12 +13,11 @@ interface SidebarProps {
     currentUser: Teacher;
     allTeachers: Teacher[];
     onSwitchUser: (teacherId: string) => void;
-    schoolLogo?: string; // Add schoolLogo prop
+    schoolLogo?: string;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isMobileOpen, toggleMobile, currentUser, allTeachers, onSwitchUser, schoolLogo }) => {
     
-    // Reordered Menu Items to match App.tsx
     const menuItems = [
         { id: SystemView.DASHBOARD, label: 'ภาพรวม', icon: Home, visible: true },
         { id: SystemView.DOCUMENTS, label: 'งานสารบรรณ', icon: FileText, visible: true },
@@ -34,7 +35,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isMobileOp
 
     return (
         <>
-             {/* Mobile Overlay */}
              {isMobileOpen && (
                 <div 
                     className="fixed inset-0 z-20 bg-black bg-opacity-50 lg:hidden"
@@ -44,14 +44,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isMobileOp
 
             <div className={`${baseClasses} ${mobileClasses} flex flex-col shadow-xl`}>
                 <div className="h-16 flex items-center justify-between px-6 bg-slate-800 shrink-0">
-                    <div className="flex items-center space-x-2">
-                        {schoolLogo ? (
-                            <img src={schoolLogo} alt="School Logo" className="w-8 h-8 rounded-lg object-contain bg-white" />
-                        ) : (
-                            <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center shadow-lg">
-                                <span className="font-bold text-white text-lg">S</span>
-                            </div>
-                        )}
+                    <div className="flex items-center space-x-3">
+                        <img src={schoolLogo || APP_LOGO_URL} alt="Logo" className="w-8 h-8 rounded-lg object-contain bg-white shadow-sm" />
                         <span className="text-xl font-bold tracking-tight">SchoolOS</span>
                     </div>
                     <button onClick={toggleMobile} className="lg:hidden">
@@ -85,7 +79,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isMobileOp
                     </nav>
                 </div>
 
-                {/* Profile Footer */}
                 <div className="p-4 bg-slate-800/50 border-t border-slate-800">
                     <div className="flex items-center gap-3 mb-4 px-2 cursor-pointer hover:bg-slate-700/50 p-2 rounded-lg transition-colors" onClick={() => onChangeView(SystemView.PROFILE)}>
                         <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-300">
@@ -97,7 +90,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isMobileOp
                         </div>
                     </div>
 
-                    {/* DEV: User Switcher (Keep for testing, but label it) */}
                     <div className="mb-2 px-2">
                          <label className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Developer Mode: Switch User</label>
                          <select 

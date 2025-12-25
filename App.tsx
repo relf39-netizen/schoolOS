@@ -24,6 +24,7 @@ import { supabase, isConfigured as isSupabaseConfigured } from './supabaseClient
 import { sendTelegramMessage } from './utils/telegram';
 
 const SESSION_KEY = 'schoolos_session_v1';
+const APP_LOGO_URL = "https://img2.pic.in.th/pic/9c2e0f8ba684e3441fc58d880fdf143d.png";
 
 interface AppNotification {
     message: string;
@@ -241,13 +242,7 @@ const App: React.FC = () => {
         <div className="p-4 md:p-8 animate-fade-in pb-24">
             <div className="max-w-7xl mx-auto">
                 <div className="mb-8 flex items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border">
-                    {currentSchool?.logoBase64 ? (
-                        <img src={currentSchool.logoBase64} alt="Logo" className="w-16 h-16 rounded-xl object-contain bg-white shadow-sm border" />
-                    ) : (
-                        <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center text-white shadow-lg">
-                            <Building2 size={32}/>
-                        </div>
-                    )}
+                    <img src={currentSchool?.logoBase64 || APP_LOGO_URL} alt="Logo" className="w-16 h-16 rounded-xl object-contain bg-white shadow-sm border" />
                     <div>
                         <h2 className="text-2xl md:text-3xl font-bold text-slate-800">สวัสดี, {currentUser?.name}</h2>
                         <p className="text-slate-500 font-medium">{currentUser?.position} | {currentSchool?.name}</p>
@@ -364,7 +359,7 @@ const App: React.FC = () => {
             </header>
             <main className="flex-1 w-full">{currentView !== SystemView.DASHBOARD ? <div className="max-w-7xl mx-auto p-4 md:p-8 pb-24 animate-fade-in">{renderContent()}</div> : renderContent()}</main>
             <footer className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-sm border-t border-slate-200 py-3 px-6 z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] print:hidden">
-                <div className="max-w-7xl mx-auto flex justify-between items-center"><div className="flex items-center gap-2 text-slate-600"><Building2 size={18} className="text-blue-600"/><span className="font-bold text-sm md:text-base">{currentSchool?.name || 'SchoolOS System'}</span></div><div className="text-[10px] md:text-xs text-slate-400 font-bold">SMART SCHOOL MANAGEMENT v5.0</div></div>
+                <div className="max-w-7xl mx-auto flex justify-between items-center"><div className="flex items-center gap-2 text-slate-600"><img src={APP_LOGO_URL} className="w-5 h-5 object-contain"/><span className="font-bold text-sm md:text-base">{currentSchool?.name || 'SchoolOS System'}</span></div><div className="text-[10px] md:text-xs text-slate-400 font-bold">SMART SCHOOL MANAGEMENT v5.0</div></div>
             </footer>
         </div>
     );

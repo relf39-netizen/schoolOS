@@ -1,21 +1,23 @@
+
 {
   "name": "SchoolOS - ระบบบริหารจัดการโรงเรียน",
   "short_name": "SchoolOS",
   "start_url": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#f3f4f6",
   "theme_color": "#1e293b",
   "icons": [
     {
-      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiMzYjgyZjYiLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMxZTNhOGEiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjEwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjE2MCIgY3k9IjE4MCIgcj0iNjAiIGZpbGw9IndoaXRlIi8+PHBhdGggZD0iTTYwIDQyMCBMMjYwIDQyMCBMMjYwIDMyMCBRMjYwIDI2MCAxNjAgMjYwIFE2MCAyNjAgNjAgMzIwIFoiIGZpbGw9IndoaXRlIi8+PGNpcmNsZSBjeD0iMzUyIiBjeT0iMTgwIiByPSI2MCIgZmlsbD0id2hpdGUiLz48cGF0aCBkPSJNMjUyIDQyMCBMNDUyIDQyMCBMNDUyIDMyMCBRNDUyIDI2MCAzNTIgMjYwIFEyNTIgMjYwIDI1MiAzMjAgWiIgZmlsbD0id2hpdGUiLz48cGF0aCBkPSJNMjkyIDE4MCBRMjkyIDEwMCAzNTIgMTAwIFE0MTIgMTAwIDQxMiAxODAiIGZpbGw9IndoaXRlIi8+PC9zdmc+",
+      "src": "https://img2.pic.in.th/pic/9c2e0f8ba684e3441fc58d880fdf143d.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiMzYjgyZjYiLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMxZTNhOGEiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjEwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjE2MCIgY3k9IjE4MCIgcj0iNjAiIGZpbGw9IndoaXRlIi8+PHBhdGggZD0iTTYwIDQyMCBMMjYwIDQyMCBMMjYwIDMyMCBRMjYwIDI2MCAxNjAgMjYwIFE2MCAyNjAgNjAgMzIwIFoiIGZpbGw9IndoaXRlIi8+PGNpcmNsZSBjeD0iMzUyIiBjeT0iMTgwIiByPSI2MCIgZmlsbD0id2hpdGUiLz48cGF0aCBkPSJNMjUyIDQyMCBMNDUyIDQyMCBMNDUyIDMyMCBRNDUyIDI2MCAzNTIgMjYwIFEyNTIgMjYwIDI1MiAzMjAgWiIgZmlsbD0id2hpdGUiLz48cGF0aCBkPSJNMjkyIDE4MCBRMjkyIDEwMCAzNTIgMTAwIFE0MTIgMTAwIDQxMiAxODAiIGZpbGw9IndoaXRlIi8+PC9zdmc+",
+      "src": "https://img2.pic.in.th/pic/9c2e0f8ba684e3441fc58d880fdf143d.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
