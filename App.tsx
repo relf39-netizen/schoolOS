@@ -12,16 +12,15 @@ import LoginScreen from './components/LoginScreen';
 import FirstLoginSetup from './components/FirstLoginSetup';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import DirectorCalendar from './components/DirectorCalendar'; 
-import { SystemView, Teacher, School, TeacherRole, DirectorEvent, SystemConfig } from './types';
+import { SystemView, Teacher, School, TeacherRole } from './types';
 import { 
     Activity, Users, Clock, FileText, CalendarRange, 
-    Loader, Database, ServerOff, Home, LogOut, 
-    Settings, ChevronLeft, Building2, LayoutGrid, Bell, UserCircle, ExternalLink, X, Calendar, GraduationCap
+    Loader, Database, ServerOff, LogOut, 
+    Settings, ChevronLeft, LayoutGrid, Bell, UserCircle, ExternalLink, X, Calendar, GraduationCap
 } from 'lucide-react';
-import { MOCK_DOCUMENTS, MOCK_LEAVE_REQUESTS, MOCK_TRANSACTIONS, MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
-import { db, isConfigured, collection, onSnapshot, setDoc, doc, deleteDoc, query, where, getDocs, updateDoc, getDoc, type QuerySnapshot, type DocumentData } from './firebaseConfig';
+import { MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
+import { isConfigured, type QuerySnapshot, type DocumentData } from './firebaseConfig';
 import { supabase, isConfigured as isSupabaseConfigured } from './supabaseClient';
-import { sendTelegramMessage } from './utils/telegram';
 
 const SESSION_KEY = 'schoolos_session_v1';
 const APP_LOGO_URL = "https://img2.pic.in.th/pic/9c2e0f8ba684e3441fc58d880fdf143d.png";
@@ -82,7 +81,7 @@ const App: React.FC = () => {
         if (!currentUser || !isSupabaseConfigured || !supabase) return;
 
         const fetchPendingCount = async () => {
-            const { count, error } = await supabase
+            const { count, error } = await supabase!
                 .from('leave_requests')
                 .select('*', { count: 'exact', head: true })
                 .eq('school_id', currentUser.schoolId)
@@ -94,7 +93,7 @@ const App: React.FC = () => {
         fetchPendingCount();
 
         // Subscribe to changes in leave_requests
-        const channel = supabase
+        const channel = supabase!
             .channel('leave_changes')
             .on('postgres_changes', { 
                 event: '*', 
@@ -107,7 +106,7 @@ const App: React.FC = () => {
             .subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
+            supabase!.removeChannel(channel);
         };
     }, [currentUser?.schoolId]);
 

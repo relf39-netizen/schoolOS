@@ -13,7 +13,7 @@ interface ErrorBoundaryState {
 }
 
 // Error Boundary Component to catch crashes
-// Fix: Use Component directly from react to ensure proper type recognition of inherited members (props/state)
+// Fix: Use the imported Component directly instead of React.Component to ensure proper type recognition of inherited members (props/state)
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   // Initialize state directly as a class property for better type inference and to resolve 'Property state does not exist' errors
   state: ErrorBoundaryState = {
@@ -48,7 +48,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       );
     }
 
-    // Fix: Return children from this.props (now properly recognized via generic extension)
+    // Fix: Return children from this.props (now properly recognized via direct extension of Component)
     return this.props.children;
   }
 }
