@@ -14,14 +14,13 @@ import {
   deleteDoc, 
   getDocs, 
   setDoc,
-  Timestamp
+  Timestamp,
+  type QuerySnapshot,
+  type DocumentData
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
-/**
- * 💡 คำแนะนำ: นำค่าที่คัดลอกมาจาก Firebase Project Settings มาวางที่นี่
- */
 const firebaseConfig = {
   apiKey: "AIzaSyDEpU1t8EBzxpeWmy8AZrcMySi-SbqGLl4",
   authDomain: "schooloperatorsystem.firebaseapp.com",
@@ -69,5 +68,7 @@ export {
   setDoc,
   Timestamp
 };
+
+export type { QuerySnapshot, DocumentData };
 
 export default app;
