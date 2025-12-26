@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import DocumentsSystem from './components/DocumentsSystem';
 import LeaveSystem from './components/LeaveSystem';
@@ -12,7 +11,7 @@ import LoginScreen from './components/LoginScreen';
 import FirstLoginSetup from './components/FirstLoginSetup';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import DirectorCalendar from './components/DirectorCalendar'; 
-import { SystemView, Teacher, School, TeacherRole } from './types';
+import { SystemView, Teacher, School, TeacherRole, DocumentItem } from './types';
 import { 
     Activity, Users, Clock, FileText, CalendarRange, 
     Loader, Database, ServerOff, LogOut, 
@@ -41,6 +40,7 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [notification, setNotification] = useState<AppNotification | null>(null);
     const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+    const [pendingDocCount, setPendingDocCount] = useState(0);
     const [focusItem, setFocusItem] = useState<{ view: SystemView, id: string } | null>(null);
     const [pendingDeepLink, setPendingDeepLink] = useState<{ view: SystemView, id: string } | null>(null);
     const [currentView, setCurrentView] = useState<SystemView>(SystemView.DASHBOARD);
@@ -76,39 +76,61 @@ const App: React.FC = () => {
         loadData();
     }, []);
 
-    // Real-time Pending Leave Count via Supabase
+    // Real-time Pending Counts via Supabase
     useEffect(() => {
         if (!currentUser || !isSupabaseConfigured || !supabase) return;
 
-        const fetchPendingCount = async () => {
-            const { count, error } = await supabase!
+        const fetchCounts = async () => {
+            // 1. Pending Leave Count
+            const { count: leaveCount } = await supabase!
                 .from('leave_requests')
                 .select('*', { count: 'exact', head: true })
                 .eq('school_id', currentUser.schoolId)
                 .eq('status', 'Pending');
-            
-            if (!error) setPendingLeaveCount(count || 0);
+            setPendingLeaveCount(leaveCount || 0);
+
+            // 2. Pending Document Count based on roles
+            const isDirector = currentUser.roles.includes('DIRECTOR');
+            const isViceDirector = currentUser.roles.includes('VICE_DIRECTOR');
+
+            const { data: docData, error: docError } = await supabase!
+                .from('documents')
+                .select('id, status, target_teachers, acknowledged_by, assigned_vice_director_id')
+                .eq('school_id', currentUser.schoolId);
+
+            if (!docError && docData) {
+                let count = 0;
+                if (isDirector) {
+                    count = docData.filter(d => d.status === 'PendingDirector').length;
+                } else if (isViceDirector) {
+                    count = docData.filter(d => d.status === 'PendingViceDirector' && d.assigned_vice_director_id === currentUser.id).length;
+                } else {
+                    // Regular Teacher - count Distributed but not yet acknowledged
+                    count = docData.filter(d => 
+                        d.status === 'Distributed' && 
+                        (d.target_teachers || []).includes(currentUser.id) && 
+                        !(d.acknowledged_by || []).includes(currentUser.id)
+                    ).length;
+                }
+                setPendingDocCount(count);
+            }
         };
 
-        fetchPendingCount();
+        fetchCounts();
 
-        // Subscribe to changes in leave_requests
-        const channel = supabase!
-            .channel('leave_changes')
-            .on('postgres_changes', { 
-                event: '*', 
-                schema: 'public', 
-                table: 'leave_requests',
-                filter: `school_id=eq.${currentUser.schoolId}` 
-            }, () => {
-                fetchPendingCount();
-            })
-            .subscribe();
+        const leaveChannel = supabase!.channel('app_counts_leave').on('postgres_changes', { 
+            event: '*', schema: 'public', table: 'leave_requests', filter: `school_id=eq.${currentUser.schoolId}` 
+        }, () => fetchCounts()).subscribe();
+
+        const docChannel = supabase!.channel('app_counts_docs').on('postgres_changes', { 
+            event: '*', schema: 'public', table: 'documents', filter: `school_id=eq.${currentUser.schoolId}` 
+        }, () => fetchCounts()).subscribe();
 
         return () => {
-            supabase!.removeChannel(channel);
+            supabase!.removeChannel(leaveChannel);
+            supabase!.removeChannel(docChannel);
         };
-    }, [currentUser?.schoolId]);
+    }, [currentUser?.id, currentUser?.schoolId]);
 
     useEffect(() => {
         if (!isDataLoaded) return;
@@ -184,6 +206,7 @@ const App: React.FC = () => {
 
     const handleUpdateSchool = async (s: School) => {
         if (isSupabaseConfigured && supabase) {
+            // Fix: Changed s.late_time_threshold to s.lateTimeThreshold to match the School interface property name
             await supabase.from('schools').upsert([{ id: s.id, name: s.name, district: s.district, province: s.province, lat: s.lat, lng: s.lng, radius: s.radius, late_time_threshold: s.lateTimeThreshold, is_suspended: s.isSuspended || false }]);
             setAllSchools(allSchools.map(sch => sch.id === s.id ? s : sch));
         }
@@ -225,11 +248,32 @@ const App: React.FC = () => {
     const schoolTeachers = allTeachers.filter(t => t.schoolId === currentUser?.schoolId);
     const currentSchool = allSchools.find(s => s.id === currentUser?.schoolId);
 
+    // Dynamic Module Config with counts
+    const isDirector = currentUser?.roles.includes('DIRECTOR');
+    const isViceDirector = currentUser?.roles.includes('VICE_DIRECTOR');
+
+    const getDocStatusText = () => {
+        if (pendingDocCount === 0) return null;
+        if (isDirector) return `มีหนังสือรอเกษียณ ${pendingDocCount} ฉบับ`;
+        if (isDirector) return `มีหนังสือรอเกษียณ ${pendingDocCount} ฉบับ`;
+        if (isViceDirector) return `มีหนังสือรอสั่งการ ${pendingDocCount} ฉบับ`;
+        return `มีหนังสือเข้าใหม่ ${pendingDocCount} ฉบับ`;
+    };
+
     const modules = [
         { id: SystemView.PROFILE, title: 'ข้อมูลส่วนตัว', slogan: 'แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล', icon: UserCircle, color: 'from-purple-500 to-indigo-400', shadow: 'shadow-purple-200', visible: true },
         { id: SystemView.DIRECTOR_CALENDAR, title: 'ปฏิทินปฏิบัติงาน ผอ.', slogan: 'แจ้งเตือนนัดหมาย และภารกิจ', icon: Calendar, color: 'from-indigo-500 to-blue-400', shadow: 'shadow-indigo-200', visible: true },
         { id: SystemView.ACADEMIC, title: 'งานวิชาการ', slogan: 'สถิตินักเรียน / ผลสอบ O-NET', icon: GraduationCap, color: 'from-indigo-600 to-violet-500', shadow: 'shadow-indigo-200', visible: true },
-        { id: SystemView.DOCUMENTS, title: 'งานสารบรรณ', slogan: 'รับ-ส่ง รวดเร็ว ทันใจ', icon: FileText, color: 'from-blue-500 to-cyan-400', shadow: 'shadow-blue-200', visible: true },
+        { 
+            id: SystemView.DOCUMENTS, 
+            title: 'งานสารบรรณ', 
+            slogan: 'รับ-ส่ง รวดเร็ว ทันใจ', 
+            badge: getDocStatusText(),
+            icon: FileText, 
+            color: 'from-blue-500 to-cyan-400', 
+            shadow: 'shadow-blue-200', 
+            visible: true 
+        },
         { id: SystemView.PLAN, title: 'แผนปฏิบัติการ', slogan: 'วางแผนแม่นยำ สู่ความสำเร็จ', icon: CalendarRange, color: 'from-violet-500 to-fuchsia-400', shadow: 'shadow-violet-200', visible: true },
         { id: SystemView.LEAVE, title: 'ระบบการลา', slogan: 'โปร่งใส ตรวจสอบง่าย', icon: Users, color: 'from-emerald-500 to-teal-400', shadow: 'shadow-emerald-200', visible: true, badge: pendingLeaveCount > 0 ? `รอพิจารณา ${pendingLeaveCount} รายการ` : null },
         { id: SystemView.FINANCE, title: 'ระบบการเงิน', slogan: 'คุมงบประมาณ อย่างมีประสิทธิภาพ', icon: Activity, color: 'from-amber-500 to-orange-400', shadow: 'shadow-amber-200', visible: currentUser?.roles.includes('DIRECTOR') || currentUser?.roles.includes('FINANCE_BUDGET') || currentUser?.roles.includes('FINANCE_NONBUDGET') },
@@ -248,17 +292,23 @@ const App: React.FC = () => {
                     </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {modules.filter(m => m.visible).map((module) => (
+                    {modules.filter(m => m.visible).map((module: any) => (
                         <button key={module.id} onClick={() => setCurrentView(module.id)} className={`group relative overflow-hidden rounded-3xl p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl bg-white border border-slate-100 shadow-lg ${module.shadow}`}>
                             <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${module.color} opacity-10 rounded-bl-full transition-transform group-hover:scale-110`}></div>
                             <div className="flex flex-col h-full justify-between items-start relative z-10">
                                 <div className="flex justify-between w-full items-start">
                                     <div className={`p-4 rounded-2xl bg-gradient-to-br ${module.color} text-white shadow-md mb-6`}><module.icon size={32} /></div>
-                                    {module.badge && <div className="bg-red-500 text-white text-[10px] font-black px-3 py-1.5 rounded-full animate-pulse shadow-lg border-2 border-white">{module.badge}</div>}
+                                    {module.badge && (
+                                        <div className="bg-red-600 text-white text-[11px] font-black px-4 py-2 rounded-full animate-pulse shadow-xl border-2 border-white transform hover:scale-110 transition-transform">
+                                            {module.badge}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="text-left w-full">
                                     <h3 className="text-xl font-bold text-slate-800 mb-1 group-hover:text-blue-700 transition-colors">{module.title}</h3>
-                                    <p className="text-slate-500 font-medium text-sm">{module.slogan}</p>
+                                    <p className="text-slate-500 font-medium text-sm">
+                                        {module.slogan}
+                                    </p>
                                 </div>
                                 <div className="mt-4 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
                                     <div className={`h-full bg-gradient-to-r ${module.color} w-0 group-hover:w-full transition-all duration-500 ease-out`}></div>

@@ -64,9 +64,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     const [linkInput, setLinkInput] = useState('');
     const [linkNameInput, setLinkNameInput] = useState('');
     
-    // Upload Progress State
-    const [uploadProgress, setUploadProgress] = useState<string>('');
-
     // Action State
     const [command, setCommand] = useState('');
     const [selectedTeachers, setSelectedTeachers] = useState<string[]>([]);
@@ -288,6 +285,85 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         teachers.forEach(t => {
             if (t.telegramChatId) sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId, message, deepLink);
         });
+    };
+
+    const handleFileUploadInBackground = async (file: File) => {
+        if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId) {
+            alert("ไม่พบการตั้งค่า Google Drive!");
+            return;
+        }
+
+        const taskId = `upload_${Date.now()}`;
+        const safeBookNumber = (newDoc.bookNumber || 'unknown').replace(/[\\/:*?"<>|]/g, '-');
+        const finalFileName = `${safeBookNumber}_${file.name}`;
+
+        setBackgroundTasks(prev => [...prev, { 
+            id: taskId, 
+            title: `อัปโหลด: ${file.name}`, 
+            status: 'uploading', 
+            message: 'กำลังเตรียมไฟล์...', 
+            notified: false 
+        }]);
+
+        try {
+            const reader = new FileReader();
+            const base64DataPromise = new Promise<string>((resolve) => {
+                reader.onload = async () => {
+                    let data = reader.result as string;
+                    // Auto-stamp receive number for incoming PDF
+                    if (file.type === 'application/pdf' && docCategory === 'INCOMING') {
+                        updateTask(taskId, { message: 'กำลังประทับตราเลขรับ...' });
+                        try {
+                            data = await stampReceiveNumber({
+                                fileBase64: data,
+                                bookNumber: newDoc.bookNumber || "XXX/XXXX",
+                                date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }),
+                                time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
+                                schoolName: currentSchool.name
+                            });
+                        } catch (e) {
+                            console.error("Stamping failed, uploading original", e);
+                        }
+                    }
+                    resolve(data);
+                };
+            });
+            reader.readAsDataURL(file);
+            const base64Data = await base64DataPromise;
+
+            updateTask(taskId, { message: 'กำลังอัปโหลดไปที่ Google Drive...' });
+
+            const payload = { 
+                folderId: sysConfig.driveFolderId, 
+                fileName: finalFileName, 
+                mimeType: file.type, 
+                fileData: getCleanBase64(base64Data) 
+            }; 
+            
+            const response = await fetch(sysConfig.scriptUrl!, { 
+                method: 'POST', 
+                body: JSON.stringify(payload), 
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                redirect: 'follow' 
+            }); 
+            
+            const result = await response.json(); 
+            if (result.status === 'success') { 
+                const newAtt: Attachment = { 
+                    id: `att_${Date.now()}`, 
+                    name: finalFileName, 
+                    type: 'LINK', 
+                    url: result.viewUrl || result.url, 
+                    fileType: file.type 
+                };
+                setTempAttachments(prev => [...prev, newAtt]); 
+                updateTask(taskId, { status: 'done', message: 'อัปโหลดสำเร็จ' });
+            } else { 
+                throw new Error(result.message); 
+            }
+        } catch (err: any) {
+            updateTask(taskId, { status: 'error', message: `อัปโหลดล้มเหลว: ${err.message || 'ข้อผิดพลาดเครือข่าย'}` });
+        }
     };
 
     const processActionInBackground = async (targetDoc: DocumentItem, finalCommand: string, targetTeachers: string[], targetPage: number, nextStatus: any, viceId?: string) => {
@@ -585,12 +661,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
             {viewMode === 'CREATE' && (
                 <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 max-w-4xl mx-auto relative overflow-hidden animate-slide-up">
-                    {isUploading && (<div className="absolute inset-0 bg-white/90 z-50 flex items-center justify-center flex-col"><Loader className="animate-spin text-blue-600 mb-2" size={40} /><p className="font-bold text-slate-700">{uploadProgress}</p></div>)}
                     <div className="mb-6 border-b pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4"><h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><FilePlus className="text-blue-600"/> ลงทะเบียนรับหนังสือ / สร้างคำสั่ง</h3><div className="bg-slate-100 p-1 rounded-lg flex shadow-inner"><button type="button" onClick={() => setDocCategory('INCOMING')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${docCategory === 'INCOMING' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}><FileBadge size={16}/> หนังสือรับภายนอก</button><button type="button" onClick={() => setDocCategory('ORDER')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${docCategory === 'ORDER' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}><Megaphone size={16}/> คำสั่งปฏิบัติราชการ</button></div></div>
                     <form onSubmit={async (e) => {
                         e.preventDefault();
                         if (!newDoc.bookNumber || !supabase) return;
-                        setIsUploading(true);
                         const isOrder = docCategory === 'ORDER';
                         const now = new Date();
                         const created: any = {
@@ -606,7 +680,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                             setNewDoc({ bookNumber: '', title: '', from: '', priority: 'Normal', description: '' });
                             setTempAttachments([]); setSelectedTeachers([]); setViewMode('LIST'); fetchDocs();
                         } else { alert("บันทึกล้มเหลว: " + error?.message); }
-                        setIsUploading(false);
                     }} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-4">
@@ -616,58 +689,27 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                 <div><label className="block text-sm font-bold text-slate-700 mb-1">รายละเอียดเพิ่มเติม</label><textarea rows={3} value={newDoc.description} onChange={e => setNewDoc({...newDoc, description: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"></textarea></div>
                             </div>
                             <div className="space-y-4">
-                                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200"><h4 className="font-bold text-slate-700 mb-2 flex items-center gap-2"><UploadCloud size={18}/> อัปโหลดไฟล์แนบ</h4>{tempAttachments.map(att => (<div key={att.id} className="p-2 flex justify-between items-center text-xs bg-white mb-2 border rounded shadow-sm"><div className="flex items-center gap-2 truncate"><span>{att.name}</span></div><button type="button" onClick={() => setTempAttachments(prev => prev.filter(a => a.id !== att.id))} className="text-red-500 ml-2 hover:bg-red-50 p-1 rounded transition-colors"><Trash2 size={14}/></button></div>))}<input type="file" onChange={async (e) => { 
-                                    if (e.target.files && e.target.files[0]) { 
-                                        const file = e.target.files[0]; 
-                                        if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId) { alert("ไม่พบการตั้งค่า Google Drive!"); return; } 
-                                        setUploadProgress('กำลังเตรียมไฟล์...'); 
-                                        setIsUploading(true); 
-                                        try { 
-                                            const reader = new FileReader(); 
-                                            reader.readAsDataURL(file); 
-                                            reader.onload = async () => { 
-                                                let base64Data = reader.result as string; 
-                                                if (file.type === 'application/pdf' && tempAttachments.length === 0 && docCategory === 'INCOMING') { 
-                                                    try { base64Data = await stampReceiveNumber({ fileBase64: base64Data, bookNumber: newDoc.bookNumber || "XXX/XXXX", date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }), time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.', schoolName: currentSchool.name }); } catch (e) {} 
-                                                } 
-                                                
-                                                const safeBookNumber = (newDoc.bookNumber || 'unknown').replace(/[\\/:*?"<>|]/g, '-');
-                                                const finalFileName = `${safeBookNumber}.pdf`;
-
-                                                const payload = { 
-                                                    folderId: sysConfig.driveFolderId, 
-                                                    fileName: finalFileName, 
-                                                    mimeType: file.type, 
-                                                    fileData: getCleanBase64(base64Data) 
-                                                }; 
-                                                
-                                                const response = await fetch(sysConfig.scriptUrl!, { 
-                                                    method: 'POST', 
-                                                    body: JSON.stringify(payload), 
-                                                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                                                    redirect: 'follow' 
-                                                }); 
-                                                
-                                                const result = await response.json(); 
-                                                if (result.status === 'success') { 
-                                                    setTempAttachments([...tempAttachments, { id: `att_${Date.now()}`, name: finalFileName, type: 'LINK', url: result.viewUrl || result.url, fileType: file.type }]); 
-                                                } else { 
-                                                    throw new Error(result.message); 
-                                                } 
-                                                setIsUploading(false); 
-                                                setUploadProgress(''); 
-                                            }; 
-                                        } catch (err: any) { 
-                                            alert(`เกิดข้อผิดพลาดในการอัปโหลด: ${err.message || err}`); 
-                                            setIsUploading(false); 
-                                            setUploadProgress(''); 
+                                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200"><h4 className="font-bold text-slate-700 mb-2 flex items-center gap-2"><UploadCloud size={18}/> ไฟล์แนบ (อัปโหลดเบื้องหลังได้)</h4>
+                                    <div className="space-y-2 mb-4">
+                                        {tempAttachments.map(att => (<div key={att.id} className="p-2 flex justify-between items-center text-xs bg-white border rounded shadow-sm"><div className="flex items-center gap-2 truncate text-slate-600 font-medium"><span>{att.name}</span></div><button type="button" onClick={() => setTempAttachments(prev => prev.filter(a => a.id !== att.id))} className="text-red-500 ml-2 hover:bg-red-50 p-1 rounded transition-colors"><Trash2 size={14}/></button></div>))}
+                                        {backgroundTasks.filter(t => t.id.startsWith('upload_') && (t.status === 'uploading' || t.status === 'processing')).map(task => (
+                                            <div key={task.id} className="p-2 flex items-center justify-between text-[10px] bg-blue-50 border border-blue-100 rounded animate-pulse">
+                                                <div className="flex items-center gap-2 font-bold text-blue-700">
+                                                    <Loader size={12} className="animate-spin"/> <span>กำลังอัปโหลด...</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <input type="file" multiple onChange={(e) => { 
+                                        if (e.target.files) { 
+                                            Array.from(e.target.files).forEach(file => handleFileUploadInBackground(file));
+                                            e.target.value = ''; 
                                         } 
-                                    } 
-                                }} className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"/><div className="text-center text-xs text-slate-400 font-bold my-2">- หรือ -</div><div className="flex flex-col gap-2"><input type="text" placeholder="ชื่อเอกสาร (ถ้ามี)" value={linkNameInput} onChange={e => setLinkNameInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm outline-none focus:ring-1 ring-blue-200"/><div className="flex gap-2"><input type="text" placeholder="วางลิงก์ https://..." value={linkInput} onChange={e => setLinkInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm outline-none focus:ring-1 ring-blue-200"/><button type="button" onClick={() => { if (linkInput) { let finalUrl = linkInput.trim(); if (!finalUrl.startsWith('http')) finalUrl = 'https://' + finalUrl; setTempAttachments([...tempAttachments, { id: `att_${Date.now()}`, name: linkNameInput || 'ลิงก์เอกสาร', type: 'LINK', url: finalUrl, fileType: 'external-link' }]); setLinkInput(''); setLinkNameInput(''); } }} className="bg-slate-600 text-white px-3 py-2 rounded hover:bg-slate-700 transition-colors"><Plus size={16}/></button></div></div></div>
+                                    }} className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"/><div className="text-center text-xs text-slate-400 font-bold my-2">- หรือ -</div><div className="flex flex-col gap-2"><input type="text" placeholder="ชื่อเอกสาร (ถ้ามี)" value={linkNameInput} onChange={e => setLinkNameInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm outline-none focus:ring-1 ring-blue-200"/><div className="flex gap-2"><input type="text" placeholder="วางลิงก์ https://..." value={linkInput} onChange={e => setLinkInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm outline-none focus:ring-1 ring-blue-200"/><button type="button" onClick={() => { if (linkInput) { let finalUrl = linkInput.trim(); if (!finalUrl.startsWith('http')) finalUrl = 'https://' + finalUrl; setTempAttachments([...tempAttachments, { id: `att_${Date.now()}`, name: linkNameInput || 'ลิงก์เอกสาร', type: 'LINK', url: finalUrl, fileType: 'external-link' }]); setLinkInput(''); setLinkNameInput(''); } }} className="bg-slate-600 text-white px-3 py-2 rounded hover:bg-slate-700 transition-colors"><Plus size={16}/></button></div></div></div>
                                 {docCategory === 'ORDER' && (<div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100"><div className="flex justify-between items-center mb-3"><h4 className="font-bold text-indigo-900 text-sm flex items-center gap-2 uppercase tracking-wide"><Users size={16}/> เลือกผู้รับปฏิบัติ (ส่งทันที)</h4><button type="button" onClick={() => setSelectedTeachers(teachersInSchool.length === selectedTeachers.length ? [] : teachersInSchool.map(t=>t.id))} className="text-[10px] font-black text-indigo-600 uppercase hover:underline">เลือกทั้งหมด</button></div><div className="bg-white border rounded-xl max-h-[160px] overflow-y-auto custom-scrollbar p-1">{teachersInSchool.map(t => (<label key={t.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all ${selectedTeachers.includes(t.id) ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}><input type="checkbox" checked={selectedTeachers.includes(t.id)} onChange={(e) => { if (e.target.checked) setSelectedTeachers([...selectedTeachers, t.id]); else setSelectedTeachers(selectedTeachers.filter(id => id !== t.id)); }} className="rounded-md text-indigo-600 w-4 h-4"/><div className="flex-1 overflow-hidden"><div className="text-xs font-bold text-slate-700 truncate">{t.name}</div><div className="text-[9px] text-slate-400 truncate">{t.position}</div></div></label>))}</div></div>)}
                             </div>
                         </div>
-                        <div className="flex gap-3 pt-4 border-t"><button type="button" onClick={() => setViewMode('LIST')} className="flex-1 py-3 text-slate-600 bg-slate-100 rounded-xl font-bold hover:bg-slate-200 transition-all">ยกเลิก</button><button type="submit" className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 ${docCategory === 'ORDER' ? 'bg-indigo-600' : 'bg-blue-600'}`}>{docCategory === 'ORDER' ? <Send size={20}/> : <Save size={20}/>} {docCategory === 'ORDER' ? 'บันทึกและส่งทันที' : 'บันทึกและเสนอ ผอ.'}</button></div>
+                        <div className="flex gap-3 pt-4 border-t"><button type="button" onClick={() => setViewMode('LIST')} className="flex-1 py-3 text-slate-600 bg-slate-100 rounded-xl font-bold hover:bg-slate-200 transition-all">ยกเลิก</button><button type="submit" disabled={activeTasks.length > 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 ${activeTasks.length > 0 ? 'bg-slate-400 cursor-not-allowed' : (docCategory === 'ORDER' ? 'bg-indigo-600' : 'bg-blue-600')}`}>{activeTasks.length > 0 ? <Loader className="animate-spin" size={18}/> : (docCategory === 'ORDER' ? <Send size={20}/> : <Save size={20}/>)} {activeTasks.length > 0 ? 'กำลังอัปโหลดไฟล์...' : (docCategory === 'ORDER' ? 'บันทึกและส่งทันที' : 'บันทึกและเสนอ ผอ.')}</button></div>
                     </form>
                 </div>
             )}
@@ -677,7 +719,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                     <div className="flex items-center gap-4"><button type="button" onClick={() => setViewMode('LIST')} className="p-2 hover:bg-slate-200 rounded-full text-slate-600 transition-colors"><ArrowLeft size={24}/></button><h2 className="text-2xl font-bold text-slate-800 tracking-tight">รายละเอียดหนังสือราชการ</h2></div>
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8 text-sm border-b pb-6"><div className="flex flex-col"><span className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">เรื่อง</span><span className="font-bold text-lg text-slate-800 leading-tight">{selectedDoc.title}</span></div><div className="flex flex-col"><span className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">เลขที่รับ / คำสั่ง</span><span className="font-mono font-bold text-slate-700 text-lg">{selectedDoc.bookNumber}</span></div><div className="flex flex-col"><span className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">จากหน่วยงาน</span><span className="font-bold text-slate-700">{selectedDoc.from}</span></div><div className="flex flex-col"><span className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">วันที่รับ/บันทึก</span><span className="font-bold text-slate-700">{selectedDoc.date} เวลา {selectedDoc.timestamp}</span></div></div>
-                        <div><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-slate-700 flex items-center gap-2"><LinkIcon size={18} className="text-blue-500"/> ไฟล์เอกสารแนบ</h3><span className="text-[10px] text-blue-500 font-bold uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">คลิกดูไฟล์เพื่อยืนยันรับทราบ</span></div><div className="flex flex-col gap-3">{selectedDoc.signedFileUrl && (<button type="button" onClick={() => handleOpenAndAck(selectedDoc, selectedDoc.signedFileUrl!)} className="w-full p-4 bg-emerald-600 text-white rounded-xl shadow-md flex items-center justify-between group hover:bg-emerald-700 transition-all border-2 border-emerald-400 relative overflow-hidden"><div className="absolute top-0 right-0 p-2 opacity-10 group-hover:scale-150 transition-transform"><CheckCircle size={80}/></div><div className="flex items-center gap-4 relative z-10"><div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm shadow-inner"><FileCheck size={28}/></div><div className="text-left"><div className="font-bold text-lg leading-none mb-1">บันทึกข้อสั่งการ (ลงนามแล้ว)</div><div className="text-xs opacity-80 uppercase tracking-widest">Signed & Final Document</div></div></div><ExternalLink size={20} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform relative z-10"/></button>)}{selectedDoc.attachments.map((att, idx) => (<button type="button" key={idx} onClick={() => handleOpenAndAck(selectedDoc, att.url)} className="w-full p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between transition-all group"><div className="flex items-center gap-4"><div className="p-2 bg-white rounded-lg shadow-sm border border-slate-100 transition-transform group-hover:scale-110"><FileIcon size={24}/></div><div className="text-left"><div className="font-bold text-slate-700 mb-0.5">{att.name}</div><div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Original File Uploaded</div></div></div><ExternalLink size={20} className="text-slate-400 group-hover:text-blue-600 transition-all group-hover:scale-110"/></button>))}</div></div>
+                        <div><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-slate-700 flex items-center gap-2"><LinkIcon size={18} className="text-blue-500"/> ไฟล์เอกสารแนบ</h3><span className="text-[10px] text-blue-500 font-bold uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">คลิกดูไฟล์เพื่อยืนยันรับทราบ</span></div><div className="flex flex-col gap-3">{selectedDoc.signedFileUrl && (<button type="button" onClick={() => handleOpenAndAck(selectedDoc, selectedDoc.signedFileUrl!)} className="w-full p-4 bg-emerald-600 text-white rounded-xl shadow-md flex items-center justify-between group hover:bg-emerald-700 transition-all border-2 border-emerald-400 relative overflow-hidden"><div className="absolute top-0 right-0 p-2 opacity-10 group-hover:scale-150 transition-transform"><CheckCircle size={80}/></div><div className="flex items-center gap-4 relative z-10"><div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm shadow-inner"><FileCheck size={28}/></div><div className="text-left"><div className="font-bold text-lg leading-none mb-1">บันทึกข้อสั่งการ (ลงนามแล้ว)</div><div className="text-xs opacity-80 uppercase tracking-widest">Signed & Final Document</div></div></div><ExternalLink size={20} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform relative z-10"/></button>)}{selectedDoc.attachments.map((att, idx) => (<button type="button" key={idx} onClick={() => handleOpenAndAck(selectedDoc, att.url)} className="w-full p-4 bg-blue-600 text-white border-2 border-blue-400 rounded-xl flex items-center justify-between transition-all group hover:bg-blue-700 shadow-md"><div className="flex items-center gap-4"><div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm shadow-inner transition-transform group-hover:scale-110"><FileIcon size={24}/></div><div className="text-left"><div className="font-bold text-white mb-0.5">{att.name}</div><div className="text-[10px] text-blue-100 font-bold uppercase tracking-wider">คลิกเพื่อเปิดดูเอกสาร PDF</div></div></div><ExternalLink size={20} className="text-blue-100 group-hover:text-white transition-all group-hover:scale-110"/></button>))}</div></div>
 
                         {isDirector && selectedDoc.status === 'PendingDirector' && (
                             <div className="bg-blue-50 p-6 rounded-2xl border border-blue-200 space-y-4 animate-slide-up shadow-sm">
