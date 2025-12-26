@@ -39,8 +39,9 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     const [showTaskQueue, setShowTaskQueue] = useState(false);
     const [lastCompletedTaskId, setLastCompletedTaskId] = useState<string | null>(null);
     
-    // Pagination State
+    // Pagination & Search State
     const [currentPage, setCurrentPage] = useState(1);
+    const [searchTerm, setSearchTerm] = useState('');
     const ITEMS_PER_PAGE = 10;
     
     // System Config State
@@ -94,6 +95,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         setAssignedViceDirId('');
         setTeacherSearchTerm('');
     }, [selectedDoc?.id, viewMode]);
+
+    // Reset page to 1 when search term changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
 
     const activeTasks = backgroundTasks.filter(t => t.status === 'processing' || t.status === 'uploading');
     const doneTasksCount = backgroundTasks.filter(t => t.status === 'done').length;
@@ -559,12 +565,27 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     };
 
     const filteredDocs = docs.filter(doc => {
-        if (isDirector || isDocOfficer || isSystemAdmin) return true;
-        if (isViceDirector || (doc.assignedViceDirectorId === currentUser.id)) {
-            return (doc.status === 'PendingViceDirector' && doc.assignedViceDirectorId === currentUser.id) ||
-                   (doc.status === 'Distributed' && (doc.targetTeachers || []).includes(currentUser.id));
+        // 1. Role-based visibility logic
+        let isVisible = false;
+        if (isDirector || isDocOfficer || isSystemAdmin) {
+            isVisible = true;
+        } else if (isViceDirector || (doc.assignedViceDirectorId === currentUser.id)) {
+            isVisible = (doc.status === 'PendingViceDirector' && doc.assignedViceDirectorId === currentUser.id) ||
+                        (doc.status === 'Distributed' && (doc.targetTeachers || []).includes(currentUser.id));
+        } else {
+            isVisible = doc.status === 'Distributed' && (doc.targetTeachers || []).includes(currentUser.id);
         }
-        return doc.status === 'Distributed' && (doc.targetTeachers || []).includes(currentUser.id);
+
+        if (!isVisible) return false;
+
+        // 2. Search term logic
+        if (!searchTerm) return true;
+        const s = searchTerm.toLowerCase();
+        return (
+            doc.title.toLowerCase().includes(s) || 
+            doc.bookNumber.toLowerCase().includes(s) || 
+            doc.from.toLowerCase().includes(s)
+        );
     });
 
     const totalPages = Math.ceil(filteredDocs.length / ITEMS_PER_PAGE);
@@ -604,12 +625,39 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
             {viewMode === 'LIST' && (
                 <>
-                    <div className="flex justify-between items-center">
-                        <div className="relative flex-1 max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" placeholder="ค้นหาเรื่อง/เลขที่..." className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm" /></div>
-                        {(isDocOfficer || isSystemAdmin) && (<button type="button" onClick={() => { const currentThaiYear = String(new Date().getFullYear() + 543); let maxNum = 0; docs.forEach(d => { const parts = d.bookNumber.split('/'); if (parts.length === 2 && parts[1].trim() === currentThaiYear) { const num = parseInt(parts[0].trim()); if (!isNaN(num) && num > maxNum) maxNum = num; } }); setNewDoc({ bookNumber: `${String(maxNum + 1).padStart(3, '0')}/${currentThaiYear}`, title: '', from: '', priority: 'Normal', description: '' }); setDocCategory('INCOMING'); setTempAttachments([]); setSelectedTeachers([]); setViewMode('CREATE'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-sm flex items-center gap-2 font-bold transition-all hover:scale-105 active:scale-95"><FilePlus size={18} /> ลงรับ/สร้างหนังสือ</button>)}
+                    <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="relative flex-1 w-full md:max-w-md">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <input 
+                                type="text" 
+                                placeholder="ค้นหาเรื่อง, เลขที่หนังสือ, หน่วยงาน..." 
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm" 
+                            />
+                            {searchTerm && (
+                                <button 
+                                    onClick={() => setSearchTerm('')}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+                                >
+                                    <X size={16}/>
+                                </button>
+                            )}
+                        </div>
+                        {(isDocOfficer || isSystemAdmin) && (
+                            <button type="button" onClick={() => { const currentThaiYear = String(new Date().getFullYear() + 543); let maxNum = 0; docs.forEach(d => { const parts = d.bookNumber.split('/'); if (parts.length === 2 && parts[1].trim() === currentThaiYear) { const num = parseInt(parts[0].trim()); if (!isNaN(num) && num > maxNum) maxNum = num; } }); setNewDoc({ bookNumber: `${String(maxNum + 1).padStart(3, '0')}/${currentThaiYear}`, title: '', from: '', priority: 'Normal', description: '' }); setDocCategory('INCOMING'); setTempAttachments([]); setSelectedTeachers([]); setViewMode('CREATE'); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-sm flex items-center gap-2 font-bold transition-all hover:scale-105 active:scale-95 w-full md:w-auto justify-center">
+                                <FilePlus size={18} /> ลงรับ/สร้างหนังสือ
+                            </button>
+                        )}
                     </div>
                     <div className="grid grid-cols-1 gap-4">
-                        {displayedDocs.length === 0 ? (<div className="text-center py-20 text-slate-400 bg-white rounded-xl border border-dashed">ไม่มีรายการหนังสือราชการ</div>) : displayedDocs.map((docItem, index) => {
+                        {displayedDocs.length === 0 ? (
+                            <div className="text-center py-20 text-slate-400 bg-white rounded-xl border border-dashed flex flex-col items-center gap-2">
+                                <Search size={48} className="opacity-20"/>
+                                <p>{searchTerm ? `ไม่พบข้อมูลที่ค้นหาสำหรับ "${searchTerm}"` : 'ไม่มีรายการหนังสือราชการ'}</p>
+                                {searchTerm && <button onClick={() => setSearchTerm('')} className="text-blue-600 text-sm font-bold hover:underline">ล้างการค้นหา</button>}
+                            </div>
+                        ) : displayedDocs.map((docItem, index) => {
                              const isUnread = docItem.status === 'Distributed' && (docItem.targetTeachers || []).includes(currentUser.id) && !docItem.acknowledgedBy?.includes(currentUser.id);
                              const isAcknowledged = docItem.acknowledgedBy?.includes(currentUser.id);
                              const backgroundTask = backgroundTasks.find(t => t.id === docItem.id);
