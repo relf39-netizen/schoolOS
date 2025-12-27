@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { DocumentItem, Teacher, Attachment, SystemConfig, School } from '../types';
 import { 
@@ -266,7 +265,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     }, [currentUser.schoolId, currentSchool.name]);
 
     const getGoogleDriveId = (url: string) => {
-        const patterns = [/drive\.google\.com\/file\/d\/([-_\w]+)/, /drive\.google\.com\/open\?id=([-_\w]+)/];
+        if (!url) return null;
+        const patterns = [/drive\.google\.com\/file\/d\/([-_\w]+)/, /drive\.google\.com\/open\?id=([-_\w]+)/, /id=([-_\w]+)/];
         for (const pattern of patterns) {
             const match = url.match(pattern);
             if (match && match[1]) return match[1];
@@ -278,7 +278,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         if (!base64Str) return '';
         const parts = base64Str.split(',');
         const content = parts.length > 1 ? parts[1] : parts[0];
-        return content.replace(/\s/g, ''); 
+        return content.replace(/[\s\n\r]/g, ''); 
     };
 
     const triggerTelegramNotification = async (teachers: Teacher[], docId: string, title: string, isOrder: boolean) => {
@@ -295,7 +295,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
     const handleFileUploadInBackground = async (file: File) => {
         if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId) {
-            alert("ไม่พบการตั้งค่า Google Drive!");
+            alert("ไม่พบการตั้งค่า Google Drive! (โปรดระบุ Script URL และ Folder ID ในหน้าคลาวด์)");
             return;
         }
 
@@ -316,7 +316,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             const base64DataPromise = new Promise<string>((resolve) => {
                 reader.onload = async () => {
                     let data = reader.result as string;
-                    // Auto-stamp receive number for incoming PDF
                     if (file.type === 'application/pdf' && docCategory === 'INCOMING') {
                         updateTask(taskId, { message: 'กำลังประทับตราเลขรับ...' });
                         try {
@@ -325,7 +324,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                 bookNumber: newDoc.bookNumber || "XXX/XXXX",
                                 date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }),
                                 time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
-                                schoolName: currentSchool.name
+                                schoolName: currentSchool.name,
+                                schoolLogoBase64: sysConfig.schoolLogoBase64
                             });
                         } catch (e) {
                             console.error("Stamping failed, uploading original", e);
@@ -340,19 +340,21 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             updateTask(taskId, { message: 'กำลังอัปโหลดไปที่ Google Drive...' });
 
             const payload = { 
-                folderId: sysConfig.driveFolderId, 
+                folderId: sysConfig.driveFolderId.trim(), 
                 fileName: finalFileName, 
                 mimeType: file.type, 
                 fileData: getCleanBase64(base64Data) 
             }; 
             
-            const response = await fetch(sysConfig.scriptUrl!, { 
+            const response = await fetch(sysConfig.scriptUrl.trim(), { 
                 method: 'POST', 
                 body: JSON.stringify(payload), 
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 redirect: 'follow' 
             }); 
             
+            if (!response.ok) throw new Error("Cloud Storage Response Error: " + response.status);
+
             const result = await response.json(); 
             if (result.status === 'success') { 
                 const newAtt: Attachment = { 
@@ -368,7 +370,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                 throw new Error(result.message); 
             }
         } catch (err: any) {
-            updateTask(taskId, { status: 'error', message: `อัปโหลดล้มเหลว: ${err.message || 'ข้อผิดพลาดเครือข่าย'}` });
+            updateTask(taskId, { status: 'error', message: `อัปโหลดล้มเหลว: ${err.message || 'ตรวจสัญญาณอินเทอร์เน็ต'}` });
         }
     };
 
@@ -385,36 +387,59 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             let pdfBase64 = null;
 
             if (baseFile) {
-                updateTask(taskId, { message: 'กำลังเชื่อมต่อไฟล์ต้นฉบับ...' });
                 const fileId = getGoogleDriveId(baseFile);
-                const dlUrl = fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : baseFile;
                 
-                let blob;
-                try {
-                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(dlUrl)}`;
-                    const resp = await fetch(proxyUrl);
-                    if (!resp.ok) throw new Error("Proxy Access Error");
-                    blob = await resp.blob();
-                } catch (proxyError) {
-                    updateTask(taskId, { message: 'ระบบสำรอง: กำลังดึงไฟล์ตรง...' });
-                    const directResp = await fetch(dlUrl);
-                    if (!directResp.ok) throw new Error("ไม่สามารถโหลดไฟล์ได้ (ตรวจสอบการแชร์ไฟล์)");
-                    blob = await directResp.blob();
+                if (fileId && sysConfig?.scriptUrl) {
+                    updateTask(taskId, { message: 'กำลังดึงไฟล์ผ่าน Cloud Proxy...' });
+                    try {
+                        const proxyResp = await fetch(sysConfig.scriptUrl.trim(), {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                            body: JSON.stringify({ action: 'read', fileId: fileId }),
+                            redirect: 'follow'
+                        });
+                        
+                        if (!proxyResp.ok) throw new Error("Cloud Proxy Connection Failed (HTTP " + proxyResp.status + ")");
+                        const proxyData = await proxyResp.json();
+                        
+                        if (proxyData.status === 'success' && proxyData.fileData) {
+                            pdfBase64 = `data:application/pdf;base64,${proxyData.fileData}`;
+                        } else {
+                            throw new Error(proxyData.message || "Drive denied access to file");
+                        }
+                    } catch (proxyError: any) {
+                        console.error("GAS Proxy Error:", proxyError);
+                        updateTask(taskId, { message: 'Proxy หลักขัดข้อง กำลังใช้ทางสำรอง...' });
+                        const dlUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+                        const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(dlUrl)}`;
+                        const resp = await fetch(allOriginsUrl);
+                        if (!resp.ok) throw new Error("ไม่สามารถดึงไฟล์ได้ (โปรดตรวจสอบการเปิดแชร์ไฟล์เป็น Anyone with link)");
+                        const blob = await resp.blob();
+                        pdfBase64 = await new Promise<string>((res, rej) => {
+                            const r = new FileReader(); 
+                            r.onload = () => res(r.result as string); 
+                            r.onerror = () => rej(new Error("File Read Failed"));
+                            r.readAsDataURL(blob);
+                        });
+                    }
+                } else if (baseFile && baseFile.startsWith('data:')) {
+                    pdfBase64 = baseFile;
+                } else if (baseFile) {
+                    updateTask(taskId, { message: 'กำลังดาวน์โหลดไฟล์แนบ...' });
+                    const resp = await fetch(baseFile);
+                    if (!resp.ok) throw new Error("Cannot fetch external file");
+                    const blob = await resp.blob();
+                    pdfBase64 = await new Promise<string>((res) => {
+                        const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(blob);
+                    });
                 }
 
-                const base64Original = await new Promise<string>((res, rej) => {
-                    const r = new FileReader(); 
-                    r.onload = () => res(r.result as string); 
-                    r.onerror = () => rej(new Error("File Read Failed"));
-                    r.readAsDataURL(blob);
-                });
-                
-                updateTask(taskId, { message: 'กำลังประทับตราดิจิทัล...' });
+                updateTask(taskId, { message: 'กำลังประทับตราดิจิทัลและลงนาม...' });
                 pdfBase64 = await stampPdfDocument({
-                    fileUrl: base64Original, fileType: 'application/pdf', notifyToText: '', commandText: finalCommand,
+                    fileUrl: pdfBase64 || '', fileType: 'application/pdf', notifyToText: '', commandText: finalCommand,
                     directorName: currentUser.name, 
                     directorPosition: currentUser.position, 
-                    signatureImageBase64: currentUser.signatureBase64 || sysConfig?.directorSignatureBase64,
+                    signatureImageBase64: currentUser.signatureBase64,
                     schoolName: currentSchool.name, 
                     schoolLogoBase64: sysConfig?.schoolLogoBase64, targetPage, 
                     onStatusChange: (m) => updateTask(taskId, { message: m }),
@@ -423,12 +448,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                     alignment: stampAlignment
                 });
             } else {
-                updateTask(taskId, { message: 'กำลังสร้างใบสั่งการ...' });
+                updateTask(taskId, { message: 'กำลังสร้างใบสั่งการใหม่...' });
                 pdfBase64 = await stampPdfDocument({
                     fileUrl: '', fileType: 'new', notifyToText: '', commandText: finalCommand,
                     directorName: currentUser.name, 
                     directorPosition: currentUser.position, 
-                    signatureImageBase64: currentUser.signatureBase64 || sysConfig?.directorSignatureBase64,
+                    signatureImageBase64: currentUser.signatureBase64,
                     schoolName: currentSchool.name, 
                     schoolLogoBase64: sysConfig?.schoolLogoBase64, targetPage: 1,
                     onStatusChange: (m) => updateTask(taskId, { message: m }),
@@ -438,40 +463,35 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
             let signedUrl = null;
             if (pdfBase64 && sysConfig?.scriptUrl) {
-                updateTask(taskId, { status: 'uploading', message: 'กำลังบันทึกไฟล์ (ชื่อตามเลขที่หนังสือ)...' });
+                updateTask(taskId, { status: 'uploading', message: 'กำลังบันทึกไฟล์ข้อสั่งการลงคลาวด์...' });
                 const safeBookNumber = targetDoc.bookNumber.replace(/[\\/:*?"<>|]/g, '-');
                 const finalFileName = `${safeBookNumber}_signed.pdf`;
 
                 const payload = { 
-                    folderId: sysConfig.driveFolderId, 
+                    folderId: sysConfig.driveFolderId.trim(), 
                     fileName: finalFileName, 
                     mimeType: 'application/pdf', 
                     fileData: getCleanBase64(pdfBase64) 
                 };
 
-                try {
-                    const upRespWithUrl = await fetch(sysConfig.scriptUrl, { 
-                        method: 'POST', 
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify(payload),
-                        redirect: 'follow'
-                    });
-                    
-                    if (!upRespWithUrl.ok) throw new Error(`GAS Error: ${upRespWithUrl.status}`);
-                    
-                    const upRes = await upRespWithUrl.json();
-                    if (upRes.status === 'success') {
-                        signedUrl = upRes.viewUrl || upRes.url;
-                    } else {
-                        throw new Error(upRes.message || "GAS Failed");
-                    }
-                } catch (fetchErr: any) {
-                    console.error("GAS Signing Upload Error:", fetchErr);
-                    throw new Error(`การบันทึกไฟล์ลง Drive ล้มเหลว (${fetchErr.message})`);
+                const upRespWithUrl = await fetch(sysConfig.scriptUrl.trim(), { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(payload),
+                    redirect: 'follow'
+                });
+                
+                if (!upRespWithUrl.ok) throw new Error("Cloud Storage Response Error: " + upRespWithUrl.status);
+
+                const upRes = await upRespWithUrl.json();
+                if (upRes.status === 'success') {
+                    signedUrl = upRes.viewUrl || upRes.url;
+                } else {
+                    throw new Error(upRes.message || "Cloud Storage Save Failed");
                 }
             }
 
-            updateTask(taskId, { message: 'กำลังบันทึกสถานะ...' });
+            updateTask(taskId, { message: 'บันทึกสถานะลงฐานข้อมูล SQL...' });
             const nowStr = new Date().toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
             const updateData: any = { status: nextStatus };
             if (signedUrl) updateData.signed_file_url = signedUrl;
@@ -496,7 +516,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             fetchDocs();
         } catch (e: any) { 
             console.error("Action Background Error:", e);
-            updateTask(taskId, { status: 'error', message: `ล้มเหลว: ${e.message || "การเชื่อมต่อขัดข้อง"}` }); 
+            updateTask(taskId, { status: 'error', message: `ล้มเหลว: ${e.message || "Failed to fetch (Check Internet/Script URL)"}` }); 
         }
     };
 
@@ -532,6 +552,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
     const handleDirectorAction = (isAckOnly: boolean) => {
         if (!selectedDoc) return;
+        if (!sysConfig?.scriptUrl) { alert("โปรดตั้งค่า Script URL ในเมนูคลาวด์ก่อน"); return; }
         const currentCommand = command || (isAckOnly ? 'รับทราบ' : 'ดำเนินการตามเสนอ');
         setBackgroundTasks(prev => [...prev, { id: selectedDoc.id, title: selectedDoc.title, status: 'processing', message: 'เริ่มงาน...', notified: false }]);
         setViewMode('LIST');
@@ -540,6 +561,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
     const handleViceDirectorAction = () => {
         if (!selectedDoc) return;
+        if (!sysConfig?.scriptUrl) { alert("โปรดตั้งค่า Script URL ในเมนูคลาวด์ก่อน"); return; }
         const finalCommand = command || 'ดำเนินการตามเสนอ';
         setBackgroundTasks(prev => [...prev, { id: selectedDoc.id, title: selectedDoc.title, status: 'processing', message: 'กำลังเริ่มการลงนาม...', notified: false }]);
         setViewMode('LIST');
@@ -565,7 +587,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     };
 
     const filteredDocs = docs.filter(doc => {
-        // 1. Role-based visibility logic
         let isVisible = false;
         if (isDirector || isDocOfficer || isSystemAdmin) {
             isVisible = true;
@@ -578,7 +599,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
         if (!isVisible) return false;
 
-        // 2. Search term logic
         if (!searchTerm) return true;
         const s = searchTerm.toLowerCase();
         return (
@@ -754,7 +774,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                             e.target.value = ''; 
                                         } 
                                     }} className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"/><div className="text-center text-xs text-slate-400 font-bold my-2">- หรือ -</div><div className="flex flex-col gap-2"><input type="text" placeholder="ชื่อเอกสาร (ถ้ามี)" value={linkNameInput} onChange={e => setLinkNameInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm outline-none focus:ring-1 ring-blue-200"/><div className="flex gap-2"><input type="text" placeholder="วางลิงก์ https://..." value={linkInput} onChange={e => setLinkInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm outline-none focus:ring-1 ring-blue-200"/><button type="button" onClick={() => { if (linkInput) { let finalUrl = linkInput.trim(); if (!finalUrl.startsWith('http')) finalUrl = 'https://' + finalUrl; setTempAttachments([...tempAttachments, { id: `att_${Date.now()}`, name: linkNameInput || 'ลิงก์เอกสาร', type: 'LINK', url: finalUrl, fileType: 'external-link' }]); setLinkInput(''); setLinkNameInput(''); } }} className="bg-slate-600 text-white px-3 py-2 rounded hover:bg-slate-700 transition-colors"><Plus size={16}/></button></div></div></div>
-                                {docCategory === 'ORDER' && (<div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100"><div className="flex justify-between items-center mb-3"><h4 className="font-bold text-indigo-900 text-sm flex items-center gap-2 uppercase tracking-wide"><Users size={16}/> เลือกผู้รับปฏิบัติ (ส่งทันที)</h4><button type="button" onClick={() => setSelectedTeachers(teachersInSchool.length === selectedTeachers.length ? [] : teachersInSchool.map(t=>t.id))} className="text-[10px] font-black text-indigo-600 uppercase hover:underline">เลือกทั้งหมด</button></div><div className="bg-white border rounded-xl max-h-[160px] overflow-y-auto custom-scrollbar p-1">{teachersInSchool.map(t => (<label key={t.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all ${selectedTeachers.includes(t.id) ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}><input type="checkbox" checked={selectedTeachers.includes(t.id)} onChange={(e) => { if (e.target.checked) setSelectedTeachers([...selectedTeachers, t.id]); else setSelectedTeachers(selectedTeachers.filter(id => id !== t.id)); }} className="rounded-md text-indigo-600 w-4 h-4"/><div className="flex-1 overflow-hidden"><div className="text-xs font-bold text-slate-700 truncate">{t.name}</div><div className="text-[9px] text-slate-400 truncate">{t.position}</div></div></label>))}</div></div>)}
+                                {docCategory === 'ORDER' && (<div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100"><div className="flex justify-between items-center mb-3"><h4 className="font-bold text-indigo-900 text-sm flex items-center gap-2 uppercase tracking-wide"><Users size={16}/> เลือกผู้รับปฏิบัติ (ส่งทันที)</h4><button type="button" onClick={() => teachersInSchool.length === selectedTeachers.length ? setSelectedTeachers([]) : setSelectedTeachers(teachersInSchool.map(t=>t.id))} className="text-[10px] font-black text-indigo-600 uppercase hover:underline">เลือกทั้งหมด</button></div><div className="bg-white border rounded-xl max-h-[160px] overflow-y-auto custom-scrollbar p-1">{teachersInSchool.map(t => (<label key={t.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all ${selectedTeachers.includes(t.id) ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}><input type="checkbox" checked={selectedTeachers.includes(t.id)} onChange={(e) => { if (e.target.checked) setSelectedTeachers([...selectedTeachers, t.id]); else setSelectedTeachers(selectedTeachers.filter(id => id !== t.id)); }} className="rounded-md text-indigo-600 w-4 h-4"/><div className="flex-1 overflow-hidden"><div className="text-xs font-bold text-slate-700 truncate">{t.name}</div><div className="text-[9px] text-slate-400 truncate">{t.position}</div></div></label>))}</div></div>)}
                             </div>
                         </div>
                         <div className="flex gap-3 pt-4 border-t"><button type="button" onClick={() => setViewMode('LIST')} className="flex-1 py-3 text-slate-600 bg-slate-100 rounded-xl font-bold hover:bg-slate-200 transition-all">ยกเลิก</button><button type="submit" disabled={activeTasks.length > 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 ${activeTasks.length > 0 ? 'bg-slate-400 cursor-not-allowed' : (docCategory === 'ORDER' ? 'bg-indigo-600' : 'bg-blue-600')}`}>{activeTasks.length > 0 ? <Loader className="animate-spin" size={18}/> : (docCategory === 'ORDER' ? <Send size={20}/> : <Save size={20}/>)} {activeTasks.length > 0 ? 'กำลังอัปโหลดไฟล์...' : (docCategory === 'ORDER' ? 'บันทึกและส่งทันที' : 'บันทึกและเสนอ ผอ.')}</button></div>
@@ -824,7 +844,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                                 </div>
                                                 <button 
                                                     type="button"
-                                                    onClick={() => setSelectedTeachers(selectedTeachers.length === teachersInSchool.length ? [] : teachersInSchool.map(t => t.id))}
+                                                    onClick={() => selectedTeachers.length === teachersInSchool.length ? setSelectedTeachers([]) : setSelectedTeachers(teachersInSchool.map(t => t.id))}
                                                     className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selectedTeachers.length === teachersInSchool.length ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'}`}
                                                 >
                                                     {selectedTeachers.length === teachersInSchool.length ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
@@ -882,7 +902,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                             </div>
                                             <button 
                                                 type="button"
-                                                onClick={() => setSelectedTeachers(selectedTeachers.length === teachersInSchool.length ? [] : teachersInSchool.map(t => t.id))}
+                                                onClick={() => selectedTeachers.length === teachersInSchool.length ? setSelectedTeachers([]) : setSelectedTeachers(teachersInSchool.map(t => t.id))}
                                                 className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selectedTeachers.length === teachersInSchool.length ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`}
                                             >
                                                 {selectedTeachers.length === teachersInSchool.length ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}

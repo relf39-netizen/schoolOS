@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
 import { 
@@ -45,31 +44,52 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     const [copied, setCopied] = useState(false);
 
     const gasCode = `/**
- * SchoolOS - Cloud Storage Bridge (Google Drive) v7.0
+ * SchoolOS - Cloud Storage & Private Proxy v8.2 (Master Stable)
+ * แก้ปัญหา Failed to Fetch และ CORS สำหรับการจัดการ PDF
  */
 function doPost(e) {
   var lock = LockService.getScriptLock();
   try {
-    lock.waitLock(15000);
+    lock.waitLock(30000); 
     if (!e.postData || !e.postData.contents) { throw new Error("No data received"); }
     var data = JSON.parse(e.postData.contents);
+    
+    // --- ACTION: READ ---
+    if (data.action === 'read') {
+       if (!data.fileId) throw new Error("Missing fileId");
+       var file = DriveApp.getFileById(data.fileId);
+       var blob = file.getBlob();
+       return ContentService.createTextOutput(JSON.stringify({
+         'status': 'success',
+         'fileData': Utilities.base64Encode(blob.getBytes()),
+         'mimeType': blob.getContentType(),
+         'fileName': file.getName()
+       })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // --- ACTION: UPLOAD ---
     var folderId = data.folderId;
     var base64Data = data.fileData;
     var fileName = (data.fileName || "file_" + new Date().getTime()).replace(/[^a-zA-Z0-9.\\-_ก-ฮะ-าำิ-ูเ-์ ]/g, "_");
     var mimeType = data.mimeType || "application/octet-stream";
+    
     if (!base64Data || !folderId) { throw new Error("Missing fileData or folderId"); }
+    
     var cleanBase64 = base64Data.toString().replace(/[\\s\\n\\r]/g, "");
     var decoded = Utilities.base64Decode(cleanBase64);
     var blob = Utilities.newBlob(decoded, mimeType, fileName);
     var folder = DriveApp.getFolderById(folderId);
     var file = folder.createFile(blob);
+    
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    
     return ContentService.createTextOutput(JSON.stringify({ 
       'status': 'success', 
       'url': file.getUrl(), 
       'id': file.getId(),
       'viewUrl': "https://drive.google.com/uc?export=view&id=" + file.getId() 
     })).setMimeType(ContentService.MimeType.JSON);
+    
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({ 
       'status': 'error', 
@@ -164,7 +184,7 @@ function doPost(e) {
                 password: tData.password || '123456',
                 position: tData.position, 
                 roles: tData.roles, 
-                signature_base64: tData.signatureBase64,
+                signature_base_64: tData.signatureBase64,
                 telegram_chat_id: tData.telegramChatId, 
                 is_suspended: tData.isSuspended || false
             };
@@ -187,10 +207,10 @@ function doPost(e) {
         setIsLoadingConfig(true);
         const payload = {
             school_id: currentSchool.id, 
-            drive_folder_id: config.driveFolderId, 
-            script_url: config.scriptUrl,
-            telegram_bot_token: config.telegramBotToken, 
-            app_base_url: config.appBaseUrl,
+            drive_folder_id: config.driveFolderId?.trim(), 
+            script_url: config.scriptUrl?.trim(),
+            telegram_bot_token: config.telegramBotToken?.trim(), 
+            app_base_url: config.appBaseUrl?.trim(),
             official_garuda_base_64: config.officialGarudaBase64, 
             director_signature_base_64: config.directorSignatureBase64,
             director_signature_scale: config.directorSignatureScale, 
@@ -221,7 +241,6 @@ function doPost(e) {
 
     return (
         <div className="space-y-6 animate-fade-in pb-10">
-            {/* Main Header with Navigation Tabs */}
             <div className="bg-white p-4 rounded-[1.5rem] shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex items-center gap-4">
                     <div className="p-4 bg-slate-800 text-white rounded-2xl shadow-xl shadow-slate-200">
@@ -241,7 +260,6 @@ function doPost(e) {
             </div>
 
             <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 min-h-[600px]">
-                {/* 1. USERS LIST VIEW */}
                 {activeTab === 'USERS' && (
                     <div className="space-y-6 animate-fade-in">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -306,7 +324,6 @@ function doPost(e) {
                     </div>
                 )}
 
-                {/* 2. USER FORM VIEW (Full Section instead of Modal) */}
                 {activeTab === 'USER_FORM' && (
                     <div className="animate-slide-up space-y-8 max-w-4xl mx-auto">
                         <div className="flex justify-between items-center border-b pb-6">
@@ -379,7 +396,6 @@ function doPost(e) {
                     </div>
                 )}
 
-                {/* 3. SCHOOL SETTINGS VIEW */}
                 {activeTab === 'SCHOOL_SETTINGS' && (
                     <div className="space-y-8 animate-fade-in max-w-4xl mx-auto">
                         <div className="flex items-center gap-3 border-b pb-4"><MapPin className="text-orange-500" size={28}/><h3 className="font-black text-2xl text-slate-800">ขอบเขตพื้นที่ลงเวลา (GPS)</h3></div>
@@ -400,7 +416,6 @@ function doPost(e) {
                     </div>
                 )}
 
-                {/* 4. SYSTEM SETTINGS VIEW */}
                 {activeTab === 'SETTINGS' && (
                     <div className="space-y-10 animate-fade-in max-w-5xl mx-auto">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
@@ -492,7 +507,6 @@ function doPost(e) {
                     </div>
                 )}
 
-                {/* 5. CLOUD SETUP VIEW */}
                 {activeTab === 'CLOUD_SETUP' && (
                     <div className="space-y-8 animate-fade-in max-w-6xl mx-auto">
                         <div className="bg-orange-50 border-2 border-orange-100 rounded-[2.5rem] p-10 space-y-8 relative overflow-hidden shadow-inner">
@@ -501,11 +515,11 @@ function doPost(e) {
                                 <div>
                                     <h3 className="text-3xl font-black text-orange-900 flex items-center gap-4">
                                         <Cloud className="text-orange-600" size={36}/>
-                                        Google Drive API Setup
+                                        Google Drive API Setup (v8.2 Master)
                                     </h3>
-                                    <p className="text-orange-700 font-bold mt-2">เชื่อมต่อพื้นที่เก็บข้อมูลถาวรสำหรับอัปโหลดไฟล์ (PDF/รูปภาพ/เอกสารแนบ)</p>
+                                    <p className="text-orange-700 font-bold mt-2">เชื่อมต่อพื้นที่เก็บข้อมูลถาวรสำหรับอัปโหลดไฟล์ และ Private Proxy เพื่อแก้ปัญหา Failed to fetch</p>
                                 </div>
-                                <div className="bg-orange-600 text-white px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest animate-pulse shadow-lg">Required for Uploads</div>
+                                <div className="bg-orange-600 text-white px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest animate-pulse shadow-lg">Required for Reliability</div>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
@@ -523,20 +537,20 @@ function doPost(e) {
                                         <input type="text" value={config.driveFolderId} onChange={e => setConfig({...config, driveFolderId: e.target.value})} className="w-full px-6 py-4 border-2 border-white rounded-2xl font-mono text-xs focus:border-orange-500 outline-none bg-white shadow-sm" placeholder="1w2x3y4z..."/>
                                     </div>
                                     <div className="bg-white/80 p-6 rounded-3xl border border-orange-100 shadow-inner">
-                                        <h4 className="font-black text-orange-900 text-sm mb-3 flex items-center gap-2">📌 ขั้นตอนการติดตั้ง</h4>
+                                        <h4 className="font-black text-orange-900 text-sm mb-3 flex items-center gap-2">📌 ขั้นตอนการแก้ปัญหา Failed to fetch</h4>
                                         <ol className="text-[11px] text-orange-800 font-bold space-y-3 list-decimal pl-4">
-                                            <li>คัดลอกโค้ด <span className="bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono">GAS Bridge</span> ฝั่งขวา</li>
-                                            <li>เปิด <a href="https://script.google.com" target="_blank" className="underline text-orange-600">Google Apps Script</a> และสร้างโปรเจกต์ใหม่</li>
-                                            <li>วางโค้ดที่คัดลอกและกด <span className="bg-orange-600 text-white px-1.5 py-0.5 rounded">Deploy</span> เป็น <span className="font-black">Web App</span></li>
-                                            <li>เลือก Execute as: <span className="underline">Me</span> และ Access: <span className="underline">Anyone</span></li>
-                                            <li>คัดลอก URL และ Folder ID มาใส่ในช่องด้านบน</li>
+                                            <li>คัดลอกโค้ด <span className="bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono">GAS Bridge v8.2</span> ฝั่งขวา</li>
+                                            <li>เปิดโปรเจกต์เดิมใน <a href="https://script.google.com" target="_blank" className="underline text-orange-600">Google Apps Script</a></li>
+                                            <li>วางโค้ดที่คัดลอกทับของเดิมและกด <span className="bg-orange-600 text-white px-1.5 py-0.5 rounded">Deploy {"\u2192"} New Deployment</span></li>
+                                            <li>เลือกประเภท <span className="font-black">Web App</span> และตั้งค่า Access: <span className="underline">Anyone</span></li>
+                                            <li>คัดลอก URL ใหม่ที่ได้มาอัปเดตในช่องด้านบนนี้</li>
                                         </ol>
                                     </div>
                                 </div>
                                 <div className="lg:col-span-7 flex flex-col space-y-4">
                                     <div className="flex justify-between items-end">
                                         <div className="flex items-center gap-2 font-black text-orange-900 text-xs uppercase tracking-widest px-2">
-                                            <Terminal size={16}/> GAS Bridge Code (v7.0 Stable)
+                                            <Terminal size={16}/> GAS Bridge Code (v8.2 Master)
                                         </div>
                                         <button onClick={() => { navigator.clipboard.writeText(gasCode); setCopied(true); setTimeout(()=>setCopied(false), 2000); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-md active:scale-95 ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-white hover:bg-black'}`}>
                                             {copied ? 'Copied!' : 'Click to Copy'}
