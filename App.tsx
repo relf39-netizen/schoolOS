@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import DocumentsSystem from './components/DocumentsSystem';
 import LeaveSystem from './components/LeaveSystem';
@@ -206,7 +207,6 @@ const App: React.FC = () => {
 
     const handleUpdateSchool = async (s: School) => {
         if (isSupabaseConfigured && supabase) {
-            // Fix: Changed s.late_time_threshold to s.lateTimeThreshold to match the School interface property name
             await supabase.from('schools').upsert([{ id: s.id, name: s.name, district: s.district, province: s.province, lat: s.lat, lng: s.lng, radius: s.radius, late_time_threshold: s.lateTimeThreshold, is_suspended: s.isSuspended || false }]);
             setAllSchools(allSchools.map(sch => sch.id === s.id ? s : sch));
         }
@@ -255,7 +255,6 @@ const App: React.FC = () => {
     const getDocStatusText = () => {
         if (pendingDocCount === 0) return null;
         if (isDirector) return `มีหนังสือรอเกษียณ ${pendingDocCount} ฉบับ`;
-        if (isDirector) return `มีหนังสือรอเกษียณ ${pendingDocCount} ฉบับ`;
         if (isViceDirector) return `มีหนังสือรอสั่งการ ${pendingDocCount} ฉบับ`;
         return `มีหนังสือเข้าใหม่ ${pendingDocCount} ฉบับ`;
     };
@@ -276,7 +275,7 @@ const App: React.FC = () => {
         },
         { id: SystemView.PLAN, title: 'แผนปฏิบัติการ', slogan: 'วางแผนแม่นยำ สู่ความสำเร็จ', icon: CalendarRange, color: 'from-violet-500 to-fuchsia-400', shadow: 'shadow-violet-200', visible: true },
         { id: SystemView.LEAVE, title: 'ระบบการลา', slogan: 'โปร่งใส ตรวจสอบง่าย', icon: Users, color: 'from-emerald-500 to-teal-400', shadow: 'shadow-emerald-200', visible: true, badge: pendingLeaveCount > 0 ? `รอพิจารณา ${pendingLeaveCount} รายการ` : null },
-        { id: SystemView.FINANCE, title: 'ระบบการเงิน', slogan: 'คุมงบประมาณ อย่างมีประสิทธิภาพ', icon: Activity, color: 'from-amber-500 to-orange-400', shadow: 'shadow-amber-200', visible: currentUser?.roles.includes('DIRECTOR') || currentUser?.roles.includes('FINANCE_BUDGET') || currentUser?.roles.includes('FINANCE_NONBUDGET') },
+        { id: SystemView.FINANCE, title: 'ระบบการเงิน', slogan: 'คุมงบประมาณ อย่างมีประสิทธิภาพ', icon: Activity, color: 'from-amber-500 to-orange-400', shadow: 'shadow-amber-200', visible: currentUser?.roles.includes('DIRECTOR') || currentUser?.roles.includes('FINANCE_BUDGET') || currentUser?.roles.includes('FINANCE_NONBUDGET') || currentUser?.roles.includes('FINANCE_COOP') },
         { id: SystemView.ATTENDANCE, title: 'ลงเวลาทำงาน', slogan: 'เช็คเวลาแม่นยำ ด้วย GPS', icon: Clock, color: 'from-rose-500 to-pink-400', shadow: 'shadow-rose-200', visible: true },
         { id: SystemView.ADMIN_USERS, title: 'ผู้ดูแลระบบ', slogan: 'ตั้งค่าระบบ และผู้ใช้งาน', icon: Settings, color: 'from-slate-600 to-slate-400', shadow: 'shadow-slate-200', visible: currentUser?.roles.includes('SYSTEM_ADMIN') || currentUser?.roles.includes('DIRECTOR') }
     ];

@@ -119,12 +119,12 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
     useEffect(() => { fetchData(); }, [currentUser.schoolId]);
 
-    // --- AUTO-NAVIGATION LOGIC (Skip Dashboard if account exists for NonBudget or Coop) ---
+    // --- AUTO-NAVIGATION LOGIC ---
     useEffect(() => {
-        if (activeTab !== 'Budget' && viewMode === 'DASHBOARD' && !isLoadingData) {
-            const foundAccount = accounts.find(a => a.type === activeTab);
-            if (foundAccount) {
-                setSelectedAccount(foundAccount);
+        if (!isLoadingData && (activeTab === 'NonBudget' || activeTab === 'Coop') && viewMode === 'DASHBOARD') {
+            const existingAccount = accounts.find(a => a.type === activeTab);
+            if (existingAccount) {
+                setSelectedAccount(existingAccount);
                 setViewMode('DETAIL');
             }
         }
@@ -202,23 +202,41 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         }
         if (!targetAcc) { alert("กรุณาเลือกบัญชี"); return; }
 
+        const amountNum = parseFloat(newTrans.amount);
         const success = await handleSaveTransaction({
             accountId: targetAcc.id,
             date: newTrans.date,
             description: newTrans.desc,
-            amount: parseFloat(newTrans.amount),
+            amount: amountNum,
             type: newTrans.type as any
         }, false);
 
         if (success) {
+            // คำนวณยอดคงเหลือใหม่เพื่อแจ้งเตือน Telegram
+            const currentAccTrans = transactions.filter(t => t.accountId === targetAcc!.id);
+            const currentBalance = currentAccTrans.reduce((acc, t) => t.type === 'Income' ? acc + t.amount : acc - t.amount, 0);
+            const updatedBalance = newTrans.type === 'Income' ? currentBalance + amountNum : currentBalance - amountNum;
+
             await fetchData();
             alert("บันทึกข้อมูลเรียบร้อย");
             setNewTrans({ date: new Date().toISOString().split('T')[0], desc: '', amount: '', type: 'Income' });
             setViewMode('DETAIL');
             
             if (sysConfig?.telegramBotToken) {
-                const icon = newTrans.type === 'Income' ? '🟢' : '🔴';
-                const msg = `${icon} <b>บันทึกการเงินใหม่ (${activeTab === 'Coop' ? 'สหกรณ์' : 'การเงิน'})</b>\nบัญชี: ${targetAcc.name}\nรายการ: ${newTrans.desc}\nจำนวน: ${newTrans.amount} บาท\nผู้บันทึก: ${currentUser.name}`;
+                const icon = newTrans.type === 'Income' ? '🟢 รายรับ (ฝาก)' : '🔴 รายจ่าย (ถอน)';
+                const typeText = activeTab === 'Coop' ? 'เงินสหกรณ์' : activeTab === 'NonBudget' ? 'เงินนอกงบประมาณ' : 'เงินงบประมาณ';
+                
+                const msg = `${icon} <b>แจ้งเตือนบันทึกการเงิน (${typeText})</b>\n` +
+                            `━━━━━━━━━━━━━━━━━━\n` +
+                            `<b>บัญชี:</b> ${targetAcc.name}\n` +
+                            `<b>รายการ:</b> ${newTrans.desc}\n` +
+                            `<b>จำนวนเงิน:</b> ${amountNum.toLocaleString()} บาท\n` +
+                            `━━━━━━━━━━━━━━━━━━\n` +
+                            `💰 <b>คงเหลือสุทธิ: ${updatedBalance.toLocaleString()} บาท</b>\n` +
+                            `━━━━━━━━━━━━━━━━━━\n` +
+                            `👤 บันทึกโดย: ${currentUser.name}`;
+
+                // คัดเลือกผู้รับ: ผู้อำนวยการ และ เจ้าหน้าที่ที่ดูแลประเภทบัญชีนั้นๆ
                 const recipients = allTeachers.filter(t => 
                     t.schoolId === currentUser.schoolId && 
                     t.telegramChatId && 
@@ -227,6 +245,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                      (activeTab === 'NonBudget' && t.roles.includes('FINANCE_NONBUDGET')) ||
                      (activeTab === 'Coop' && t.roles.includes('FINANCE_COOP')))
                 );
+                
                 recipients.forEach(t => sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId!, msg));
             }
         } else {
@@ -328,7 +347,6 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     );
                 })}
                 
-                {/* แสดงการ์ดสร้างบัญชีเฉพาะครั้งแรกที่ยังไม่มีบัญชีสำหรับ NonBudget และ Coop หรือแสดงตลอดใน Budget */}
                 {canEdit && (activeTab === 'Budget' || accounts.filter(a => a.type === activeTab).length === 0) && (
                     <button onClick={() => setShowAccountForm(true)} className={`border-4 border-dashed border-slate-200 rounded-[2rem] p-8 flex flex-col items-center justify-center text-slate-300 transition-all gap-3 min-h-[250px] ${activeTab === 'Coop' ? 'hover:text-purple-500 hover:border-purple-200 hover:bg-purple-50' : activeTab === 'NonBudget' ? 'hover:text-blue-500 hover:border-blue-200 hover:bg-blue-50' : 'hover:text-orange-500 hover:border-orange-200 hover:bg-orange-50'}`}>
                         <PlusCircle size={48}/><span className="font-black text-lg">สร้างบัญชี {activeTab === 'Coop' ? 'สหกรณ์' : activeTab === 'NonBudget' ? 'เงินนอกงบประมาณ' : 'การเงิน'}</span>
@@ -358,7 +376,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
         return (
             <div className="space-y-8 animate-slide-up pb-20 font-sarabun">
-                {/* Header Section เหมือนในรูปภาพ */}
+                {/* Header Section */}
                 <div className="flex flex-col md:flex-row justify-between items-center gap-6">
                     <div className="flex items-center gap-6 self-start md:self-auto">
                         <button onClick={() => { setViewMode('DASHBOARD'); setActiveTab('Budget'); }} className="p-3.5 bg-white hover:bg-slate-50 border rounded-2xl text-slate-400 shadow-sm transition-all group">
@@ -383,59 +401,59 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                     </div>
                 </div>
 
-                {/* Summary Cards Section - ปรับขนาดการ์ดและตัวเลขให้เล็กลง */}
+                {/* Summary Cards Section */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-md">
-                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">รายรับรวม</p>
-                        <p className="text-3xl font-black text-green-600 leading-none">+{inc.toLocaleString()}</p>
+                    <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm transition-all hover:shadow-md">
+                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">รายรับรวม</p>
+                        <p className="text-2xl font-black text-green-600 leading-none">+{inc.toLocaleString()}</p>
                     </div>
-                    <div className="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-md">
-                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">รายจ่ายรวม</p>
-                        <p className="text-3xl font-black text-red-600 leading-none">-{exp.toLocaleString()}</p>
+                    <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm transition-all hover:shadow-md">
+                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">รายจ่ายรวม</p>
+                        <p className="text-2xl font-black text-red-600 leading-none">-{exp.toLocaleString()}</p>
                     </div>
-                    <div className={`p-5 rounded-[2.5rem] shadow-2xl text-white transform hover:scale-[1.02] transition-all bg-[#2a2d61]`}>
-                        <p className="text-xs font-black text-slate-300 uppercase tracking-widest mb-2 ml-1">คงเหลือสุทธิ</p>
+                    <div className={`p-4 rounded-[2rem] shadow-2xl text-white transform hover:scale-[1.02] transition-all bg-[#2a2d61]`}>
+                        <p className="text-xs font-black text-slate-300 uppercase tracking-widest mb-1 ml-1">คงเหลือสุทธิ</p>
                         <div className="flex items-baseline gap-1">
-                             <span className="text-xl font-black text-slate-400">฿</span>
-                             <span className="text-4xl font-black">{(inc-exp).toLocaleString()}</span>
+                             <span className="text-lg font-black text-slate-400">฿</span>
+                             <span className="text-3xl font-black">{(inc-exp).toLocaleString()}</span>
                         </div>
                     </div>
                 </div>
 
-                {/* Transaction Table Section - ปรับ Padding (p-3) ให้ชิดกันมากขึ้น */}
+                {/* Transaction Table Section */}
                 <div className="bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden shadow-sm">
-                    <div className="p-8 bg-slate-50/50 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                        <h3 className="font-black text-2xl text-slate-800 flex items-center gap-2">
+                    <div className="p-6 bg-slate-50/50 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <h3 className="font-black text-xl text-slate-800 flex items-center gap-2">
                              รายการเดินบัญชี
                              <span className="text-xs font-bold text-slate-400 bg-white px-3 py-1 rounded-full border ml-2">หน้า {currentPage} / {pages || 1}</span>
                         </h3>
                         <div className="relative group w-full sm:w-auto">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18}/>
-                            <input type="text" placeholder="ค้นหารายการ..." className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 ring-blue-100 text-sm font-bold transition-all"/>
+                            <input type="text" placeholder="ค้นหารายการ..." className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 outline-none focus:ring-2 ring-blue-100 text-sm font-bold transition-all"/>
                         </div>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm text-left">
                             <thead className="bg-white border-b text-slate-400 font-black uppercase text-[11px] tracking-widest">
                                 <tr>
-                                    <th className="p-3 px-8">วันที่</th>
-                                    <th className="p-3 px-8">รายการ</th>
-                                    <th className="p-3 px-8 text-right">จำนวนเงิน</th>
-                                    {canEdit && <th className="p-3 px-8 text-center w-32">จัดการ</th>}
+                                    <th className="p-3 px-6">วันที่</th>
+                                    <th className="p-3 px-6">รายการ</th>
+                                    <th className="p-3 px-6 text-right">จำนวนเงิน</th>
+                                    {canEdit && <th className="p-3 px-6 text-center w-24">จัดการ</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
                                 {display.map(t => (
                                     <tr key={t.id} className="hover:bg-slate-50/80 transition-colors group">
-                                        <td className="p-3 px-8 font-black text-slate-500 whitespace-nowrap">{getThaiDate(t.date)}</td>
-                                        <td className="p-3 px-8 font-bold text-slate-800 text-lg leading-tight">{t.description}</td>
-                                        <td className={`p-3 px-8 text-right font-black text-2xl ${t.type === 'Income' ? 'text-green-600' : 'text-red-600'}`}>
+                                        <td className="p-2 px-6 font-black text-slate-500 whitespace-nowrap">{getThaiDate(t.date)}</td>
+                                        <td className="p-2 px-6 font-bold text-slate-800 text-md leading-tight">{t.description}</td>
+                                        <td className={`p-2 px-6 text-right font-black text-xl ${t.type === 'Income' ? 'text-green-600' : 'text-red-600'}`}>
                                             {t.type === 'Income' ? '+' : '-'}{t.amount.toLocaleString()}
                                         </td>
                                         {canEdit && (
-                                            <td className="p-3 px-8 text-center">
+                                            <td className="p-2 px-6 text-center">
                                                 <button onClick={() => { setEditingTransaction(t); setShowEditModal(true); }} className="text-slate-300 hover:text-blue-600 p-2 hover:bg-white rounded-2xl shadow-sm opacity-0 group-hover:opacity-100 transition-all transform hover:scale-110">
-                                                    <Edit2 size={18}/>
+                                                    <Edit2 size={16}/>
                                                 </button>
                                             </td>
                                         )}
@@ -443,7 +461,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                                 ))}
                                 {display.length === 0 && (
                                     <tr>
-                                        <td colSpan={canEdit ? 4 : 3} className="p-24 text-center text-slate-300 font-black italic uppercase tracking-[0.3em] opacity-40">
+                                        <td colSpan={canEdit ? 4 : 3} className="p-12 text-center text-slate-300 font-black italic uppercase tracking-[0.3em] opacity-40">
                                             NO TRANSACTIONS FOUND
                                         </td>
                                     </tr>
@@ -452,12 +470,12 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                         </table>
                     </div>
                     {pages > 1 && (
-                        <div className="p-8 bg-slate-50/50 flex justify-center items-center gap-2 border-t">
-                            <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="p-3 border rounded-2xl bg-white disabled:opacity-30 hover:shadow-md transition-all text-slate-500 active:scale-95"><ChevronsLeft size={20}/></button>
-                            <button onClick={() => setCurrentPage(p => Math.max(1, p-1))} disabled={currentPage === 1} className="p-3 border rounded-2xl bg-white disabled:opacity-30 hover:shadow-md transition-all text-slate-500 active:scale-95"><ChevronLeft size={20}/></button>
-                            <span className="font-black text-slate-600 uppercase text-[11px] tracking-widest mx-6 bg-white px-5 py-2 rounded-full border shadow-inner">หน้า {currentPage} จาก {pages}</span>
-                            <button onClick={() => setCurrentPage(p => Math.min(pages, p+1))} disabled={currentPage === pages} className="p-3 border rounded-2xl bg-white disabled:opacity-30 hover:shadow-md transition-all text-slate-500 active:scale-95"><ChevronRight size={20}/></button>
-                            <button onClick={() => setCurrentPage(pages)} disabled={currentPage === pages} className="p-3 border rounded-2xl bg-white disabled:opacity-30 hover:shadow-md transition-all text-slate-500 active:scale-95"><ChevronsRight size={20}/></button>
+                        <div className="p-6 bg-slate-50/50 flex justify-center items-center gap-2 border-t">
+                            <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="p-2 rounded-2xl bg-white border shadow-sm disabled:opacity-30 hover:shadow-md transition-all text-slate-500 active:scale-95"><ChevronsLeft size={18}/></button>
+                            <button onClick={() => setCurrentPage(p => Math.max(1, p-1))} disabled={currentPage === 1} className="p-2 rounded-2xl bg-white border shadow-sm disabled:opacity-30 hover:shadow-md transition-all text-slate-500 active:scale-95"><ChevronLeft size={18}/></button>
+                            <span className="font-black text-slate-600 uppercase text-[10px] tracking-widest mx-4 bg-white px-4 py-1.5 rounded-full border shadow-inner">หน้า {currentPage} จาก {pages}</span>
+                            <button onClick={() => setCurrentPage(p => Math.min(pages, p+1))} disabled={currentPage === pages} className="p-2 rounded-2xl bg-white border shadow-sm disabled:opacity-30 hover:shadow-md transition-all text-slate-500 active:scale-95"><ChevronRight size={18}/></button>
+                            <button onClick={() => setCurrentPage(pages)} disabled={currentPage === pages} className="p-2 rounded-2xl bg-white border shadow-sm disabled:opacity-30 hover:shadow-md transition-all text-slate-500 active:scale-95"><ChevronsRight size={18}/></button>
                         </div>
                     )}
                 </div>
