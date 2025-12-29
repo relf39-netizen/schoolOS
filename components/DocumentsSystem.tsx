@@ -1,15 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { DocumentItem, Teacher, Attachment, SystemConfig, School } from '../types';
-import { 
-    Search, FileText, Users, PenTool, CheckCircle, FilePlus, Eye, 
-    CheckSquare, Loader, Link as LinkIcon, Trash2, File as FileIcon, 
-    ExternalLink, Plus, UploadCloud, AlertTriangle, Monitor, FileCheck, 
-    ArrowLeft, Send, MousePointerClick, ChevronLeft, ChevronRight, 
-    FileBadge, Megaphone, Save, FileSpreadsheet, FileArchive, 
-    Image as ImageIcon, Bell, X, Info, Layers, Zap, FastForward, 
-    UserCheck, ChevronsLeft, ChevronsRight 
-} from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bell, CheckCircle, CheckSquare, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, FastForward, FileBadge, FileCheck, FileIcon, FilePlus, FileText, Info, Link as LinkIcon, Loader, Megaphone, PenTool, Plus, Save, Search, Send, Trash2, UploadCloud, UserCheck, UserMinus, UserPlus, Users, X, Zap } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
+import { Attachment, DocumentItem, School, SystemConfig, Teacher } from '../types';
 import { stampPdfDocument, stampReceiveNumber } from '../utils/pdfStamper';
 import { sendTelegramMessage } from '../utils/telegram';
 
@@ -80,7 +72,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     const teachersInSchool = allTeachers.filter(t => 
         t.schoolId === currentUser.schoolId && 
         !t.roles.includes('DIRECTOR')
-    );
+    ).sort((a, b) => a.name.localeCompare(b.name, 'th'));
 
     const viceDirectors = teachersInSchool.filter(t => 
         t.position.includes('รองผู้อำนวยการ') || t.roles.includes('VICE_DIRECTOR')
@@ -612,10 +604,98 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     const displayedDocs = filteredDocs.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
     const goToPage = (p: number) => { if (p >= 1 && p <= totalPages) setCurrentPage(p); };
 
-    const filteredTeachersForAction = teachersInSchool.filter(t => 
-        t.name.toLowerCase().includes(teacherSearchTerm.toLowerCase()) || 
-        t.position.toLowerCase().includes(teacherSearchTerm.toLowerCase())
-    );
+    // Helper for rendering teacher selection grid
+    const TeacherSelectionGrid = ({ selectedIds, onToggle, currentSearch, onSearchChange }: { 
+        selectedIds: string[], 
+        onToggle: (ids: string[]) => void,
+        currentSearch: string,
+        onSearchChange: (val: string) => void
+    }) => {
+        const filtered = teachersInSchool.filter(t => 
+            t.name.toLowerCase().includes(currentSearch.toLowerCase()) || 
+            t.position.toLowerCase().includes(currentSearch.toLowerCase())
+        );
+
+        return (
+            <div className="space-y-4">
+                <div className="flex flex-col md:flex-row gap-3 items-center">
+                    <div className="relative flex-1 w-full">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+                        <input 
+                            type="text" 
+                            placeholder="ค้นชื่อครู..." 
+                            value={currentSearch}
+                            onChange={(e) => onSearchChange(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 text-sm border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white shadow-sm"
+                        />
+                    </div>
+                    <div className="flex gap-2 w-full md:w-auto">
+                        <button 
+                            type="button" 
+                            onClick={() => onToggle(teachersInSchool.map(t => t.id))}
+                            className="flex-1 md:flex-none px-3 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold hover:bg-blue-100 transition-colors border border-blue-100"
+                        >
+                            เลือกทั้งหมด
+                        </button>
+                        <button 
+                            type="button" 
+                            onClick={() => onToggle([])}
+                            className="flex-1 md:flex-none px-3 py-2 bg-slate-50 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors border border-slate-200"
+                        >
+                            ล้างทั้งหมด
+                        </button>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-[250px] overflow-y-auto p-1 custom-scrollbar">
+                    {filtered.map(t => {
+                        const isSelected = selectedIds.includes(t.id);
+                        return (
+                            <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => {
+                                    if (isSelected) onToggle(selectedIds.filter(id => id !== t.id));
+                                    else onToggle([...selectedIds, t.id]);
+                                }}
+                                className={`p-3 rounded-xl border-2 text-left transition-all duration-200 hover:scale-[1.02] active:scale-95 ${
+                                    isSelected 
+                                    ? 'bg-blue-600 border-blue-600 text-white shadow-md' 
+                                    : 'bg-white border-slate-100 text-slate-600 hover:border-blue-200'
+                                }`}
+                            >
+                                <div className="font-bold text-xs truncate">{t.name}</div>
+                                <div className={`text-[9px] truncate mt-0.5 ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                                    {t.position}
+                                </div>
+                            </button>
+                        );
+                    })}
+                    {filtered.length === 0 && (
+                        <div className="col-span-full py-10 text-center text-slate-400 italic text-sm">ไม่พบรายชื่อที่ค้นหา</div>
+                    )}
+                </div>
+                
+                {selectedIds.length > 0 && (
+                    <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-center justify-between">
+                        <span className="text-xs font-bold text-blue-700">เลือกแล้ว {selectedIds.length} ท่าน</span>
+                        <div className="flex -space-x-2">
+                            {selectedIds.slice(0, 5).map(id => (
+                                <div key={id} className="w-6 h-6 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center text-[10px] text-white font-bold">
+                                    {(teachersInSchool.find(t => t.id === id)?.name || '?')[0]}
+                                </div>
+                            ))}
+                            {selectedIds.length > 5 && (
+                                <div className="w-6 h-6 rounded-full bg-slate-300 border-2 border-white flex items-center justify-center text-[10px] text-slate-600 font-bold">
+                                    +{selectedIds.length - 5}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     if (isLoading) return <div className="p-10 text-center text-slate-500"><Loader className="animate-spin inline mr-2"/> กำลังโหลดข้อมูล...</div>;
 
@@ -693,10 +773,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                     {(isNewForDirector || isNewForVice) && !isProcessing && (<div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-3 py-1 rounded-bl-lg shadow-md z-20 flex items-center gap-1 animate-pulse"><Bell size={10} className="fill-current"/> หนังสือเข้าใหม่ !</div>)}
                                     <div className="flex justify-between items-start">
                                         <div className="flex items-start gap-4">
-                                            <div className={`p-3 rounded-lg ${docItem.status === 'Distributed' ? (docItem.category === 'ORDER' ? 'bg-indigo-100 text-indigo-600' : 'bg-green-50 text-green-600') : 'bg-slate-100 text-slate-500'}`}>{docItem.category === 'ORDER' ? <Megaphone size={24}/> : <FileText size={24} />}</div>
+                                            <div className={`p-3 rounded-lg ${docItem.status === 'Distributed' ? (docItem.category === 'ORDER' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600') : 'bg-slate-100 text-slate-500'}`}>{docItem.category === 'ORDER' ? <Megaphone size={24}/> : <FileText size={24} />}</div>
                                             <div>
                                                 <div className="flex items-center gap-2 mb-1">
-                                                    <span className={`text-xs font-mono px-2 py-0.5 rounded border ${docItem.category === 'ORDER' ? 'bg-indigo-50 border-indigo-100' : 'bg-white border-slate-100'}`}>{docItem.category === 'ORDER' ? 'เลขที่คำสั่ง' : 'รับที่'}: {docItem.bookNumber}</span>
+                                                    <span className={`text-xs font-mono px-2 py-0.5 rounded border ${docItem.category === 'ORDER' ? 'bg-emerald-50 border-emerald-100' : 'bg-blue-50 border-blue-100'}`}>{docItem.category === 'ORDER' ? 'เลขที่คำสั่ง' : 'รับที่'}: {docItem.bookNumber}</span>
                                                     <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${docItem.priority === 'Critical' ? 'bg-red-100 text-red-700 border-red-200' : docItem.priority === 'Urgent' ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-blue-100 text-blue-700 border-blue-200'}`}>{docItem.priority === 'Critical' ? 'ด่วนที่สุด' : docItem.priority === 'Urgent' ? 'ด่วน' : 'ปกติ'}</span>
                                                     {isUnread && <span className="bg-red-600 text-white text-[10px] px-2 py-1 rounded-full animate-pulse font-bold shadow-sm">NEW</span>}
                                                     {isAcknowledged && <span className="bg-green-100 text-green-700 text-[10px] px-2 py-1 rounded-full font-bold border border-green-200">รับทราบแล้ว</span>}
@@ -729,7 +809,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
             {viewMode === 'CREATE' && (
                 <div className="bg-white rounded-xl shadow-xl border border-slate-200 p-6 max-w-4xl mx-auto relative overflow-hidden animate-slide-up">
-                    <div className="mb-6 border-b pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4"><h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><FilePlus className="text-blue-600"/> ลงทะเบียนรับหนังสือ / สร้างคำสั่ง</h3><div className="bg-slate-100 p-1 rounded-lg flex shadow-inner"><button type="button" onClick={() => setDocCategory('INCOMING')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${docCategory === 'INCOMING' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}><FileBadge size={16}/> หนังสือรับภายนอก</button><button type="button" onClick={() => setDocCategory('ORDER')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${docCategory === 'ORDER' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500'}`}><Megaphone size={16}/> คำสั่งปฏิบัติราชการ</button></div></div>
+                    <div className="mb-6 border-b pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4"><h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><FilePlus className="text-blue-600"/> ลงทะเบียนรับหนังสือ / สร้างคำสั่ง</h3><div className="bg-slate-100 p-1 rounded-lg flex shadow-inner"><button type="button" onClick={() => setDocCategory('INCOMING')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${docCategory === 'INCOMING' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-50'}`}><FileBadge size={16}/> หนังสือรับภายนอก</button><button type="button" onClick={() => setDocCategory('ORDER')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${docCategory === 'ORDER' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500'}`}><Megaphone size={16}/> คำสั่งปฏิบัติราชการ</button></div></div>
                     <form onSubmit={async (e) => {
                         e.preventDefault();
                         if (!newDoc.bookNumber || !supabase) return;
@@ -774,10 +854,22 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                             e.target.value = ''; 
                                         } 
                                     }} className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"/><div className="text-center text-xs text-slate-400 font-bold my-2">- หรือ -</div><div className="flex flex-col gap-2"><input type="text" placeholder="ชื่อเอกสาร (ถ้ามี)" value={linkNameInput} onChange={e => setLinkNameInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm outline-none focus:ring-1 ring-blue-200"/><div className="flex gap-2"><input type="text" placeholder="วางลิงก์ https://..." value={linkInput} onChange={e => setLinkInput(e.target.value)} className="w-full px-3 py-2 border rounded text-sm outline-none focus:ring-1 ring-blue-200"/><button type="button" onClick={() => { if (linkInput) { let finalUrl = linkInput.trim(); if (!finalUrl.startsWith('http')) finalUrl = 'https://' + finalUrl; setTempAttachments([...tempAttachments, { id: `att_${Date.now()}`, name: linkNameInput || 'ลิงก์เอกสาร', type: 'LINK', url: finalUrl, fileType: 'external-link' }]); setLinkInput(''); setLinkNameInput(''); } }} className="bg-slate-600 text-white px-3 py-2 rounded hover:bg-slate-700 transition-colors"><Plus size={16}/></button></div></div></div>
-                                {docCategory === 'ORDER' && (<div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100"><div className="flex justify-between items-center mb-3"><h4 className="font-bold text-indigo-900 text-sm flex items-center gap-2 uppercase tracking-wide"><Users size={16}/> เลือกผู้รับปฏิบัติ (ส่งทันที)</h4><button type="button" onClick={() => teachersInSchool.length === selectedTeachers.length ? setSelectedTeachers([]) : setSelectedTeachers(teachersInSchool.map(t=>t.id))} className="text-[10px] font-black text-indigo-600 uppercase hover:underline">เลือกทั้งหมด</button></div><div className="bg-white border rounded-xl max-h-[160px] overflow-y-auto custom-scrollbar p-1">{teachersInSchool.map(t => (<label key={t.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all ${selectedTeachers.includes(t.id) ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}><input type="checkbox" checked={selectedTeachers.includes(t.id)} onChange={(e) => { if (e.target.checked) setSelectedTeachers([...selectedTeachers, t.id]); else setSelectedTeachers(selectedTeachers.filter(id => id !== t.id)); }} className="rounded-md text-indigo-600 w-4 h-4"/><div className="flex-1 overflow-hidden"><div className="text-xs font-bold text-slate-700 truncate">{t.name}</div><div className="text-[9px] text-slate-400 truncate">{t.position}</div></div></label>))}</div></div>)}
+                                {docCategory === 'ORDER' && (
+                                    <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                                        <div className="mb-3 flex items-center justify-between">
+                                            <h4 className="font-bold text-indigo-900 text-sm flex items-center gap-2 uppercase tracking-wide"><Users size={16}/> เลือกผู้รับปฏิบัติ (คำสั่ง)</h4>
+                                        </div>
+                                        <TeacherSelectionGrid 
+                                            selectedIds={selectedTeachers} 
+                                            onToggle={setSelectedTeachers}
+                                            currentSearch={teacherSearchTerm}
+                                            onSearchChange={setTeacherSearchTerm}
+                                        />
+                                    </div>
+                                )}
                             </div>
                         </div>
-                        <div className="flex gap-3 pt-4 border-t"><button type="button" onClick={() => setViewMode('LIST')} className="flex-1 py-3 text-slate-600 bg-slate-100 rounded-xl font-bold hover:bg-slate-200 transition-all">ยกเลิก</button><button type="submit" disabled={activeTasks.length > 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 ${activeTasks.length > 0 ? 'bg-slate-400 cursor-not-allowed' : (docCategory === 'ORDER' ? 'bg-indigo-600' : 'bg-blue-600')}`}>{activeTasks.length > 0 ? <Loader className="animate-spin" size={18}/> : (docCategory === 'ORDER' ? <Send size={20}/> : <Save size={20}/>)} {activeTasks.length > 0 ? 'กำลังอัปโหลดไฟล์...' : (docCategory === 'ORDER' ? 'บันทึกและส่งทันที' : 'บันทึกและเสนอ ผอ.')}</button></div>
+                        <div className="flex gap-3 pt-4 border-t"><button type="button" onClick={() => setViewMode('LIST')} className="flex-1 py-3 text-slate-600 bg-slate-100 rounded-xl font-bold hover:bg-slate-200 transition-all">ยกเลิก</button><button type="submit" disabled={activeTasks.length > 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2 ${activeTasks.length > 0 ? 'bg-slate-400 cursor-not-allowed' : (docCategory === 'ORDER' ? 'bg-emerald-600' : 'bg-blue-600')}`}>{activeTasks.length > 0 ? <Loader className="animate-spin" size={18}/> : (docCategory === 'ORDER' ? <Send size={20}/> : <Save size={20}/>)} {activeTasks.length > 0 ? 'กำลังอัปโหลดไฟล์...' : (docCategory === 'ORDER' ? 'บันทึกและส่งทันที' : 'บันทึกและเสนอ ผอ.')}</button></div>
                     </form>
                 </div>
             )}
@@ -830,39 +922,16 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                             <label className="block text-sm font-bold text-blue-900 flex items-center gap-2">
                                                 <Users size={18}/> เลือกผู้รับปฏิบัติ / แจ้งเตือน
                                             </label>
-                                            
-                                            <div className="flex gap-2 w-full md:w-auto">
-                                                <div className="relative flex-1 md:w-64">
-                                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14}/>
-                                                    <input 
-                                                        type="text" 
-                                                        placeholder="ค้นหาชื่อครู..." 
-                                                        value={teacherSearchTerm}
-                                                        onChange={(e) => setTeacherSearchTerm(e.target.value)}
-                                                        className="w-full pl-9 pr-3 py-1.5 text-sm border rounded-lg focus:ring-1 focus:ring-blue-500 outline-none bg-white shadow-sm"
-                                                    />
-                                                </div>
-                                                <button 
-                                                    type="button"
-                                                    onClick={() => selectedTeachers.length === teachersInSchool.length ? setSelectedTeachers([]) : setSelectedTeachers(teachersInSchool.map(t => t.id))}
-                                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selectedTeachers.length === teachersInSchool.length ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'}`}
-                                                >
-                                                    {selectedTeachers.length === teachersInSchool.length ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
-                                                </button>
-                                            </div>
                                         </div>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto custom-scrollbar p-1">
-                                            {filteredTeachersForAction.map(t => (
-                                                <label key={t.id} className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer border transition-all ${selectedTeachers.includes(t.id) ? 'bg-blue-50 border-blue-200 shadow-sm' : 'hover:bg-white border-transparent'}`}>
-                                                    <input type="checkbox" checked={selectedTeachers.includes(t.id)} onChange={e => e.target.checked ? setSelectedTeachers([...selectedTeachers, t.id]) : setSelectedTeachers(selectedTeachers.filter(id => id !== t.id))} className="rounded-md text-blue-600 w-4 h-4 transition-all"/>
-                                                    <div className="flex-1 overflow-hidden"><div className="text-xs font-bold text-slate-700 truncate">{t.name}</div><div className="text-[9px] text-slate-400 font-bold truncate uppercase">{t.position}</div></div>
-                                                </label>
-                                            ))}
-                                        </div>
+                                        <TeacherSelectionGrid 
+                                            selectedIds={selectedTeachers} 
+                                            onToggle={setSelectedTeachers}
+                                            currentSearch={teacherSearchTerm}
+                                            onSearchChange={setTeacherSearchTerm}
+                                        />
                                     </div>
 
-                                    <div className="flex justify-between items-center gap-4">
+                                    <div className="flex justify-between items-center gap-4 pt-4">
                                         <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border text-xs font-bold text-slate-500"><FileText size={14}/> ประทับตราที่หน้า: <input type="number" min="1" value={stampPage} onChange={e => setStampPage(parseInt(e.target.value))} className="w-10 text-center font-black text-blue-600 bg-transparent outline-none"/></div>
                                         <div className="flex flex-1 gap-3">
                                             <button type="button" onClick={() => handleDirectorAction(true)} className="flex-1 py-3 bg-white border-2 border-emerald-600 text-emerald-600 rounded-xl font-bold shadow-md hover:bg-emerald-50 active:scale-95 transition-all text-xs uppercase"><CheckSquare size={16} className="inline mr-1"/> รับทราบ (แจ้งเวียน)</button>
@@ -888,36 +957,13 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                         <label className="block text-sm font-bold text-indigo-900 flex items-center gap-2">
                                             <Users size={18}/> เลือกผู้รับปฏิบัติ / แจ้งเตือน
                                         </label>
-                                        
-                                        <div className="flex gap-2 w-full md:w-auto">
-                                            <div className="relative flex-1 md:w-64">
-                                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14}/>
-                                                <input 
-                                                    type="text" 
-                                                    placeholder="ค้นหาชื่อครู..." 
-                                                    value={teacherSearchTerm}
-                                                    onChange={(e) => setTeacherSearchTerm(e.target.value)}
-                                                    className="w-full pl-9 pr-3 py-1.5 text-sm border rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50 shadow-sm"
-                                                />
-                                            </div>
-                                            <button 
-                                                type="button"
-                                                onClick={() => selectedTeachers.length === teachersInSchool.length ? setSelectedTeachers([]) : setSelectedTeachers(teachersInSchool.map(t => t.id))}
-                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${selectedTeachers.length === teachersInSchool.length ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`}
-                                            >
-                                                {selectedTeachers.length === teachersInSchool.length ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
-                                            </button>
-                                        </div>
                                     </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto custom-scrollbar p-1">
-                                        {filteredTeachersForAction.map(t => (
-                                            <label key={t.id} className={`flex items-center gap-3 p-2 rounded-xl cursor-pointer border transition-all ${selectedTeachers.includes(t.id) ? 'bg-blue-50 border-blue-200 shadow-sm' : 'hover:bg-white border-transparent'}`}>
-                                                <input type="checkbox" checked={selectedTeachers.includes(t.id)} onChange={e => e.target.checked ? setSelectedTeachers([...selectedTeachers, t.id]) : setSelectedTeachers(selectedTeachers.filter(id => id !== t.id))} className="rounded-md text-blue-600 w-4 h-4 transition-all"/>
-                                                <div className="flex-1 overflow-hidden"><div className="text-xs font-bold text-slate-700 truncate">{t.name}</div><div className="text-[9px] text-slate-400 font-bold truncate uppercase">{t.position}</div></div>
-                                            </label>
-                                        ))}
-                                    </div>
+                                    <TeacherSelectionGrid 
+                                        selectedIds={selectedTeachers} 
+                                        onToggle={setSelectedTeachers}
+                                        currentSearch={teacherSearchTerm}
+                                        onSearchChange={setTeacherSearchTerm}
+                                    />
                                 </div>
 
                                 <div className="flex items-center gap-4 mt-4">
