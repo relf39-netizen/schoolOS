@@ -21,6 +21,7 @@ export type TeacherRole =
   | 'DOCUMENT_OFFICER'  
   | 'FINANCE_BUDGET'    
   | 'FINANCE_NONBUDGET' 
+  | 'FINANCE_COOP'      // เพิ่มบทบาทเจ้าหน้าที่สหกรณ์
   | 'PLAN_OFFICER'      
   | 'ACADEMIC_OFFICER'  
   | 'TEACHER';          
@@ -80,9 +81,9 @@ export interface LeaveRequest {
   type: 'Sick' | 'Personal' | 'OffCampus' | 'Late' | 'Maternity';
   startDate: string;
   endDate: string;
-  startTime?: string;
-  endTime?: string;
-  substituteName?: string; // เพิ่มฟิลด์ครูสอนแทน
+  startTime?: string; 
+  endTime?: string;   
+  substituteName?: string; 
   reason: string;
   contactInfo?: string; 
   mobilePhone?: string; 
@@ -114,7 +115,7 @@ export interface FinanceAccount {
   id: string;
   schoolId?: string;
   name: string;
-  type: 'Budget' | 'NonBudget';
+  type: 'Budget' | 'NonBudget' | 'Coop'; // เพิ่มประเภท Coop (สหกรณ์)
   description?: string;
 }
 

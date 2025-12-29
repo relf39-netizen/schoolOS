@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
 import { 
     Users, UserPlus, Edit, Trash2, CheckSquare, Square, Save, X, Settings, 
     Link as LinkIcon, UploadCloud, ImageIcon, 
     MapPin, Crosshair, RefreshCw, UserCheck, UserX, Send, Globe, Power, PowerOff,
-    Cloud, Terminal, FileSignature, LayoutGrid, ArrowLeft, ShieldPlus, UserMinus
+    Cloud, Terminal, FileSignature, LayoutGrid, ArrowLeft, ShieldPlus, UserMinus, ShoppingBag
 } from 'lucide-react';
 import { supabase, isConfigured } from '../supabaseClient';
 import { ACADEMIC_POSITIONS } from '../constants';
@@ -25,7 +26,9 @@ const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
     { id: 'DOCUMENT_OFFICER', label: 'เจ้าหน้าที่ธุรการ' },
     { id: 'FINANCE_BUDGET', label: 'การเงิน (งบประมาณ)' },
     { id: 'FINANCE_NONBUDGET', label: 'การเงิน (นอกงบประมาณ)' },
+    { id: 'FINANCE_COOP', label: 'เจ้าหน้าที่สหกรณ์' }, // เพิ่ม Role ใหม่
     { id: 'PLAN_OFFICER', label: 'เจ้าหน้าที่งานแผน' },
+    { id: 'ACADEMIC_OFFICER', label: 'เจ้าหน้าที่งานวิชาการ' },
     { id: 'TEACHER', label: 'ครูผู้สอน' },
 ];
 
@@ -552,7 +555,7 @@ function doPost(e) {
                                         <div className="flex items-center gap-2 font-black text-orange-900 text-xs uppercase tracking-widest px-2">
                                             <Terminal size={16}/> GAS Bridge Code (v8.2 Master)
                                         </div>
-                                        <button onClick={() => { navigator.clipboard.writeText(gasCode); setCopied(true); setTimeout(()=>setCopied(false), 2000); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-md active:scale-95 ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-white hover:bg-black'}`}>
+                                        <button onClick={() => { navigator.clipboard.writeText(gasCode); setCopied(true); setTimeout(()=>setCopied(false), 2000); }} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-md active:scale-95 ${copied ? 'bg-emerald-50 text-white' : 'bg-slate-800 text-white hover:bg-black'}`}>
                                             {copied ? 'Copied!' : 'Click to Copy'}
                                         </button>
                                     </div>
