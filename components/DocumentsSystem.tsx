@@ -1,4 +1,3 @@
-
 // Fix: Added missing imports for History, Clock, Bookmark, and ChevronDown from lucide-react
 import { AlertTriangle, ArrowLeft, Bell, CheckCircle, CheckSquare, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, FastForward, FileBadge, FileCheck, FileIcon, FilePlus, FileText, Info, Link as LinkIcon, Loader, Megaphone, PenTool, Plus, Save, Search, Send, Trash2, UploadCloud, UserCheck, UserMinus, UserPlus, Users, X, Zap, DownloadCloud, History, Clock, Bookmark, ChevronDown } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
@@ -370,7 +369,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     }
 
     const handleFetchAndUploadFromUrl = async (url: string, customName?: string) => {
-        if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId) {
+        const client = supabase;
+        if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId || !client) {
             alert("ไม่พบการตั้งค่า Google Drive! (โปรดระบุ Script URL และ Folder ID)");
             return;
         }
@@ -460,7 +460,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     };
 
     const handleFileUploadInBackground = async (file: File) => {
-        if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId) {
+        const client = supabase;
+        if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId || !client) {
             alert("ไม่พบการตั้งค่า Google Drive! (โปรดระบุ Script URL และ Folder ID ในหน้าคลาวด์)");
             return;
         }
@@ -880,7 +881,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         );
     };
 
-    if (isLoading) return <div className="p-10 text-center text-slate-500"><Loader className="animate-spin inline mr-2" /> กำลังโหลดข้อมูล...</div>;
+    if (isLoading) return <div className="p-10 text-center text-slate-500 flex flex-col items-center gap-4"><Loader className="animate-spin text-blue-600" size={32}/><p className="font-bold">กำลังเชื่อมต่อระบบฐานข้อมูล SQL...</p></div>;
 
     return (
         <div className="space-y-6 animate-fade-in pb-10 relative">
