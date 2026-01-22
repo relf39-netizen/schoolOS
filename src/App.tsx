@@ -74,7 +74,8 @@ const App: React.FC = () => {
     }, []);
 
     const fetchSqlData = useCallback(async () => {
-        const client = supabase; // Narrowing locally
+        // ใช้ Local client สำหรับ narrowing
+        const client = supabase;
         if (!isSupabaseConfigured || !client) return false;
         
         try {
@@ -116,7 +117,7 @@ const App: React.FC = () => {
         const sync = async () => {
             setIsLoading(true);
             
-            // Fix TS18047: Use local constant for narrowing
+            // 1. Try SQL (Supabase) first - ใช้ local variable เพื่อ TS safety
             const client = supabase;
             if (isSupabaseConfigured && client) {
                 const ok = await fetchSqlData();
@@ -184,7 +185,6 @@ const App: React.FC = () => {
 
     // Real-time SQL Notifications
     useEffect(() => {
-        // Fix TS18047: Local variable narrowing
         const client = supabase;
         if (!currentUser || !isSupabaseConfigured || !client) return;
         
@@ -208,6 +208,7 @@ const App: React.FC = () => {
             .subscribe();
 
         return () => { 
+            // ใช้ Optional chaining หรือ เช็ค null อีกครั้งเพื่อป้องกัน Build error
             if (client) {
                 client.removeChannel(channel); 
             }
@@ -242,7 +243,6 @@ const App: React.FC = () => {
         setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
         setCurrentUser(updated);
         
-        // Fix TS18047: Local variable narrowing
         const client = supabase;
         if (isSupabaseConfigured && client) {
             await client.from('profiles').update({
