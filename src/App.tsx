@@ -74,11 +74,12 @@ const App: React.FC = () => {
     }, []);
 
     const fetchSqlData = useCallback(async () => {
-        if (!isSupabaseConfigured || !supabase) return false;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return false;
         
         try {
-            // Fetch Schools - Added ! assertion to satisfy strict compiler
-            const { data: schoolsData, error: schoolsError } = await supabase!.from('schools').select('*');
+            // Fetch Schools
+            const { data: schoolsData, error: schoolsError } = await client.from('schools').select('*');
             if (schoolsError) throw schoolsError;
             
             // Map SQL names to CamelCase for frontend
@@ -89,8 +90,8 @@ const App: React.FC = () => {
             }));
             setAllSchools(mappedSchools);
 
-            // Fetch Teachers (Profiles) - Added ! assertion
-            const { data: teachersData, error: teachersError } = await supabase!.from('profiles').select('*');
+            // Fetch Teachers (Profiles)
+            const { data: teachersData, error: teachersError } = await client.from('profiles').select('*');
             if (teachersError) throw teachersError;
 
             const mappedTeachers: Teacher[] = (teachersData || []).map(t => ({
@@ -127,10 +128,10 @@ const App: React.FC = () => {
             // 2. Fallback to Firebase
             if (isFirebaseConfigured && db) {
                 try {
-                    const unsubSchools = onSnapshot(collection(db, 'schools'), (snap) => {
+                    onSnapshot(collection(db, 'schools'), (snap) => {
                         setAllSchools(snap.docs.map(d => d.data() as School));
                     });
-                    const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => {
+                    onSnapshot(collection(db, 'teachers'), (snap) => {
                         setAllTeachers(snap.docs.map(d => d.data() as Teacher));
                         setIsDataLoaded(true);
                         setSyncSource('FIREBASE');
@@ -182,10 +183,10 @@ const App: React.FC = () => {
 
     // Real-time SQL Notifications
     useEffect(() => {
-        if (!currentUser || !isSupabaseConfigured || !supabase) return;
+        const client = supabase;
+        if (!currentUser || !isSupabaseConfigured || !client) return;
         
-        // Fix TS18047: Force non-null assertion with !
-        const channel = supabase!.channel('app_global_notifications')
+        const channel = client.channel('app_global_notifications')
             .on('postgres_changes', { 
                 event: 'INSERT', schema: 'public', table: 'documents', 
                 filter: `school_id=eq.${currentUser.schoolId}` 
@@ -205,7 +206,7 @@ const App: React.FC = () => {
             .subscribe();
 
         return () => { 
-            if (supabase) supabase!.removeChannel(channel); 
+            if (client) client.removeChannel(channel); 
         };
     }, [currentUser]);
 
@@ -237,9 +238,9 @@ const App: React.FC = () => {
         setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
         setCurrentUser(updated);
         
-        // Added ! assertion for Supabase calls
-        if (isSupabaseConfigured && supabase) {
-            await supabase!.from('profiles').update({
+        const client = supabase;
+        if (isSupabaseConfigured && client) {
+            await client.from('profiles').update({
                 name: updated.name, position: updated.position,
                 password: updated.password, signature_base_64: updated.signatureBase64,
                 telegram_chat_id: updated.telegramChatId

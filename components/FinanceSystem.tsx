@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Transaction, FinanceAccount, Teacher, SystemConfig } from '../types';
 import { TrendingUp, TrendingDown, DollarSign, Plus, Wallet, FileText, ArrowRight, PlusCircle, LayoutGrid, List, ArrowLeft, Loader, Database, ServerOff, Edit2, Trash2, X, Save, ShieldAlert, Eye, Printer, Upload, Calendar, Search, ChevronLeft, ChevronRight, HardDrive, Cloud, RefreshCw, AlertTriangle, HelpCircle, FileSpreadsheet, ChevronsLeft, ChevronsRight, ShoppingBag, Store } from 'lucide-react';
@@ -99,16 +98,17 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
     // --- DATA LOADING ---
     const fetchData = async () => {
+        const client = supabase;
         setIsLoadingData(true);
-        if (isSupabaseConfigured && supabase) {
+        if (isSupabaseConfigured && client) {
             try {
-                const { data: accData } = await supabase.from('finance_accounts').select('*').eq('school_id', currentUser.schoolId);
+                const { data: accData } = await client.from('finance_accounts').select('*').eq('school_id', currentUser.schoolId);
                 if (accData) setAccounts(accData.map(mapAccountFromDb));
 
-                const { data: transData } = await supabase.from('finance_transactions').select('*').eq('school_id', currentUser.schoolId);
+                const { data: transData } = await client.from('finance_transactions').select('*').eq('school_id', currentUser.schoolId);
                 if (transData) setTransactions(transData.map(mapTransactionFromDb));
 
-                const { data: configData } = await supabase.from('school_configs').select('*').eq('school_id', currentUser.schoolId).single();
+                const { data: configData } = await client.from('school_configs').select('*').eq('school_id', currentUser.schoolId).single();
                 if (configData) setSysConfig({ driveFolderId: configData.drive_folder_id, scriptUrl: configData.script_url, telegramBotToken: configData.telegram_bot_token, appBaseUrl: configData.app_base_url, schoolName: configData.school_name });
             } catch (err) {
                 console.error("Fetch Error", err);
@@ -132,7 +132,8 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
 
     // --- DB OPERATIONS ---
     const handleSaveTransaction = async (t: Partial<Transaction>, isUpdate = false) => {
-        if (!isSupabaseConfigured || !supabase) return false;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return false;
         const payload: any = {
             school_id: currentUser.schoolId,
             account_id: t.accountId!.toString(),
@@ -143,10 +144,10 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
         };
         try {
             if (isUpdate && t.id) {
-                const { error } = await supabase.from('finance_transactions').update(payload).eq('id', parseInt(t.id));
+                const { error } = await client.from('finance_transactions').update(payload).eq('id', parseInt(t.id));
                 if (error) throw error;
             } else {
-                const { error } = await supabase.from('finance_transactions').insert([payload]);
+                const { error } = await client.from('finance_transactions').insert([payload]);
                 if (error) throw error;
             }
             return true;
@@ -157,29 +158,32 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     };
 
     const handleSaveAccount = async (acc: Partial<FinanceAccount>) => {
-        if (!isSupabaseConfigured || !supabase) return false;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return false;
         const payload = { 
             id: `acc_${Date.now()}`,
             school_id: currentUser.schoolId, 
             name: acc.name, 
             type: acc.type 
         };
-        const { error } = await supabase.from('finance_accounts').insert([payload]);
+        const { error } = await client.from('finance_accounts').insert([payload]);
         if (error) { console.error(error); return false; }
         return true;
     };
 
     const handleUpdateAccountName = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!editingAccount || !newAccountName || !supabase) return;
-        const { error } = await supabase.from('finance_accounts').update({ name: newAccountName }).eq('id', editingAccount.id);
+        const client = supabase;
+        if (!editingAccount || !newAccountName || !client) return;
+        const { error } = await client.from('finance_accounts').update({ name: newAccountName }).eq('id', editingAccount.id);
         if (!error) { await fetchData(); setShowEditAccountModal(false); }
         else alert("แก้ไขล้มเหลว: " + error.message);
     };
 
     const handleDeleteAccount = async (accId: string) => {
-        if (!confirm("ยืนยันการลบบัญชีและประวัติทั้งหมด?") || !supabase) return;
-        const { error } = await supabase.from('finance_accounts').delete().eq('id', accId);
+        const client = supabase;
+        if (!confirm("ยืนยันการลบบัญชีและประวัติทั้งหมด?") || !client) return;
+        const { error } = await client.from('finance_accounts').delete().eq('id', accId);
         if (!error) await fetchData();
     };
 
@@ -262,8 +266,9 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     };
 
     const handleDeleteTransaction = async () => {
-        if (!editingTransaction || !supabase) return;
-        const { error } = await supabase.from('finance_transactions').delete().eq('id', parseInt(editingTransaction.id));
+        const client = supabase;
+        if (!editingTransaction || !client) return;
+        const { error } = await client.from('finance_transactions').delete().eq('id', parseInt(editingTransaction.id));
         if (!error) { await fetchData(); setShowEditModal(false); }
     };
 
@@ -670,7 +675,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                              <div className="flex bg-slate-100 p-1 rounded-2xl border shadow-inner">
                                 <button type="button" onClick={() => setEditingTransaction({...editingTransaction, type: 'Income'})} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${editingTransaction.type === 'Income' ? 'bg-white text-green-600 shadow border' : 'text-slate-400'}`}>รายรับ</button>
                                 <button type="button" onClick={() => setEditingTransaction({...editingTransaction, type: 'Expense'})} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${editingTransaction.type === 'Expense' ? 'bg-white text-red-600 shadow border' : 'text-slate-400'}`}>รายจ่าย</button>
-                            </div>
+                             </div>
                             <input type="date" value={editingTransaction.date} onChange={e => setEditingTransaction({...editingTransaction, date: e.target.value})} className="w-full border-2 border-slate-100 p-4 rounded-xl font-bold bg-slate-50"/>
                             <input type="text" value={editingTransaction.description} onChange={e => setEditingTransaction({...editingTransaction, description: e.target.value})} className="w-full border-2 border-slate-100 p-4 rounded-xl font-bold bg-slate-50"/>
                             <input type="number" step="0.01" value={editingTransaction.amount} onChange={e => setEditingTransaction({...editingTransaction, amount: parseFloat(e.target.value)})} className={`w-full border-2 border-slate-100 p-4 rounded-xl font-black text-2xl bg-slate-50 ${activeTab === 'Coop' ? 'text-purple-600' : 'text-blue-600'}`}/>
@@ -687,7 +692,7 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
                         <h3 className="text-2xl font-black mb-8 text-slate-800">แก้ไขชื่อบัญชี</h3>
                         <form onSubmit={handleUpdateAccountName} className="space-y-6">
                             <input autoFocus required value={newAccountName} onChange={e => setNewAccountName(e.target.value)} className="w-full border-2 border-slate-100 p-5 rounded-2xl font-black text-lg outline-none focus:border-blue-500 shadow-inner bg-slate-50"/>
-                            <div className="flex gap-4 pt-2"><button type="button" onClick={() => setShowEditAccountModal(false)} className="flex-1 py-4 bg-slate-100 rounded-2xl font-black text-slate-500 uppercase tracking-widest text-xs">ยกเลิก</button><button type="submit" className={`flex-2 py-4 text-white rounded-2xl font-black shadow-xl text-lg active:scale-95 transition-all ${activeTab === 'Coop' ? 'bg-purple-600' : 'bg-blue-600'}`}>บันทึก</button></div>
+                            <div className="flex gap-4 pt-2"><button type="button" onClick={() => setShowEditAccountModal(false)} className="flex-1 py-4 bg-slate-100 rounded-2xl font-black text-slate-500 uppercase tracking-widest text-xs transition-colors">ยกเลิก</button><button type="submit" className={`flex-2 py-4 text-white rounded-2xl font-black shadow-xl text-lg active:scale-95 transition-all ${activeTab === 'Coop' ? 'bg-purple-600' : 'bg-blue-600'}`}>บันทึก</button></div>
                         </form>
                     </div>
                 </div>

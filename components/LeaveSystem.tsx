@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { LeaveRequest, Teacher, School, SystemConfig } from '../types';
 import { 
@@ -73,12 +72,13 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
 
     // --- Data Fetching ---
     const fetchRequests = async () => {
-        if (!isSupabaseConfigured || !supabase) return;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return;
         
-        let query = supabase!.from('leave_requests').select('*').eq('school_id', currentUser.schoolId);
-        if (!canViewAll) { query = query.eq('teacher_id', currentUser.id); }
+        let queryBuilder = client.from('leave_requests').select('*').eq('school_id', currentUser.schoolId);
+        if (!canViewAll) { queryBuilder = queryBuilder.eq('teacher_id', currentUser.id); }
 
-        const { data, error } = await query.order('created_at', { ascending: false });
+        const { data, error } = await queryBuilder.order('created_at', { ascending: false });
 
         if (!error && data) {
             const mapped = data.map(r => ({
@@ -107,10 +107,11 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     };
 
     useEffect(() => {
+        const client = supabase;
         const loadInitial = async () => {
             await fetchRequests();
-            if (isSupabaseConfigured && supabase) {
-                const { data } = await supabase!.from('school_configs').select('*').eq('school_id', currentUser.schoolId).single();
+            if (isSupabaseConfigured && client) {
+                const { data } = await client.from('school_configs').select('*').eq('school_id', currentUser.schoolId).single();
                 if (data) {
                     setSysConfig({
                         driveFolderId: data.drive_folder_id,
@@ -127,11 +128,11 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         };
         loadInitial();
 
-        const channel = supabase?.channel('leave_list_changes').on('postgres_changes', {
+        const channel = client?.channel('leave_list_changes').on('postgres_changes', {
             event: '*', schema: 'public', table: 'leave_requests', filter: `school_id=eq.${currentUser.schoolId}`
         }, () => fetchRequests()).subscribe();
 
-        return () => { if (channel) supabase?.removeChannel(channel); };
+        return () => { if (channel && client) client.removeChannel(channel); };
     }, [currentUser.schoolId]);
 
     useEffect(() => {
@@ -184,7 +185,8 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     }, [viewMode, selectedRequest, requests, sysConfig]);
 
     const submitRequest = async () => {
-        if (!isSupabaseConfigured || !supabase) return;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return;
         setIsSubmitting(true);
 
         const payload = {
@@ -204,7 +206,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             status: 'Pending'
         };
 
-        const { data, error } = await supabase!.from('leave_requests').insert([payload]).select();
+        const { data, error } = await client.from('leave_requests').insert([payload]).select();
 
         if (!error && data) {
             const newReqId = data[0].id;
@@ -224,10 +226,11 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     };
 
     const handleDirectorAction = async (isApproved: boolean) => {
-        if (!selectedRequest || !supabase) return;
+        const client = supabase;
+        if (!selectedRequest || !client) return;
         setIsProcessingApproval(true);
         const now = new Date().toISOString().split('T')[0];
-        const { error } = await supabase!.from('leave_requests').update({ 
+        const { error } = await client.from('leave_requests').update({ 
             status: isApproved ? 'Approved' : 'Rejected', 
             director_signature: currentUser.name,
             approved_date: now
@@ -247,8 +250,9 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     };
 
     const handleDelete = async (docId: string) => {
-        if (!confirm("ยืนยันการลบข้อมูลใบลาชิ้นนี้?")) return;
-        const { error } = await supabase!.from('leave_requests').delete().eq('id', parseInt(docId));
+        const client = supabase;
+        if (!confirm("ยืนยันการลบข้อมูลใบลาชิ้นนี้?") || !client) return;
+        const { error } = await client.from('leave_requests').delete().eq('id', parseInt(docId));
         if (!error) {
             alert("ลบข้อมูลสำเร็จ");
             fetchRequests();

@@ -1,4 +1,3 @@
-
 // Fix: Added missing imports for History, Clock, Bookmark, and ChevronDown from lucide-react
 import { AlertTriangle, ArrowLeft, Bell, CheckCircle, CheckSquare, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ExternalLink, FastForward, FileBadge, FileCheck, FileIcon, FilePlus, FileText, Info, Link as LinkIcon, Loader, Megaphone, PenTool, Plus, Save, Search, Send, Trash2, UploadCloud, UserCheck, UserMinus, UserPlus, Users, X, Zap, DownloadCloud, History, Clock, Bookmark, ChevronDown } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
@@ -23,7 +22,6 @@ interface DocumentsSystemProps {
     onClearFocus?: () => void;
 }
 
-// Fix: Ensure the component function properly returns a React element by fixing syntax errors in the JSX blocks
 const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentSchool, allTeachers, focusDocId, onClearFocus }) => {
     // State
     const [docs, setDocs] = useState<DocumentItem[]>([]);
@@ -82,14 +80,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         t.position.includes('รองผู้อำนวยการ') || t.roles.includes('VICE_DIRECTOR')
     );
 
-    // Fix: Using function declaration for hoisting to resolve 'Cannot find name' in early use
     async function handleTeacherAcknowledge(docId: string, currentAckList: string[]) {
-        if (!isSupabaseConfigured || !supabase) return;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return;
         
         if (!currentAckList.includes(currentUser.id)) {
             const newAck = [...currentAckList, currentUser.id];
             try {
-                const { error } = await supabase!.from('documents').update({ acknowledged_by: newAck }).eq('id', docId);
+                const { error } = await client.from('documents').update({ acknowledged_by: newAck }).eq('id', docId);
                 if (error) throw error;
                 
                 // Local state update
@@ -144,7 +142,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         };
     };
 
-    // Fix: Map DB snake_case 'signed_file_url' to TS camelCase 'signedFileUrl' to resolve type error
     const mapDocFromDb = (d: any): DocumentItem => ({
         id: d.id.toString(),
         schoolId: d.school_id,
@@ -168,7 +165,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         acknowledgedBy: d.acknowledged_by || []
     });
 
-    // Fix: Map TS camelCase 'signedFileUrl' to DB snake_case 'signed_file_url' for DB updates
     const mapDocToDb = (d: any) => ({
         school_id: d.schoolId,
         category: d.category,
@@ -192,8 +188,9 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     });
 
     const fetchDocs = async () => {
-        if (!isSupabaseConfigured || !supabase) return;
-        const { data, error } = await supabase!
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return;
+        const { data, error } = await client
             .from('documents')
             .select('*')
             .eq('school_id', currentUser.schoolId);
@@ -243,11 +240,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     }, [activeTasks]);
 
     useEffect(() => {
+        const client = supabase;
         const loadInitial = async () => {
             setIsLoading(true);
             await fetchDocs();
-            if (isSupabaseConfigured && supabase) {
-                const { data: configData } = await supabase!
+            if (isSupabaseConfigured && client) {
+                const { data: configData } = await client
                     .from('school_configs')
                     .select('*')
                     .eq('school_id', currentUser.schoolId)
@@ -269,8 +267,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         };
         loadInitial();
         let channel: any;
-        if (isSupabaseConfigured && supabase) {
-            channel = supabase!
+        if (isSupabaseConfigured && client) {
+            channel = client
                 .channel('documents_realtime')
                 .on('postgres_changes', { 
                     event: '*', 
@@ -280,13 +278,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                 }, () => { fetchDocs(); })
                 .subscribe();
         }
-        return () => { if (channel) supabase!.removeChannel(channel); };
+        return () => { if (channel && client) client.removeChannel(channel); };
     }, [currentUser.schoolId, currentSchool.name]);
 
     // --- Helper for Google Drive Links ---
     const getGoogleDriveId = (url: string) => {
         if (!url) return null;
-        // Fix: Use single backslash for word character in regex literal
         const patterns = [/drive\.google\.com\/file\/d\/([-_w]+)/, /drive\.google\.com\/open\?id=([-_w]+)/, /id=([-_w]+)/];
         for (const pattern of patterns) {
             const match = url.match(pattern);
@@ -309,7 +306,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                 setSelectedDoc(found);
                 setViewMode('DETAIL');
                 
-                // Requirement: Auto-acknowledge
                 const isDistributed = found.status === 'Distributed' || found.status === 'PendingViceDirector';
                 const isTarget = (found.targetTeachers || []).includes(currentUser.id) || 
                                  (found.assignedViceDirectorId === currentUser.id);
@@ -319,15 +315,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                     handleTeacherAcknowledge(found.id, found.acknowledgedBy || []);
                 }
 
-                // หากมี Parameter 'file' ใน URL ให้ Redirect ไปที่ไฟล์ทันที
                 const params = new URLSearchParams(window.location.search);
                 const directFileUrl = params.get('file');
                 if (directFileUrl) {
-                    // แปลงลิงก์ให้เป็นรูปแบบ Preview เพื่อป้องกันการดาวน์โหลดอัตโนมัติบน Chrome
                     const viewUrl = getPreviewUrl(directFileUrl);
-                    
-                    // เพื่อความรวดเร็วและป้องกัน Popup Blocker บน Telegram Browser
-                    // เราจะทำการเปลี่ยน URL ของหน้าปัจจุบันไปที่ไฟล์เลยหลังจากบันทึก Acknowledge สำเร็จ
                     setTimeout(() => {
                         window.location.replace(viewUrl);
                     }, 300);
@@ -345,13 +336,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         return content.replace(/[\s\n\r]/g, ''); 
     };
 
-    // ปรับปรุง: ให้ส่งลิงก์แจ้งเตือนแบบ Tracking ผ่าน GAS เพื่อบันทึกการรับทราบทันทีที่คลิก
     async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, isOrder: boolean, bookNumber: string, fromStr: string, attachments: Attachment[] = []) {
         if (!sysConfig?.telegramBotToken || !sysConfig?.scriptUrl) return;
         const baseUrl = sysConfig.appBaseUrl || window.location.origin;
         const scriptUrl = sysConfig.scriptUrl;
 
-        // วนลูปส่งให้ครูแต่ละคนแบบส่วนตัว เพราะลิงก์ต้องมี userId เฉพาะตัว
         teachers.forEach(t => {
             if (!t.telegramChatId) return;
 
@@ -366,7 +355,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                 message += `<b>📎 คลิกเพื่อดูเอกสารและยืนยันรับทราบ:</b>\n`;
                 attachments.forEach((att, idx) => {
                     const directFileUrl = getPreviewUrl(att.url);
-                    // สร้าง Tracking Link: เมื่อกดระบบจะไปที่ GAS เพื่ออัปเดต DB แล้วค่อยไปที่ไฟล์
                     const trackingLink = `${scriptUrl}?action=ack&docId=${docId}&userId=${t.id}&target=${encodeURIComponent(directFileUrl)}`;
                     message += `${idx + 1}. <a href=\"${trackingLink}\">${att.name}</a>\n`;
                 });
@@ -553,7 +541,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
     const processActionInBackground = async (targetDoc: DocumentItem, finalCommand: string, targetTeachers: string[], targetPage: number, nextStatus: any, viceId?: string) => {
         const taskId = targetDoc.id;
-        if (!isSupabaseConfigured || !supabase) return;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return;
         
         try {
             const isActorVice = targetDoc.status === 'PendingViceDirector' || (targetDoc.assignedViceDirectorId === currentUser.id);
@@ -690,7 +679,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                 else updateData.target_teachers = targetTeachers; 
             }
 
-            const { error: dbError } = await supabase!.from('documents').update(updateData).eq('id', taskId);
+            const { error: dbError } = await client.from('documents').update(updateData).eq('id', taskId);
             if (dbError) throw dbError;
 
             const notifyIds = nextStatus === 'PendingViceDirector' ? [viceId!] : targetTeachers;
@@ -712,7 +701,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
     };
 
     const handleQuickDelegateToVice = async () => {
-        if (!selectedDoc || !assignedViceDirId || !supabase) {
+        const client = supabase;
+        if (!selectedDoc || !assignedViceDirId || !client) {
             alert("กรุณาเลือกผู้รับมอบหมาย");
             return;
         }
@@ -725,7 +715,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
         try {
             const nowStr = new Date().toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
-            const { error } = await supabase!.from('documents').update({
+            const { error } = await client.from('documents').update({
                 status: 'PendingViceDirector',
                 assigned_vice_director_id: assignedViceDirId,
                 director_command: finalCommand,
@@ -771,7 +761,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         if (isDirector || isDocOfficer || isSystemAdmin) {
             isVisible = true;
         } else if (isViceDirector || (doc.assignedViceDirectorId === currentUser.id)) {
-            // Fix: Use camelCase assignedViceDirectorId from DocumentItem type instead of snake_case db field name
             isVisible = (doc.status === 'PendingViceDirector' && doc.assignedViceDirectorId === currentUser.id) ||
                         (doc.status === 'Distributed' && (doc.targetTeachers || []).includes(currentUser.id));
         } else {
@@ -1016,7 +1005,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                         
                                         <div className="flex items-center gap-2">
                                             {isDirector && (
-                                                <button type="button" onClick={async (e) => { e.stopPropagation(); if (!confirm("ยืนยันการลบหนังสือฉบับนี้?")) return; if (!supabase) return; const { error } = await supabase!.from('documents').delete().eq('id', docItem.id); if (error) alert("ลบไม่สำเร็จ: " + error.message); else { setDocs(docs.filter(d => d.id !== docItem.id)); } }} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={16}/></button>
+                                                <button type="button" onClick={async (e) => { e.stopPropagation(); if (!confirm("ยืนยันการลบหนังสือฉบับนี้?")) return; const client = supabase; if (!client) return; const { error } = await client.from('documents').delete().eq('id', docItem.id); if (error) alert("ลบไม่สำเร็จ: " + error.message); else { setDocs(docs.filter(d => d.id !== docItem.id)); } }} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={16}/></button>
                                             )}
                                             <div className="p-2 bg-slate-50 rounded-lg text-slate-400 group-hover:text-blue-500 group-hover:bg-blue-50 transition-all">
                                                 <ChevronRight size={18}/>
@@ -1063,7 +1052,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                     </div>
                     <form onSubmit={async (e) => {
                         e.preventDefault();
-                        if (!newDoc.bookNumber || !supabase) return;
+                        const client = supabase;
+                        if (!newDoc.bookNumber || !client) return;
                         const isOrder = docCategory === 'ORDER';
                         const now = new Date();
                         const created: any = {
@@ -1072,7 +1062,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                             priority: newDoc.priority, attachments: tempAttachments, status: isOrder ? 'Distributed' : 'PendingDirector', targetTeachers: isOrder ? selectedTeachers : [], acknowledgedBy: [],
                             directorCommand: isOrder ? 'สั่งการตามเอกสารแนบ' : '', directorSignatureDate: isOrder ? now.toLocaleString('th-TH') : ''
                         };
-                        const { data, error } = await supabase!.from('documents').insert([mapDocToDb(created)]).select();
+                        const { data, error } = await client.from('documents').insert([mapDocToDb(created)]).select();
                         if (!error && data) {
                             const savedDocId = data[0].id.toString();
                             
@@ -1200,7 +1190,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             {viewMode === 'DETAIL' && selectedDoc && (
                 <div className="max-w-6xl mx-auto space-y-8 animate-fade-in pb-20">
                     <div className="flex justify-between items-center px-2">
-                        {/* Fix: Fixed incorrectly escaped double quotes which broke TSX parsing */}
                         <button type="button" onClick={() => setViewMode('LIST')} className="flex items-center gap-2 text-slate-400 hover:text-slate-800 font-black uppercase text-xs transition-colors group">
                             <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform"/> ย้อนกลับรายการ
                         </button>
