@@ -18,7 +18,7 @@ import {
     RefreshCw, Cloud, Database, Monitor, Smartphone,
     ChevronRight, Info, AlertTriangle, CheckCircle2,
     Calendar as CalendarIcon, UserCircle, Globe,
-    FileText 
+    FileText
 } from 'lucide-react';
 import { MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
 import { db, isConfigured as isFirebaseConfigured } from './firebaseConfig';
@@ -77,7 +77,7 @@ const App: React.FC = () => {
         if (!isSupabaseConfigured || !supabase) return false;
         try {
             // Fetch Schools
-            const { data: schoolsData, error: schoolsError } = await supabase!.from('schools').select('*');
+            const { data: schoolsData, error: schoolsError } = await supabase.from('schools').select('*');
             if (schoolsError) throw schoolsError;
             
             // Map SQL names to CamelCase for frontend
@@ -89,7 +89,7 @@ const App: React.FC = () => {
             setAllSchools(mappedSchools);
 
             // Fetch Teachers (Profiles)
-            const { data: teachersData, error: teachersError } = await supabase!.from('profiles').select('*');
+            const { data: teachersData, error: teachersError } = await supabase.from('profiles').select('*');
             if (teachersError) throw teachersError;
 
             const mappedTeachers: Teacher[] = (teachersData || []).map(t => ({
@@ -114,7 +114,7 @@ const App: React.FC = () => {
         const sync = async () => {
             setIsLoading(true);
             
-            // 1. Try SQL (Supabase) first - The new primary source
+            // 1. Try SQL (Supabase) first
             if (isSupabaseConfigured) {
                 const ok = await fetchSqlData();
                 if (ok) {
@@ -123,10 +123,9 @@ const App: React.FC = () => {
                 }
             }
 
-            // 2. Fallback to Firebase if SQL failed or not configured
+            // 2. Fallback to Firebase
             if (isFirebaseConfigured && db) {
                 try {
-                    // Firebase realtime listener
                     const unsubSchools = onSnapshot(collection(db, 'schools'), (snap) => {
                         setAllSchools(snap.docs.map(d => d.data() as School));
                     });
@@ -151,7 +150,6 @@ const App: React.FC = () => {
     useEffect(() => {
         if (!isDataLoaded) return;
         
-        // Restore Session
         const stored = localStorage.getItem(SESSION_KEY);
         if (stored) {
             try {
@@ -169,7 +167,6 @@ const App: React.FC = () => {
             } catch (e) { localStorage.removeItem(SESSION_KEY); }
         }
 
-        // Parse Deep Links (?view=DOCUMENTS&id=123)
         const params = new URLSearchParams(window.location.search);
         const v = params.get('view');
         const id = params.get('id');
@@ -182,16 +179,15 @@ const App: React.FC = () => {
         }
     }, [isDataLoaded, allTeachers]);
 
-    // Real-time SQL Notifications (If enabled)
+    // Real-time SQL Notifications
     useEffect(() => {
         if (!currentUser || !isSupabaseConfigured || !supabase) return;
         
-        const channel = supabase!.channel('app_global_notifications')
+        const channel = supabase.channel('app_global_notifications')
             .on('postgres_changes', { 
                 event: 'INSERT', schema: 'public', table: 'documents', 
                 filter: `school_id=eq.${currentUser.schoolId}` 
             }, (payload) => {
-                // Document assigned to current user?
                 if (payload.new.target_teachers?.includes(currentUser.id)) {
                     addNotification(`ได้รับหนังสือใหม่: ${payload.new.title}`, 'info', SystemView.DOCUMENTS, payload.new.id.toString());
                 }
@@ -206,7 +202,9 @@ const App: React.FC = () => {
             })
             .subscribe();
 
-        return () => { supabase!.removeChannel(channel); };
+        return () => { 
+            if (supabase) supabase.removeChannel(channel); 
+        };
     }, [currentUser]);
 
     // --- Core Action Handlers ---
@@ -222,7 +220,6 @@ const App: React.FC = () => {
         setCurrentUser(null);
         setIsSuperAdminMode(false);
         localStorage.removeItem(SESSION_KEY);
-        // Reset URL params
         window.history.replaceState({}, document.title, window.location.pathname);
     };
 
@@ -231,15 +228,14 @@ const App: React.FC = () => {
             id: Math.random().toString(36).substring(7),
             message, type, timestamp: Date.now(), read: false, view, targetId
         };
-        setNotifications(prev => [newNotif, ...prev].slice(0, 10)); // Keep last 10
+        setNotifications(prev => [newNotif, ...prev].slice(0, 10));
     };
 
     const handleUpdateUser = async (updated: Teacher) => {
         setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
         setCurrentUser(updated);
-        // Sync to SQL if possible
         if (isSupabaseConfigured && supabase) {
-            await supabase!.from('profiles').update({
+            await supabase.from('profiles').update({
                 name: updated.name, position: updated.position,
                 password: updated.password, signature_base_64: updated.signatureBase64,
                 telegram_chat_id: updated.telegramChatId
@@ -315,7 +311,6 @@ const App: React.FC = () => {
             case SystemView.DASHBOARD: 
                 return (
                     <div className="space-y-8 animate-fade-in pb-20">
-                         {/* Welcome Banner */}
                          <div className="bg-white p-10 rounded-[3rem] shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-8 relative overflow-hidden">
                              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-bl-full -z-10 opacity-50"></div>
                              <div className="flex items-center gap-6">
@@ -324,7 +319,7 @@ const App: React.FC = () => {
                                 </div>
                                 <div>
                                     <h2 className="text-4xl font-black text-slate-800 tracking-tight">ยินดีต้อนรับสู่ระบบบริหารจัดการ</h2>
-                                    <p className="text-slate-400 font-bold text-lg mt-1">Smart SchoolOS v5.0 | {currentSchool.name}</p>
+                                    <p className="text-slate-400 font-bold text-lg mt-1">Smart SchoolOS v5.1 | {currentSchool.name}</p>
                                 </div>
                              </div>
                              <div className="flex gap-3">
@@ -333,7 +328,6 @@ const App: React.FC = () => {
                              </div>
                          </div>
 
-                         {/* Status Grid */}
                          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                              <div className="bg-white p-8 rounded-[2.5rem] border border-slate-50 shadow-sm flex flex-col gap-4">
                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">บุคลากรทั้งหมด</p>
@@ -360,7 +354,6 @@ const App: React.FC = () => {
                              </div>
                          </div>
                          
-                         {/* Empty Space Placeholder */}
                          <div className="py-20 text-center bg-white rounded-[3.5rem] border-2 border-dashed border-slate-100">
                              <LayoutGrid className="mx-auto text-slate-100 mb-4" size={64}/>
                              <p className="text-slate-400 font-black uppercase tracking-[0.3em]">กรุณาเลือกเมนูเพื่อแสดงข้อมูลเชิงลึก</p>
@@ -411,7 +404,6 @@ const App: React.FC = () => {
 
     return (
         <div className="flex h-screen bg-[#f8fafc] overflow-hidden font-sarabun text-slate-900">
-            {/* Sidebar Component */}
             <Sidebar
                 currentView={currentView}
                 onChangeView={setCurrentView}
@@ -431,8 +423,6 @@ const App: React.FC = () => {
             />
 
             <div className="flex-1 flex flex-col overflow-hidden relative">
-                
-                {/* Global Application Header */}
                 <header className="h-20 bg-white/80 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-8 lg:px-14 shrink-0 z-40 sticky top-0">
                     <div className="flex items-center gap-6">
                         <button onClick={() => setIsMobileOpen(true)} className="lg:hidden p-3 bg-slate-50 text-slate-600 rounded-2xl hover:bg-slate-100 transition-colors">
@@ -449,7 +439,6 @@ const App: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-4">
-                        {/* Notification Bell */}
                         <div className="relative">
                             <button 
                                 onClick={() => setShowNotificationCenter(!showNotificationCenter)}
@@ -463,7 +452,6 @@ const App: React.FC = () => {
                                 )}
                             </button>
                             
-                            {/* Notification Dropdown */}
                             {showNotificationCenter && (
                                 <div className="absolute top-full right-0 mt-4 w-80 bg-white rounded-[2rem] shadow-2xl border border-slate-100 p-4 animate-scale-up z-50">
                                     <div className="flex justify-between items-center px-4 mb-4 border-b pb-3 border-slate-50">
@@ -495,7 +483,6 @@ const App: React.FC = () => {
                             )}
                         </div>
 
-                        {/* Power/Logout */}
                         <button 
                             onClick={handleLogout} 
                             className="p-3 bg-rose-50 text-rose-500 rounded-2xl hover:bg-rose-500 hover:text-white transition-all active:scale-90"
@@ -505,14 +492,12 @@ const App: React.FC = () => {
                     </div>
                 </header>
 
-                {/* Main Dynamic Viewport */}
                 <main className="flex-1 overflow-y-auto p-6 md:p-10 lg:p-14 custom-scrollbar">
                     <div className="max-w-[1600px] mx-auto">
                         {renderView()}
                     </div>
                 </main>
 
-                {/* Mobile Bottom Navigation (Optional Enhancement) */}
                 <div className="lg:hidden h-16 bg-white border-t flex items-center justify-around px-4 shrink-0 z-40">
                     <button onClick={() => setCurrentView(SystemView.DASHBOARD)} className={`p-2 rounded-xl ${currentView === SystemView.DASHBOARD ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><LayoutGrid size={24}/></button>
                     <button onClick={() => setCurrentView(SystemView.DOCUMENTS)} className={`p-2 rounded-xl ${currentView === SystemView.DOCUMENTS ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><FileText size={24}/></button>
@@ -520,7 +505,6 @@ const App: React.FC = () => {
                     <button onClick={() => setCurrentView(SystemView.PROFILE)} className={`p-2 rounded-xl ${currentView === SystemView.PROFILE ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><UserCircle size={24}/></button>
                 </div>
 
-                {/* Sync Status Floating Badge */}
                 <div className="fixed bottom-6 left-6 z-50 pointer-events-none hidden md:block">
                     <div className="bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl border border-white/10">
                         <div className={`w-2 h-2 rounded-full ${syncSource === 'SQL' ? 'bg-emerald-50 animate-pulse' : 'bg-blue-500'}`}></div>
@@ -529,7 +513,6 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            {/* Application-wide Transitions & Scrollbars */}
             <style>{`
                 .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
                 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
