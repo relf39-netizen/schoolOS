@@ -55,9 +55,16 @@ const App: React.FC = () => {
             const { data: schoolsData } = await client.from('schools').select('*');
             if (schoolsData) {
                 setAllSchools(schoolsData.map(s => ({
-                    id: s.id, name: s.name, district: s.district, province: s.province,
-                    lat: s.lat, lng: s.lng, radius: s.radius, lateTimeThreshold: s.late_time_threshold,
-                    logoBase64: s.logo_base_64, isSuspended: s.is_suspended
+                    id: s.id, 
+                    name: s.name, 
+                    district: s.district, 
+                    province: s.province,
+                    lat: s.lat, 
+                    lng: s.lng, 
+                    radius: s.radius, 
+                    lateTimeThreshold: s.late_time_threshold, // FIX: CamelCase
+                    logoBase64: s.logo_base_64, 
+                    isSuspended: s.is_suspended
                 })));
             }
 
@@ -211,7 +218,7 @@ const App: React.FC = () => {
     const DashboardCard = ({ view, title, slogan, icon: Icon, color, badge, hasBorder }: any) => (
         <button 
             onClick={() => setCurrentView(view)}
-            className={`group relative bg-white p-8 rounded-[2.5rem] shadow-sm hover:shadow-2xl transition-all duration-700 text-left overflow-hidden border border-slate-50 flex flex-col justify-between h-60 hover:-translate-y-2`}
+            className={`group relative bg-white p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-sm hover:shadow-2xl transition-all duration-700 text-left overflow-hidden border border-slate-50 flex flex-col justify-between h-56 md:h-60 hover:-translate-y-2`}
         >
             <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-[0.12] group-hover:opacity-[0.25] transition-opacity duration-700">
                 <svg width="100%" height="100%" viewBox="0 0 300 200" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -223,16 +230,16 @@ const App: React.FC = () => {
             <div className={`absolute -right-12 -top-12 w-48 h-48 rounded-full opacity-[0.05] group-hover:scale-125 transition-transform duration-1000`} style={{ backgroundColor: color }}></div>
             <div className={`absolute left-0 bottom-0 w-32 h-32 rounded-full opacity-[0.03] blur-3xl`} style={{ backgroundColor: color }}></div>
             <div className="relative z-10">
-                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 shadow-sm transition-transform duration-500 group-hover:rotate-6 group-hover:scale-110`} style={{ backgroundColor: `${color}15`, color: color }}>
-                    <Icon size={36} />
+                <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl flex items-center justify-center mb-4 md:mb-6 shadow-sm transition-transform duration-500 group-hover:rotate-6 group-hover:scale-110`} style={{ backgroundColor: `${color}15`, color: color }}>
+                    <Icon size={32} className="md:w-[36px] md:h-[36px]" />
                 </div>
                 {badge && (
-                    <div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full animate-pulse shadow-lg border-2 border-white z-20">
+                    <div className="absolute top-0 right-0 bg-red-600 text-white text-[9px] md:text-[10px] font-black px-2 md:px-3 py-1 md:py-1.5 rounded-full animate-pulse shadow-lg border-2 border-white z-20">
                         {badge}
                     </div>
                 )}
-                <h3 className="text-2xl font-black text-slate-800 mb-1 group-hover:text-blue-600 transition-colors">{title}</h3>
-                <p className="text-slate-400 text-sm font-bold leading-relaxed">{slogan}</p>
+                <h3 className="text-xl md:text-2xl font-black text-slate-800 mb-1 group-hover:text-blue-600 transition-colors">{title}</h3>
+                <p className="text-slate-400 text-xs md:text-sm font-bold leading-relaxed">{slogan}</p>
             </div>
             <div className="relative z-10 w-full">
                 <div className="w-full h-1 bg-slate-50 rounded-full overflow-hidden">
@@ -240,7 +247,7 @@ const App: React.FC = () => {
                 </div>
             </div>
             {hasBorder && (
-                <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-blue-500 rounded-b-[2.5rem]"></div>
+                <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-blue-500 rounded-b-[2rem] md:rounded-b-[2.5rem]"></div>
             )}
         </button>
     );
@@ -299,39 +306,46 @@ const App: React.FC = () => {
                 </svg>
             </div>
             <header className="bg-white/90 backdrop-blur-md sticky top-0 z-40 border-b border-slate-100 h-20 flex items-center shadow-sm print:hidden">
-                <div className="max-w-7xl mx-auto w-full px-8 flex justify-between items-center">
-                    <div className="flex items-center gap-6">
+                <div className="max-w-7xl mx-auto w-full px-4 md:px-8 flex justify-between items-center">
+                    <div className="flex items-center gap-2 md:gap-6">
                         {currentView !== SystemView.DASHBOARD ? (
-                            <button onClick={() => setCurrentView(SystemView.DASHBOARD)} className="p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl text-slate-400 transition-all">
-                                <ChevronLeft size={24}/>
+                            <button onClick={() => setCurrentView(SystemView.DASHBOARD)} className="p-2 md:p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl text-slate-400 transition-all">
+                                <ChevronLeft size={20} className="md:w-[24px] md:h-[24px]"/>
                             </button>
                         ) : (
-                            <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
-                                <LayoutGrid size={24}/>
+                            <div className="p-2 md:p-3 bg-blue-50 text-blue-600 rounded-2xl">
+                                <LayoutGrid size={20} className="md:w-[24px] md:h-[24px]"/>
                             </div>
                         )}
-                        <h1 className="text-2xl font-black text-slate-800 tracking-tight">
-                            {currentView === SystemView.DASHBOARD ? 'Dashboard' : 'หน้าหลักระบบ'}
-                        </h1>
+                        <div className="flex flex-col">
+                            <h1 className="text-lg md:text-2xl font-black text-slate-800 tracking-tight leading-none">
+                                {currentView === SystemView.DASHBOARD ? 'ระบบบริหารโรงเรียน' : 'ระบบจัดการโรงเรียน'}
+                            </h1>
+                            {currentView === SystemView.DASHBOARD && (
+                                <p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase tracking-[0.1em] mt-0.5">
+                                    School Management System
+                                </p>
+                            )}
+                        </div>
                     </div>
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-3 md:gap-6">
                         <div className="hidden md:flex flex-col items-end">
                             <span className="text-sm font-black text-slate-800 leading-none">{currentUser.name}</span>
                             <span className="text-[10px] text-slate-400 font-bold uppercase mt-1.5 tracking-widest">{currentUser.position}</span>
                         </div>
-                        <div onClick={() => setCurrentView(SystemView.PROFILE)} className="w-11 h-11 rounded-full bg-blue-600 flex items-center justify-center text-white font-black cursor-pointer hover:scale-110 transition-all shadow-lg shadow-blue-500/20">
+                        <div onClick={() => setCurrentView(SystemView.PROFILE)} className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-blue-600 flex items-center justify-center text-white font-black cursor-pointer hover:scale-110 transition-all shadow-lg shadow-blue-500/20">
                             {currentUser.name[0]}
                         </div>
                         <button onClick={handleLogout} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
-                            <LogOut size={24}/>
+                            <LogOut size={20} className="md:w-[24px] md:h-[24px]"/>
                         </button>
                     </div>
                 </div>
             </header>
-            <main className="flex-1 w-full p-8 relative z-10">
+            <main className="flex-1 w-full p-4 md:p-8 relative z-10">
                 <div className="max-w-7xl mx-auto">
                     {currentView === SystemView.DASHBOARD ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 animate-fade-in">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8 animate-fade-in">
                             <DashboardCard view={SystemView.PROFILE} title="ข้อมูลส่วนตัว" slogan="แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล" icon={UserCircle} color="#8b5cf6"/>
                             <DashboardCard view={SystemView.DIRECTOR_CALENDAR} title="ปฏิทินปฏิบัติงาน ผอ." slogan="แจ้งเตือนนัดหมาย และภารกิจ" icon={Calendar} color="#3b82f6"/>
                             <DashboardCard view={SystemView.ACADEMIC} title="งานวิชาการ" slogan="สถิตินักเรียน / ผลสอบ O-NET" icon={GraduationCap} color="#6366f1"/>
@@ -370,9 +384,9 @@ const App: React.FC = () => {
                         ) : (
                             <img src={APP_LOGO_URL} className="w-6 h-6 object-contain grayscale" alt="OS Logo"/>
                         )}
-                        <span className="font-black text-slate-600 text-sm uppercase tracking-tight">{currentSchool?.name || 'SchoolOS System'}</span>
+                        <span className="font-black text-slate-600 text-xs md:text-sm uppercase tracking-tight">{currentSchool?.name ? `ระบบจัดการโรงเรียน ${currentSchool.name}` : 'ระบบบริหารโรงเรียน SchoolOS'}</span>
                     </div>
-                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">ลิขสิทธิ์โดย สยาม เชียงเครือ</div>
+                    <div className="hidden md:block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">ลิขสิทธิ์โดย สยาม  เชียงเครือ</div>
                 </div>
             </footer>
         </div>
