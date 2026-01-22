@@ -287,19 +287,19 @@ const App: React.FC = () => {
     };
 
     const modules = [
-        { id: SystemView.PROFILE, title: 'ข้อมูลส่วนตัว', slogan: 'รหัสผ่าน / ลายเซ็นดิจิทัล', icon: UserCircle, color: 'from-purple-500 to-indigo-400', shadow: 'shadow-purple-200', visible: true },
-        { id: SystemView.DIRECTOR_CALENDAR, title: 'ปฏิทินปฏิบัติงาน ผอ.', slogan: 'แจ้งเตือนนัดหมายภารกิจ', icon: Calendar, color: 'from-indigo-500 to-blue-400', shadow: 'shadow-indigo-200', visible: true },
-        { id: SystemView.ACADEMIC, title: 'งานวิชาการ', slogan: 'สถิตินักเรียน / ผลสอบ O-NET', icon: GraduationCap, color: 'from-indigo-600 to-violet-500', shadow: 'shadow-indigo-200', visible: true },
+        { id: SystemView.PROFILE, title: 'ข้อมูลส่วนตัว', slogan: 'รหัสผ่าน / ลายเซ็นดิจิทัล', icon: UserCircle, color: 'from-purple-500 to-indigo-400', shadow: 'shadow-purple-200', blob: 'bg-purple-300', visible: true },
+        { id: SystemView.DIRECTOR_CALENDAR, title: 'ปฏิทินปฏิบัติงาน ผอ.', slogan: 'แจ้งเตือนนัดหมายภารกิจ', icon: Calendar, color: 'from-indigo-500 to-blue-400', shadow: 'shadow-indigo-200', blob: 'bg-blue-300', visible: true },
+        { id: SystemView.ACADEMIC, title: 'งานวิชาการ', slogan: 'สถิตินักเรียน / ผลสอบ O-NET', icon: GraduationCap, color: 'from-indigo-600 to-violet-500', shadow: 'shadow-indigo-200', blob: 'bg-indigo-300', visible: true },
         { 
             id: SystemView.DOCUMENTS, title: 'งานสารบรรณ', slogan: 'รับ-ส่ง รวดเร็ว ทันใจ', 
             badge: getDocBadge(),
-            icon: FileText, color: 'from-blue-500 to-cyan-400', shadow: 'shadow-blue-200', visible: true 
+            icon: FileText, color: 'from-blue-500 to-cyan-400', shadow: 'shadow-blue-200', blob: 'bg-sky-300', visible: true 
         },
-        { id: SystemView.PLAN, title: 'แผนปฏิบัติการ', slogan: 'วางแผนงบประมาณประจำปี', icon: CalendarRange, color: 'from-violet-500 to-fuchsia-400', shadow: 'shadow-violet-200', visible: true },
-        { id: SystemView.LEAVE, title: 'ระบบการลา', slogan: 'โปร่งใส ตรวจสอบง่าย', badge: pendingLeaveCount > 0 ? `รออนุมัติ ${pendingLeaveCount}` : null, icon: Users, color: 'from-emerald-500 to-teal-400', shadow: 'shadow-emerald-200', visible: true },
-        { id: SystemView.FINANCE, title: 'ระบบการเงิน', slogan: 'งบประมาณ และรายรับ-จ่าย', icon: Activity, color: 'from-amber-500 to-orange-400', shadow: 'shadow-amber-200', visible: currentUser?.roles.includes('DIRECTOR') || currentUser?.roles.includes('FINANCE_BUDGET') || currentUser?.roles.includes('FINANCE_NONBUDGET') || currentUser?.roles.includes('FINANCE_COOP') },
-        { id: SystemView.ATTENDANCE, title: 'ลงเวลาทำงาน', slogan: 'เช็คเวลาแม่นยำ ด้วย GPS', icon: Clock, color: 'from-rose-500 to-pink-400', shadow: 'shadow-rose-200', visible: true },
-        { id: SystemView.ADMIN_USERS, title: 'ผู้ดูแลระบบ', slogan: 'ตั้งค่าระบบ และผู้ใช้งาน', icon: Settings, color: 'from-slate-600 to-slate-400', shadow: 'shadow-slate-200', visible: currentUser?.roles.includes('SYSTEM_ADMIN') || currentUser?.roles.includes('DIRECTOR') }
+        { id: SystemView.PLAN, title: 'แผนปฏิบัติการ', slogan: 'วางแผนงบประมาณประจำปี', icon: CalendarRange, color: 'from-violet-500 to-fuchsia-400', shadow: 'shadow-violet-200', blob: 'bg-fuchsia-300', visible: true },
+        { id: SystemView.LEAVE, title: 'ระบบการลา', slogan: 'โปร่งใส ตรวจสอบง่าย', badge: pendingLeaveCount > 0 ? `รออนุมัติ ${pendingLeaveCount}` : null, icon: Users, color: 'from-emerald-500 to-teal-400', shadow: 'shadow-emerald-200', blob: 'bg-emerald-300', visible: true },
+        { id: SystemView.FINANCE, title: 'ระบบการเงิน', slogan: 'งบประมาณ และรายรับ-จ่าย', icon: Activity, color: 'from-amber-500 to-orange-400', shadow: 'shadow-amber-200', blob: 'bg-amber-300', visible: currentUser?.roles.includes('DIRECTOR') || currentUser?.roles.includes('FINANCE_BUDGET') || currentUser?.roles.includes('FINANCE_NONBUDGET') || currentUser?.roles.includes('FINANCE_COOP') },
+        { id: SystemView.ATTENDANCE, title: 'ลงเวลาทำงาน', slogan: 'เช็คเวลาแม่นยำ ด้วย GPS', icon: Clock, color: 'from-rose-500 to-pink-400', shadow: 'shadow-rose-200', blob: 'bg-rose-300', visible: true },
+        { id: SystemView.ADMIN_USERS, title: 'ผู้ดูแลระบบ', slogan: 'ตั้งค่าระบบ และผู้ใช้งาน', icon: Settings, color: 'from-slate-600 to-slate-400', shadow: 'shadow-slate-200', blob: 'bg-slate-300', visible: currentUser?.roles.includes('SYSTEM_ADMIN') || currentUser?.roles.includes('DIRECTOR') }
     ];
 
     if (isLoading || !isDataLoaded) return <div className="h-screen flex items-center justify-center bg-slate-100 text-slate-400 gap-3 font-sarabun"><Loader className="animate-spin" size={32}/> กำลังเชื่อมต่อฐานข้อมูล SQL Cloud...</div>;
@@ -320,7 +320,17 @@ const App: React.FC = () => {
     if (currentUser.isFirstLogin) return <FirstLoginSetup user={currentUser} onComplete={handleFirstLoginComplete} onLogout={handleLogout} />;
 
     return (
-        <div className="flex flex-col min-h-screen bg-slate-50 font-sarabun">
+        <div className="flex flex-col min-h-screen bg-slate-50 font-sarabun relative overflow-x-hidden">
+            {/* Background Decorative Curved Lines */}
+            <div className="fixed inset-0 pointer-events-none opacity-[0.03] z-0">
+                <svg width="100%" height="100%" viewBox="0 0 1440 800" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M0 100 Q 360 200 720 100 T 1440 100" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-blue-600" />
+                    <path d="M0 300 Q 360 400 720 300 T 1440 300" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-indigo-600" />
+                    <path d="M0 500 Q 360 600 720 500 T 1440 500" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-purple-600" />
+                    <path d="M0 700 Q 360 800 720 700 T 1440 700" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-blue-600" />
+                </svg>
+            </div>
+
             {/* Header */}
             <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-200 shadow-sm print:hidden">
                 <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 flex items-center justify-between">
@@ -342,24 +352,41 @@ const App: React.FC = () => {
             </header>
 
             {/* Main Content */}
-            <main className="flex-1 w-full p-4 md:p-8">
+            <main className="flex-1 w-full p-4 md:p-8 relative z-10">
                 <div className="max-w-7xl mx-auto pb-24">
                     {currentView === SystemView.DASHBOARD ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
                             {modules.filter(m => m.visible).map((module: any) => (
-                                <button key={module.id} onClick={() => setCurrentView(module.id)} className={`group relative bg-white p-8 rounded-[2rem] border border-slate-100 shadow-lg ${module.shadow} hover:-translate-y-1 transition-all text-left`}>
-                                    <div className={`p-4 rounded-2xl bg-gradient-to-br ${module.color} text-white w-fit mb-6 shadow-md`}><module.icon size={32}/></div>
-                                    {module.badge && <div className="absolute top-8 right-8 bg-red-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full animate-pulse shadow-lg border-2 border-white">{module.badge}</div>}
-                                    <h3 className="font-black text-slate-800 text-xl mb-1 group-hover:text-blue-600 transition-colors">{module.title}</h3>
-                                    <p className="text-xs text-slate-400 font-bold uppercase tracking-tight">{module.slogan}</p>
-                                    <div className="mt-6 w-full h-1 bg-slate-50 rounded-full overflow-hidden">
-                                        <div className={`h-full bg-gradient-to-r ${module.color} w-0 group-hover:w-full transition-all duration-700`}></div>
+                                <button key={module.id} onClick={() => setCurrentView(module.id)} className={`group relative bg-white p-8 rounded-[2rem] border border-slate-100 shadow-lg ${module.shadow} hover:-translate-y-2 transition-all text-left overflow-hidden`}>
+                                    
+                                    {/* Curved Lines Graphic Element */}
+                                    <div className="absolute top-0 right-0 w-full h-full pointer-events-none opacity-[0.07] group-hover:opacity-[0.15] transition-opacity">
+                                        <svg width="100%" height="100%" viewBox="0 0 300 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M300 0C250 50 150 0 100 100C50 200 0 150 0 200" stroke="currentColor" strokeWidth="15" className={`text-${module.blob.split('-')[1]}-600`} strokeLinecap="round" />
+                                            <path d="M300 50C200 100 100 50 0 150" stroke="currentColor" strokeWidth="8" className={`text-${module.blob.split('-')[1]}-400`} strokeLinecap="round" />
+                                        </svg>
+                                    </div>
+
+                                    {/* Decorative Blobs (เดิม) */}
+                                    <div className={`absolute -top-10 -right-10 w-44 h-44 ${module.blob} rounded-full blur-[60px] -z-0 opacity-30 group-hover:scale-125 transition-transform duration-700`}></div>
+                                    <div className={`absolute -bottom-16 -left-16 w-32 h-32 ${module.blob} rounded-full blur-[50px] -z-0 opacity-15`}></div>
+                                    
+                                    <div className="relative z-10">
+                                        <div className={`p-4 rounded-2xl bg-gradient-to-br ${module.color} text-white w-fit mb-6 shadow-md transition-transform group-hover:rotate-6`}>
+                                            <module.icon size={32}/>
+                                        </div>
+                                        {module.badge && <div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full animate-pulse shadow-lg border-2 border-white z-20">{module.badge}</div>}
+                                        <h3 className="font-black text-slate-800 text-xl mb-1 group-hover:text-blue-600 transition-colors">{module.title}</h3>
+                                        <p className="text-xs text-slate-400 font-bold uppercase tracking-tight">{module.slogan}</p>
+                                        <div className="mt-6 w-full h-1 bg-slate-50 rounded-full overflow-hidden">
+                                            <div className={`h-full bg-gradient-to-r ${module.color} w-0 group-hover:w-full transition-all duration-1000 ease-out`}></div>
+                                        </div>
                                     </div>
                                 </button>
                             ))}
                         </div>
                     ) : (
-                        <div className="animate-fade-in">
+                        <div className="animate-fade-in relative z-10">
                             {(() => {
                                 switch (currentView) {
                                     case SystemView.PROFILE: return <UserProfile currentUser={currentUser} onUpdateUser={handleUpdateUserProfile} />;
@@ -385,7 +412,7 @@ const App: React.FC = () => {
                         <img src={APP_LOGO_URL} className="w-6 h-6 object-contain" alt="OS Logo"/>
                         <span className="font-black text-slate-700 text-sm md:text-base uppercase tracking-tight">{currentSchool?.name || 'SchoolOS System'}</span>
                     </div>
-                    <div className="text-[9px] md:text-xs text-slate-400 font-bold uppercase tracking-widest hidden sm:block">Cloud Intelligence SQL v5.0</div>
+                    <div className="text-[9px] md:text-xs text-slate-400 font-bold uppercase tracking-widest hidden sm:block">ลิขสิทธิ์ของ สยาม เชียงเครือ</div>
                 </div>
             </footer>
         </div>
