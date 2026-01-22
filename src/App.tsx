@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import DocumentsSystem from './components/DocumentsSystem';
@@ -19,7 +18,9 @@ import {
     RefreshCw, Cloud, Database, Monitor, Smartphone,
     ChevronRight, Info, AlertTriangle, CheckCircle2,
     Calendar as CalendarIcon, UserCircle, Globe,
-    FileText
+    FileText, GraduationCap, Calendar, CalendarRange, UserCog,
+    // Fix: Added UserCheck to missing imports from lucide-react
+    UserCheck
 } from 'lucide-react';
 import { MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
 import { db, isConfigured as isFirebaseConfigured } from './firebaseConfig';
@@ -75,6 +76,7 @@ const App: React.FC = () => {
     }, []);
 
     const fetchSqlData = useCallback(async () => {
+        // Use local constant for type narrowing
         const client = supabase;
         if (!isSupabaseConfigured || !client) return false;
         
@@ -117,8 +119,9 @@ const App: React.FC = () => {
         const sync = async () => {
             setIsLoading(true);
             
-            // 1. Try SQL (Supabase) first
-            if (isSupabaseConfigured && supabase) {
+            // 1. Try SQL (Supabase) first - Local ref for type safety
+            const client = supabase;
+            if (isSupabaseConfigured && client) {
                 const ok = await fetchSqlData();
                 if (ok) {
                     setIsLoading(false);
@@ -312,57 +315,91 @@ const App: React.FC = () => {
 
     const currentSchool = allSchools.find(s => s.id === currentUser?.schoolId) || MOCK_SCHOOLS[0];
 
+    const DashboardCard = ({ view, title, subtitle, icon: Icon, color, hasBorder }: { view: SystemView, title: string, subtitle: string, icon: any, color: string, hasBorder?: boolean }) => (
+        <div 
+            onClick={() => setCurrentView(view)}
+            className="group relative bg-white p-8 rounded-[2rem] shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer overflow-hidden border border-slate-50 h-56 flex flex-col justify-between"
+        >
+            {/* Background Blob */}
+            <div className={`absolute -right-12 -top-12 w-48 h-48 rounded-full opacity-[0.03] group-hover:scale-110 transition-transform duration-500`} style={{ backgroundColor: color }}></div>
+            <div className={`absolute right-4 bottom-4 w-32 h-32 rounded-full opacity-[0.05] group-hover:-translate-x-4 transition-transform duration-500`} style={{ backgroundColor: color }}></div>
+            
+            <div className="relative z-10">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6 shadow-sm group-hover:scale-110 transition-transform duration-300" style={{ backgroundColor: `${color}15`, color: color }}>
+                    <Icon size={32} />
+                </div>
+                <h3 className="text-xl font-black text-slate-800 mb-1">{title}</h3>
+                <p className="text-slate-400 text-xs font-bold leading-relaxed">{subtitle}</p>
+            </div>
+
+            {hasBorder && (
+                <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-blue-500 rounded-b-[2rem]"></div>
+            )}
+        </div>
+    );
+
     const renderView = () => {
+        const viewTitles: any = {
+            [SystemView.DASHBOARD]: 'Dashboard',
+            [SystemView.DOCUMENTS]: 'งานสารบรรณ',
+            [SystemView.LEAVE]: 'ระบบการลา',
+            [SystemView.FINANCE]: 'ระบบการเงิน',
+            [SystemView.ATTENDANCE]: 'ลงเวลาทำงาน',
+            [SystemView.PLAN]: 'แผนปฏิบัติการ',
+            [SystemView.ACADEMIC]: 'งานวิชาการ',
+            [SystemView.ADMIN_USERS]: 'ผู้ดูแลระบบ',
+            [SystemView.PROFILE]: 'ข้อมูลส่วนตัว',
+            [SystemView.DIRECTOR_CALENDAR]: 'ปฏิทินปฏิบัติงาน ผอ.'
+        };
+
         switch (currentView) {
             case SystemView.DASHBOARD: 
                 return (
                     <div className="space-y-8 animate-fade-in pb-20">
-                         <div className="bg-white p-10 rounded-[3rem] shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-8 relative overflow-hidden">
-                             <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-bl-full -z-10 opacity-50"></div>
-                             <div className="flex items-center gap-6">
-                                <div className="p-5 bg-blue-600 text-white rounded-[2rem] shadow-2xl shadow-blue-500/20">
-                                    <Monitor size={36}/>
-                                </div>
-                                <div>
-                                    <h2 className="text-4xl font-black text-slate-800 tracking-tight">ยินดีต้อนรับสู่ระบบบริหารจัดการ</h2>
-                                    <p className="text-slate-400 font-bold text-lg mt-1">Smart SchoolOS v5.4 | {currentSchool.name}</p>
-                                </div>
-                             </div>
-                             <div className="flex gap-3">
-                                 <button onClick={() => setCurrentView(SystemView.DOCUMENTS)} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:scale-105 transition-all">งานสารบรรณ</button>
-                                 <button onClick={() => setCurrentView(SystemView.LEAVE)} className="bg-blue-50 text-blue-600 px-8 py-3 rounded-2xl font-black border border-blue-100 hover:bg-blue-100 transition-all">ระบบการลา</button>
-                             </div>
-                         </div>
-
-                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-50 shadow-sm flex flex-col gap-4">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">บุคลากรทั้งหมด</p>
-                                <div className="flex items-end justify-between">
-                                    <span className="text-4xl font-black text-slate-800">{allTeachers.filter(t => t.schoolId === currentSchool.id).length}</span>
-                                    <UserCircle className="text-slate-100" size={48}/>
-                                </div>
-                             </div>
-                             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-50 shadow-sm flex flex-col gap-4">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">ฐานข้อมูลเชื่อมต่อ</p>
-                                <div className="flex items-end justify-between">
-                                    <span className={`text-xl font-black uppercase tracking-widest ${syncSource === 'SQL' ? 'text-emerald-600' : 'text-blue-600'}`}>{syncSource} Cloud</span>
-                                    <Database className="text-slate-100" size={48}/>
-                                </div>
-                             </div>
-                             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-50 shadow-sm flex flex-col gap-4">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">สถานะระบบ</p>
-                                <div className="flex items-end justify-between">
-                                    <span className="text-xl font-black text-emerald-600 flex items-center gap-2">
-                                        <CheckCircle2 size={24}/> Online
-                                    </span>
-                                    <Globe className="text-slate-100" size={48}/>
-                                </div>
-                             </div>
-                         </div>
-                         
-                         <div className="py-20 text-center bg-white rounded-[3.5rem] border-2 border-dashed border-slate-100">
-                             <LayoutGrid className="mx-auto text-slate-100 mb-4" size={64}/>
-                             <p className="text-slate-400 font-black uppercase tracking-[0.3em]">กรุณาเลือกเมนูเพื่อแสดงข้อมูลเชิงลึก</p>
+                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <DashboardCard 
+                                view={SystemView.PROFILE}
+                                title="ข้อมูลส่วนตัว"
+                                subtitle="แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล"
+                                icon={UserCircle}
+                                color="#8b5cf6" // Purple
+                            />
+                            <DashboardCard 
+                                view={SystemView.DIRECTOR_CALENDAR}
+                                title="ปฏิทินปฏิบัติงาน ผอ."
+                                subtitle="แจ้งเตือนนัดหมาย และภารกิจ"
+                                icon={Calendar}
+                                color="#3b82f6" // Blue
+                            />
+                            <DashboardCard 
+                                view={SystemView.ACADEMIC}
+                                title="งานวิชาการ"
+                                subtitle="สถิตินักเรียน / ผลสอบ O-NET"
+                                icon={GraduationCap}
+                                color="#6366f1" // Indigo
+                            />
+                            <DashboardCard 
+                                view={SystemView.DOCUMENTS}
+                                title="งานสารบรรณ"
+                                subtitle="รับ-ส่ง รวดเร็ว ทันใจ"
+                                icon={FileText}
+                                color="#3b82f6" // Blue
+                                hasBorder={true}
+                            />
+                            <DashboardCard 
+                                view={SystemView.PLAN}
+                                title="แผนปฏิบัติการ"
+                                subtitle="วางแผนแม่นยำ สู่ความสำเร็จ"
+                                icon={CalendarRange}
+                                color="#d946ef" // Magenta
+                            />
+                            <DashboardCard 
+                                view={SystemView.LEAVE}
+                                title="ระบบการลา"
+                                subtitle="โปร่งใส ตรวจสอบง่าย"
+                                icon={UserCheck}
+                                color="#10b981" // Green
+                            />
                          </div>
                     </div>
                 );
@@ -408,6 +445,22 @@ const App: React.FC = () => {
         }
     };
 
+    const getViewTitle = (view: SystemView) => {
+        const titles: any = {
+            [SystemView.DASHBOARD]: 'Dashboard',
+            [SystemView.DOCUMENTS]: 'งานสารบรรณ',
+            [SystemView.LEAVE]: 'ระบบการลา',
+            [SystemView.FINANCE]: 'ระบบการเงิน',
+            [SystemView.ATTENDANCE]: 'ลงเวลาทำงาน',
+            [SystemView.PLAN]: 'แผนปฏิบัติการ',
+            [SystemView.ACADEMIC]: 'งานวิชาการ',
+            [SystemView.ADMIN_USERS]: 'ผู้ดูแลระบบ',
+            [SystemView.PROFILE]: 'ข้อมูลส่วนตัว',
+            [SystemView.DIRECTOR_CALENDAR]: 'ปฏิทินปฏิบัติงาน ผอ.'
+        };
+        return titles[view] || view;
+    }
+
     return (
         <div className="flex h-screen bg-[#f8fafc] overflow-hidden font-sarabun text-slate-900">
             <Sidebar
@@ -429,71 +482,36 @@ const App: React.FC = () => {
             />
 
             <div className="flex-1 flex flex-col overflow-hidden relative">
-                <header className="h-20 bg-white/80 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-8 lg:px-14 shrink-0 z-40 sticky top-0">
+                {/* Header Updated to match image style */}
+                <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-8 lg:px-14 shrink-0 z-40 sticky top-0">
                     <div className="flex items-center gap-6">
                         <button onClick={() => setIsMobileOpen(true)} className="lg:hidden p-3 bg-slate-50 text-slate-600 rounded-2xl hover:bg-slate-100 transition-colors">
                             <LayoutGrid size={24}/>
                         </button>
-                        <div className="flex flex-col">
-                            <h1 className="text-2xl font-black text-slate-800 tracking-tight truncate max-w-[200px] md:max-w-md">{currentSchool.name}</h1>
-                            <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">
-                                <span className="flex items-center gap-1"><RefreshCw size={10} className="text-blue-500"/> SYNCED</span>
-                                <span className="w-1 h-1 bg-slate-200 rounded-full"></span>
-                                <span>{currentView}</span>
-                            </div>
+                        <div className="flex items-center gap-3">
+                            <LayoutGrid size={24} className="text-slate-600" />
+                            <h1 className="text-2xl font-black text-slate-800 tracking-tight">{getViewTitle(currentView)}</h1>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                        <div className="relative">
-                            <button 
-                                onClick={() => setShowNotificationCenter(!showNotificationCenter)}
-                                className={`p-3 rounded-2xl transition-all relative ${notifications.filter(n => !n.read).length > 0 ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                            >
-                                <Bell size={22}/>
-                                {notifications.filter(n => !n.read).length > 0 && (
-                                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-white text-[10px] font-black flex items-center justify-center border-2 border-white animate-bounce">
-                                        {notifications.filter(n => !n.read).length}
-                                    </span>
-                                )}
-                            </button>
-                            
-                            {showNotificationCenter && (
-                                <div className="absolute top-full right-0 mt-4 w-80 bg-white rounded-[2rem] shadow-2xl border border-slate-100 p-4 animate-scale-up z-50">
-                                    <div className="flex justify-between items-center px-4 mb-4 border-b pb-3 border-slate-50">
-                                        <h4 className="font-black text-slate-800 text-xs uppercase tracking-widest">การแจ้งเตือน</h4>
-                                        <button onClick={() => setNotifications([])} className="text-[10px] font-bold text-slate-400 hover:text-red-500 transition-colors">ล้างทั้งหมด</button>
-                                    </div>
-                                    <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
-                                        {notifications.length === 0 ? (
-                                            <p className="text-center py-10 text-[10px] text-slate-300 font-black uppercase tracking-widest">ไม่มีการแจ้งเตือนใหม่</p>
-                                        ) : notifications.map(n => (
-                                            <div 
-                                                key={n.id} 
-                                                onClick={() => {
-                                                    if(n.view) {
-                                                        setCurrentView(n.view);
-                                                        if(n.targetId) setFocusItem({ view: n.view, id: n.targetId });
-                                                    }
-                                                    setNotifications(prev => prev.map(x => x.id === n.id ? {...x, read: true} : x));
-                                                    setShowNotificationCenter(false);
-                                                }}
-                                                className={`p-4 rounded-2xl cursor-pointer transition-all border-l-4 ${n.read ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-blue-500 hover:shadow-lg'}`}
-                                            >
-                                                <p className="text-xs font-bold text-slate-800 leading-relaxed">{n.message}</p>
-                                                <p className="text-[9px] text-slate-400 mt-2 font-mono">{new Date(n.timestamp).toLocaleTimeString()}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
+                    <div className="flex items-center gap-6">
+                        <div className="hidden md:flex flex-col items-end">
+                            <p className="text-sm font-black text-slate-800 leading-none">{currentUser?.name}</p>
+                            <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase tracking-widest">{currentUser?.position}</p>
+                        </div>
+                        
+                        <div className="relative group">
+                            <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-sm shadow-lg shadow-blue-500/30 cursor-pointer">
+                                {currentUser?.name[0]}
+                            </div>
                         </div>
 
                         <button 
                             onClick={handleLogout} 
-                            className="p-3 bg-rose-50 text-rose-500 rounded-2xl hover:bg-rose-500 hover:text-white transition-all active:scale-90"
+                            className="p-2 text-slate-300 hover:text-rose-500 transition-all active:scale-90"
+                            title="ออกจากระบบ"
                         >
-                            <LogOut size={22}/>
+                            <LogOut size={24}/>
                         </button>
                     </div>
                 </header>
@@ -504,18 +522,24 @@ const App: React.FC = () => {
                     </div>
                 </main>
 
+                {/* Footer Updated to match image style */}
+                <footer className="h-14 bg-white border-t border-slate-50 flex items-center justify-between px-8 shrink-0 z-40">
+                    <div className="flex items-center gap-3 opacity-60">
+                        {currentSchool.logoBase64 ? (
+                            <img src={currentSchool.logoBase64} className="w-6 h-6 object-contain" alt="School" />
+                        ) : <Globe size={18} className="text-slate-400" />}
+                        <span className="text-xs font-black text-slate-600">{currentSchool.name}</span>
+                    </div>
+                    <div className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">
+                        SMART SCHOOL MANAGEMENT v5.0
+                    </div>
+                </footer>
+
                 <div className="lg:hidden h-16 bg-white border-t flex items-center justify-around px-4 shrink-0 z-40">
                     <button onClick={() => setCurrentView(SystemView.DASHBOARD)} className={`p-2 rounded-xl ${currentView === SystemView.DASHBOARD ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><LayoutGrid size={24}/></button>
                     <button onClick={() => setCurrentView(SystemView.DOCUMENTS)} className={`p-2 rounded-xl ${currentView === SystemView.DOCUMENTS ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><FileText size={24}/></button>
                     <button onClick={() => setCurrentView(SystemView.LEAVE)} className={`p-2 rounded-xl ${currentView === SystemView.LEAVE ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><CalendarIcon size={24}/></button>
                     <button onClick={() => setCurrentView(SystemView.PROFILE)} className={`p-2 rounded-xl ${currentView === SystemView.PROFILE ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><UserCircle size={24}/></button>
-                </div>
-
-                <div className="fixed bottom-6 left-6 z-50 pointer-events-none hidden md:block">
-                    <div className="bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl border border-white/10">
-                        <div className={`w-2 h-2 rounded-full ${syncSource === 'SQL' ? 'bg-emerald-50 animate-pulse' : 'bg-blue-500'}`}></div>
-                        <span>CLOUD STATUS: {syncSource} CONNECTED</span>
-                    </div>
                 </div>
             </div>
 
