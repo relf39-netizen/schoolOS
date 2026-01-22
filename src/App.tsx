@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import DocumentsSystem from './components/DocumentsSystem';
@@ -74,9 +75,8 @@ const App: React.FC = () => {
     }, []);
 
     const fetchSqlData = useCallback(async () => {
-        // ใช้ Local client และ assertion เพื่อแก้ปัญหา build error
-        if (!isSupabaseConfigured || !supabase) return false;
-        const client = supabase!;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return false;
         
         try {
             // Fetch Schools
@@ -184,8 +184,8 @@ const App: React.FC = () => {
 
     // Real-time SQL Notifications
     useEffect(() => {
-        if (!currentUser || !isSupabaseConfigured || !supabase) return;
-        const client = supabase!;
+        const client = supabase;
+        if (!currentUser || !isSupabaseConfigured || !client) return;
         
         const channel = client.channel('app_global_notifications')
             .on('postgres_changes', { 
@@ -207,7 +207,7 @@ const App: React.FC = () => {
             .subscribe();
 
         return () => { 
-            if (supabase) supabase!.removeChannel(channel); 
+            if (client) client.removeChannel(channel); 
         };
     }, [currentUser]);
 
@@ -236,11 +236,12 @@ const App: React.FC = () => {
     };
 
     const handleUpdateUser = async (updated: Teacher) => {
+        const client = supabase;
         setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
         setCurrentUser(updated);
         
-        if (isSupabaseConfigured && supabase) {
-            await supabase!.from('profiles').update({
+        if (isSupabaseConfigured && client) {
+            await client.from('profiles').update({
                 name: updated.name, position: updated.position,
                 password: updated.password, signature_base_64: updated.signatureBase64,
                 telegram_chat_id: updated.telegramChatId
