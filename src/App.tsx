@@ -74,10 +74,13 @@ const App: React.FC = () => {
     }, []);
 
     const fetchSqlData = useCallback(async () => {
-        if (!isSupabaseConfigured || !supabase) return false;
+        // Fix TS18047: Use local reference for narrowing
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return false;
+        
         try {
-            // Fetch Schools - Fixed TS18047 with !
-            const { data: schoolsData, error: schoolsError } = await supabase!.from('schools').select('*');
+            // Fetch Schools
+            const { data: schoolsData, error: schoolsError } = await client.from('schools').select('*');
             if (schoolsError) throw schoolsError;
             
             // Map SQL names to CamelCase for frontend
@@ -88,8 +91,8 @@ const App: React.FC = () => {
             }));
             setAllSchools(mappedSchools);
 
-            // Fetch Teachers (Profiles) - Fixed TS18047 with !
-            const { data: teachersData, error: teachersError } = await supabase!.from('profiles').select('*');
+            // Fetch Teachers (Profiles)
+            const { data: teachersData, error: teachersError } = await client.from('profiles').select('*');
             if (teachersError) throw teachersError;
 
             const mappedTeachers: Teacher[] = (teachersData || []).map(t => ({
@@ -181,10 +184,11 @@ const App: React.FC = () => {
 
     // Real-time SQL Notifications
     useEffect(() => {
-        if (!currentUser || !isSupabaseConfigured || !supabase) return;
+        const client = supabase;
+        if (!currentUser || !isSupabaseConfigured || !client) return;
         
-        // Fixed TS18047 with !
-        const channel = supabase!.channel('app_global_notifications')
+        // Fix TS18047: Using local client reference
+        const channel = client.channel('app_global_notifications')
             .on('postgres_changes', { 
                 event: 'INSERT', schema: 'public', table: 'documents', 
                 filter: `school_id=eq.${currentUser.schoolId}` 
@@ -204,7 +208,7 @@ const App: React.FC = () => {
             .subscribe();
 
         return () => { 
-            if (supabase) supabase!.removeChannel(channel); 
+            client.removeChannel(channel); 
         };
     }, [currentUser]);
 
@@ -235,9 +239,11 @@ const App: React.FC = () => {
     const handleUpdateUser = async (updated: Teacher) => {
         setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
         setCurrentUser(updated);
-        // Fixed TS18047 with !
-        if (isSupabaseConfigured && supabase) {
-            await supabase!.from('profiles').update({
+        
+        // Fix TS18047: Local reference
+        const client = supabase;
+        if (isSupabaseConfigured && client) {
+            await client.from('profiles').update({
                 name: updated.name, position: updated.position,
                 password: updated.password, signature_base_64: updated.signatureBase64,
                 telegram_chat_id: updated.telegramChatId
@@ -321,7 +327,7 @@ const App: React.FC = () => {
                                 </div>
                                 <div>
                                     <h2 className="text-4xl font-black text-slate-800 tracking-tight">ยินดีต้อนรับสู่ระบบบริหารจัดการ</h2>
-                                    <p className="text-slate-400 font-bold text-lg mt-1">Smart SchoolOS v5.2 | {currentSchool.name}</p>
+                                    <p className="text-slate-400 font-bold text-lg mt-1">Smart SchoolOS v5.3 | {currentSchool.name}</p>
                                 </div>
                              </div>
                              <div className="flex gap-3">
