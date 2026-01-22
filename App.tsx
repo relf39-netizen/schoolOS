@@ -372,7 +372,7 @@ const App: React.FC = () => {
                         )}
                         <span className="font-black text-slate-600 text-sm uppercase tracking-tight">{currentSchool?.name || 'SchoolOS System'}</span>
                     </div>
-                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">SMART SCHOOL MANAGEMENT v5.0</div>
+                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">ลิขสิทธิ์โดย สยาม เชียงเครือ</div>
                 </div>
             </footer>
         </div>
