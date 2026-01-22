@@ -76,8 +76,8 @@ const App: React.FC = () => {
     const fetchSqlData = useCallback(async () => {
         if (!isSupabaseConfigured || !supabase) return false;
         try {
-            // Fetch Schools
-            const { data: schoolsData, error: schoolsError } = await supabase.from('schools').select('*');
+            // Fetch Schools - Fixed TS18047 with !
+            const { data: schoolsData, error: schoolsError } = await supabase!.from('schools').select('*');
             if (schoolsError) throw schoolsError;
             
             // Map SQL names to CamelCase for frontend
@@ -88,8 +88,8 @@ const App: React.FC = () => {
             }));
             setAllSchools(mappedSchools);
 
-            // Fetch Teachers (Profiles)
-            const { data: teachersData, error: teachersError } = await supabase.from('profiles').select('*');
+            // Fetch Teachers (Profiles) - Fixed TS18047 with !
+            const { data: teachersData, error: teachersError } = await supabase!.from('profiles').select('*');
             if (teachersError) throw teachersError;
 
             const mappedTeachers: Teacher[] = (teachersData || []).map(t => ({
@@ -115,7 +115,7 @@ const App: React.FC = () => {
             setIsLoading(true);
             
             // 1. Try SQL (Supabase) first
-            if (isSupabaseConfigured) {
+            if (isSupabaseConfigured && supabase) {
                 const ok = await fetchSqlData();
                 if (ok) {
                     setIsLoading(false);
@@ -183,7 +183,8 @@ const App: React.FC = () => {
     useEffect(() => {
         if (!currentUser || !isSupabaseConfigured || !supabase) return;
         
-        const channel = supabase.channel('app_global_notifications')
+        // Fixed TS18047 with !
+        const channel = supabase!.channel('app_global_notifications')
             .on('postgres_changes', { 
                 event: 'INSERT', schema: 'public', table: 'documents', 
                 filter: `school_id=eq.${currentUser.schoolId}` 
@@ -203,7 +204,7 @@ const App: React.FC = () => {
             .subscribe();
 
         return () => { 
-            if (supabase) supabase.removeChannel(channel); 
+            if (supabase) supabase!.removeChannel(channel); 
         };
     }, [currentUser]);
 
@@ -234,8 +235,9 @@ const App: React.FC = () => {
     const handleUpdateUser = async (updated: Teacher) => {
         setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
         setCurrentUser(updated);
+        // Fixed TS18047 with !
         if (isSupabaseConfigured && supabase) {
-            await supabase.from('profiles').update({
+            await supabase!.from('profiles').update({
                 name: updated.name, position: updated.position,
                 password: updated.password, signature_base_64: updated.signatureBase64,
                 telegram_chat_id: updated.telegramChatId
@@ -319,7 +321,7 @@ const App: React.FC = () => {
                                 </div>
                                 <div>
                                     <h2 className="text-4xl font-black text-slate-800 tracking-tight">ยินดีต้อนรับสู่ระบบบริหารจัดการ</h2>
-                                    <p className="text-slate-400 font-bold text-lg mt-1">Smart SchoolOS v5.1 | {currentSchool.name}</p>
+                                    <p className="text-slate-400 font-bold text-lg mt-1">Smart SchoolOS v5.2 | {currentSchool.name}</p>
                                 </div>
                              </div>
                              <div className="flex gap-3">
