@@ -74,9 +74,9 @@ const App: React.FC = () => {
     }, []);
 
     const fetchSqlData = useCallback(async () => {
-        // ใช้ Local client สำหรับ narrowing
-        const client = supabase;
-        if (!isSupabaseConfigured || !client) return false;
+        // ใช้ Local client และ assertion เพื่อแก้ปัญหา build error
+        if (!isSupabaseConfigured || !supabase) return false;
+        const client = supabase!;
         
         try {
             // Fetch Schools
@@ -117,9 +117,8 @@ const App: React.FC = () => {
         const sync = async () => {
             setIsLoading(true);
             
-            // 1. Try SQL (Supabase) first - ใช้ local variable เพื่อ TS safety
-            const client = supabase;
-            if (isSupabaseConfigured && client) {
+            // 1. Try SQL (Supabase) first
+            if (isSupabaseConfigured && supabase) {
                 const ok = await fetchSqlData();
                 if (ok) {
                     setIsLoading(false);
@@ -185,8 +184,8 @@ const App: React.FC = () => {
 
     // Real-time SQL Notifications
     useEffect(() => {
-        const client = supabase;
-        if (!currentUser || !isSupabaseConfigured || !client) return;
+        if (!currentUser || !isSupabaseConfigured || !supabase) return;
+        const client = supabase!;
         
         const channel = client.channel('app_global_notifications')
             .on('postgres_changes', { 
@@ -208,10 +207,7 @@ const App: React.FC = () => {
             .subscribe();
 
         return () => { 
-            // ใช้ Optional chaining หรือ เช็ค null อีกครั้งเพื่อป้องกัน Build error
-            if (client) {
-                client.removeChannel(channel); 
-            }
+            if (supabase) supabase!.removeChannel(channel); 
         };
     }, [currentUser]);
 
@@ -243,9 +239,8 @@ const App: React.FC = () => {
         setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
         setCurrentUser(updated);
         
-        const client = supabase;
-        if (isSupabaseConfigured && client) {
-            await client.from('profiles').update({
+        if (isSupabaseConfigured && supabase) {
+            await supabase!.from('profiles').update({
                 name: updated.name, position: updated.position,
                 password: updated.password, signature_base_64: updated.signatureBase64,
                 telegram_chat_id: updated.telegramChatId
