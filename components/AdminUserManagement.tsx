@@ -48,34 +48,58 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
     const [isGettingLocation, setIsGettingLocation] = useState(false);
 
-    // Google Apps Script Code v9.6 (Supports Telegram Auto-Link via Supabase REST)
+    // Google Apps Script Code v10.0 (Supports Tracking Links & Telegram Auto-Link)
     const gasCode = `/**
- * SchoolOS - Cloud Storage & Telegram Auto-Link Bridge v9.6
- * สคริปต์สำหรับจัดการไฟล์ Drive และรับ Webhook จาก Telegram เพื่อผูกบัญชี
+ * SchoolOS - Cloud Storage & Tracking Bridge v10.0
+ * จัดการไฟล์ Drive และระบบรับทราบหนังสืออัตโนมัติจาก Telegram
  */
 
-// สำหรับแอดมิน: กรอกข้อมูล Supabase ของท่านที่นี่เพื่อให้บอททำงานได้
 var SUPABASE_URL = "ใส่ URL Supabase ของท่านที่นี่";
 var SUPABASE_KEY = "ใส่ Anon Key ของท่านที่นี่";
 
+/**
+ * ฟังก์ชันหลักสำหรับ GET Request (ใช้สำหรับ Tracking Link ใน Telegram)
+ */
+function doGet(e) {
+  var action = e.parameter.action;
+  
+  if (action === 'ack') {
+    var docId = e.parameter.docId;
+    var userId = e.parameter.userId;
+    var target = e.parameter.target;
+    
+    // 1. บันทึกการรับทราบลง Supabase
+    handleDirectAcknowledge(docId, userId);
+    
+    // 2. ส่งหน้า HTML ที่ Redirect ไปยังไฟล์จริง
+    return HtmlService.createHtmlOutput(
+      "<html><head><meta http-equiv='refresh' content='0;url=" + target + "'></head>" +
+      "<body style='font-family:sans-serif; text-align:center; padding-top:50px;'>" +
+      "<h3>SchoolOS: กำลังเปิดเอกสารและบันทึกสถานะรับทราบ...</h3>" +
+      "<p>กรุณารอสักครู่ หากหน้าจอไม่เปลี่ยนไป <a href='" + target + "'>คลิกที่นี่</a></p>" +
+      "</body></html>"
+    );
+  }
+  
+  return ContentService.createTextOutput("SchoolOS Cloud Bridge v10.0 is Online").setMimeType(ContentService.MimeType.TEXT);
+}
+
+/**
+ * ฟังก์ชันสำหรับ POST Request (ใช้สำหรับอัปโหลดไฟล์และ Telegram Webhook)
+ */
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     
-    // --- 1. ตรวจสอบว่าเป็นข้อมูลจาก Telegram Webhook หรือไม่ ---
+    // จัดการ Telegram Webhook
     if (data.message) {
       return handleTelegramWebhook(data.message);
     }
 
-    // --- 2. การจัดการไฟล์ Drive (ฟังก์ชันเดิม) ---
-    var folderId = data.folderId;
-    var fileName = data.fileName; 
-    var base64Data = data.fileData; 
-    var mimeType = data.mimeType;
-
-    var folder = DriveApp.getFolderById(folderId);
-    var bytes = Utilities.base64Decode(base64Data);
-    var blob = Utilities.newBlob(bytes, mimeType, fileName);
+    // จัดการการอัปโหลดไฟล์ไปที่ Drive
+    var folder = DriveApp.getFolderById(data.folderId);
+    var bytes = Utilities.base64Decode(data.fileData);
+    var blob = Utilities.newBlob(bytes, data.mimeType, data.fileName);
     var file = folder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
@@ -91,18 +115,55 @@ function doPost(e) {
   }
 }
 
+/**
+ * อัปเดตสถานะการรับทราบลงใน Supabase โดยตรง
+ */
+function handleDirectAcknowledge(docId, userId) {
+  var url = SUPABASE_URL + "/rest/v1/documents?id=eq." + docId;
+  var options = {
+    "method": "get",
+    "headers": {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY
+    }
+  };
+  
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    var docs = JSON.parse(response.getContentText());
+    if (docs.length > 0) {
+      var doc = docs[0];
+      var ackList = doc.acknowledged_by || [];
+      // ตรวจสอบว่าเคยรับทราบหรือยัง
+      if (ackList.indexOf(userId) === -1) {
+        ackList.push(userId);
+        
+        var patchOptions = {
+          "method": "patch",
+          "headers": {
+            "apikey": SUPABASE_KEY,
+            "Authorization": "Bearer " + SUPABASE_KEY,
+            "Content-Type": "application/json"
+          },
+          "payload": JSON.stringify({ "acknowledged_by": ackList })
+        };
+        UrlFetchApp.fetch(url, patchOptions);
+      }
+    }
+  } catch(e) {
+    Logger.log("Ack Error: " + e.toString());
+  }
+}
+
 function handleTelegramWebhook(msg) {
   var chatId = msg.chat.id.toString();
   var text = msg.text || "";
   var botToken = "${config.telegramBotToken || ''}";
 
-  // ตรวจสอบคำสั่งเริ่มงาน /start [citizen_id]
   if (text.indexOf("/start") === 0) {
     var parts = text.split(" ");
     if (parts.length > 1) {
       var citizenId = parts[1].trim();
-      
-      // อัปเดตข้อมูลลงฐานข้อมูลโดยตรงผ่าน REST API
       var url = SUPABASE_URL + "/rest/v1/profiles?id=eq." + citizenId;
       var options = {
         "method": "patch",
@@ -116,12 +177,10 @@ function handleTelegramWebhook(msg) {
       
       try {
         UrlFetchApp.fetch(url, options);
-        sendMessage(botToken, chatId, "✅ <b>เชื่อมต่อระบบ SchoolOS สำเร็จ!</b>\\n\\nเลขประจำตัว: " + citizenId + "\\nต่อจากนี้คุณจะได้รับการแจ้งเตือนงานสารบรรณและการลาผ่านช่องทางนี้ครับ");
+        sendMessage(botToken, chatId, "✅ <b>เชื่อมต่อระบบ SchoolOS สำเร็จ!</b>\\nต่อจากนี้คุณจะได้รับการแจ้งเตือนผ่านช่องทางนี้ครับ");
       } catch(e) {
-        sendMessage(botToken, chatId, "❌ เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาตรวจสอบการตั้งค่า API ใน Apps Script");
+        sendMessage(botToken, chatId, "❌ เกิดข้อผิดพลาดในการบันทึกข้อมูล");
       }
-    } else {
-      sendMessage(botToken, chatId, "ยินดีต้อนรับสู่บอทโรงเรียน! กรุณากดลิงก์ 'เชื่อมต่อ Telegram' จากหน้าโปรไฟล์ในแอปเพื่อผูกบัญชีครับ");
     }
   }
   return ContentService.createTextOutput("ok");
@@ -137,19 +196,11 @@ function createJsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
-function doGet(e) {
-  return ContentService.createTextOutput("SchoolOS Cloud Bridge v9.6 is Online").setMimeType(ContentService.MimeType.TEXT);
-}
-
-/**
- * ฟังก์ชันสำหรับตั้งค่า Webhook (ให้รันฟังก์ชันนี้เพียงครั้งเดียวหลังจาก Deploy)
- */
 function setTelegramWebhook() {
   var botToken = "${config.telegramBotToken || ''}";
   var scriptUrl = "${config.scriptUrl || ''}";
   var url = "https://api.telegram.org/bot" + botToken + "/setWebhook?url=" + scriptUrl;
-  var response = UrlFetchApp.fetch(url);
-  Logger.log(response.getContentText());
+  UrlFetchApp.fetch(url);
 }
 `;
 
@@ -852,12 +903,12 @@ function setTelegramWebhook() {
                     <div className="space-y-6 animate-fade-in">
                         <div className="bg-orange-50 border border-orange-200 rounded-xl p-6">
                             <h3 className="text-xl font-bold text-orange-800 mb-4 flex items-center gap-2">
-                                <Cloud className="text-orange-600"/> คู่มือติดตั้งระบบเก็บไฟล์ & บอท (v9.6)
+                                <Cloud className="text-orange-600"/> คู่มือติดตั้งระบบเก็บไฟล์ & บอท (v10.0)
                             </h3>
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 <div className="space-y-4">
                                     <p className="text-slate-700 text-sm leading-relaxed">
-                                        เพื่อให้โรงเรียนสามารถอัปโหลดไฟล์และใช้งานระบบสมัครผ่าน Telegram อัตโนมัติ แอดมินต้องติดตั้งสคริปต์สะพานเชื่อมต่อตามขั้นตอนดังนี้:
+                                        เพื่อให้โรงเรียนสามารถอัปโหลดไฟล์และใช้งานระบบ **"Tracking Link แจ้งรับทราบอัตโนมัติ"** แอดมินต้องติดตั้งสคริปต์สะพานเชื่อมต่อตามขั้นตอนดังนี้:
                                     </p>
                                     <ol className="space-y-3 text-sm text-slate-600 list-decimal pl-5">
                                         <li>เข้าสู่ <a href="https://script.google.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold underline">Google Apps Script</a> และสร้างโปรเจกต์ใหม่</li>
@@ -866,16 +917,16 @@ function setTelegramWebhook() {
                                         <li>คลิก <b>"Deploy"</b> เลือก <b>"New Deployment"</b> ประเภท <b>"Web App"</b></li>
                                         <li>ตั้งค่า <b>Execute as: Me</b> และ <b>Who has access: Anyone</b></li>
                                         <li>Deploy และนำ <b>Web App URL</b> มาวางในหน้า "ตั้งค่าระบบ"</li>
-                                        <li>ในหน้า Apps Script เลือกฟังก์ชัน <code className="bg-white border rounded px-1 text-blue-600">setTelegramWebhook</code> แล้วกดปุ่ม <b>Run</b> (ทำครั้งเดียวเพื่อเชื่อมบอท)</li>
+                                        <li>ในหน้า Apps Script เลือกฟังก์ชัน <code className="bg-white border rounded px-1 text-blue-600">setTelegramWebhook</code> แล้วกดปุ่ม <b>Run</b> (ทำครั้งเดียว)</li>
                                     </ol>
                                     <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800">
-                                        <AlertCircle className="inline mr-1" size={14}/> <b>หมายเหตุ:</b> ฟังก์ชันสมัครอัตโนมัติจะทำงานร่วมกับบอทที่ท่านตั้งค่า Token ไว้
+                                        <AlertCircle className="inline mr-1" size={14}/> <b>ฟีเจอร์ใหม่:</b> ลิงก์ใน Telegram จะบันทึกการรับทราบเข้าฐานข้อมูล SQL ให้ทันทีที่ครูกดเปิดดูไฟล์
                                     </div>
                                 </div>
 
                                 <div className="space-y-2">
                                     <div className="flex justify-between items-center px-1">
-                                        <span className="text-xs font-bold text-slate-500 uppercase">GAS v9.6 Source Code</span>
+                                        <span className="text-xs font-bold text-slate-500 uppercase">GAS v10.0 Source Code</span>
                                         <button 
                                             onClick={handleCopyCode} 
                                             className="text-xs flex items-center gap-1 font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded transition-colors"

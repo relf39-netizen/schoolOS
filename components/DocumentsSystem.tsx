@@ -144,6 +144,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         };
     };
 
+    // Fix: Map DB snake_case 'signed_file_url' to TS camelCase 'signedFileUrl' to resolve type error
     const mapDocFromDb = (d: any): DocumentItem => ({
         id: d.id.toString(),
         schoolId: d.school_id,
@@ -159,7 +160,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         status: d.status,
         directorCommand: d.director_command,
         directorSignatureDate: d.director_signature_date,
-        signed_file_url: d.signed_file_url,
+        signedFileUrl: d.signed_file_url,
         assignedViceDirectorId: d.assigned_vice_director_id,
         viceDirectorCommand: d.vice_director_command,
         viceDirectorSignatureDate: d.vice_director_signature_date,
@@ -167,6 +168,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         acknowledgedBy: d.acknowledged_by || []
     });
 
+    // Fix: Map TS camelCase 'signedFileUrl' to DB snake_case 'signed_file_url' for DB updates
     const mapDocToDb = (d: any) => ({
         school_id: d.schoolId,
         category: d.category,
@@ -181,7 +183,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         status: d.status,
         director_command: d.directorCommand,
         director_signature_date: d.directorSignatureDate,
-        signed_file_url: d.signed_file_url,
+        signed_file_url: d.signedFileUrl,
         assigned_vice_director_id: d.assignedViceDirectorId,
         vice_director_command: d.viceDirectorCommand,
         vice_director_signature_date: d.viceDirectorSignatureDate,
@@ -343,32 +345,38 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         return content.replace(/[\s\n\r]/g, ''); 
     };
 
-    // Fix: Updated telegram message to include direct file links with auto-ack tracking
+    // ปรับปรุง: ให้ส่งลิงก์แจ้งเตือนแบบ Tracking ผ่าน GAS เพื่อบันทึกการรับทราบทันทีที่คลิก
     async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, isOrder: boolean, bookNumber: string, fromStr: string, attachments: Attachment[] = []) {
-        if (!sysConfig?.telegramBotToken) return;
+        if (!sysConfig?.telegramBotToken || !sysConfig?.scriptUrl) return;
         const baseUrl = sysConfig.appBaseUrl || window.location.origin;
-        
-        let message = `<b>${isOrder ? '📝 มีคำสั่งปฏิบัติราชการใหม่' : '📩 มีหนังสือราชการใหม่'}</b>\n` +
-                        `----------------------------------\n` +
-                        `<b>เลขที่:</b> ${bookNumber}\n` +
-                        `<b>เรื่อง:</b> ${title}\n` +
-                        `<b>จาก:</b> ${fromStr}\n` +
-                        `----------------------------------\n`;
-        
-        if (attachments && attachments.length > 0) {
-            message += `<b>📎 ไฟล์เอกสารแนบ (คลิกเพื่อรับทราบทันที):</b>\n`;
-            attachments.forEach((att, idx) => {
-                // ลิงก์พิเศษ: วิ่งกลับมาที่ App พร้อมแนบ URL ไฟล์จริง เพื่อให้ App ทำการ Ack แล้ว Redirect ไป Drive ให้เอง
-                const trackingLink = `${baseUrl}?view=DOCUMENTS&id=${docId}&file=${encodeURIComponent(att.url)}`;
-                message += `${idx + 1}. <a href=\"${trackingLink}\">${att.name}</a>\n`;
-            });
-            message += `----------------------------------\n`;
-        }
+        const scriptUrl = sysConfig.scriptUrl;
 
-        message += `✅ ข้อมูลถูกบันทึกในระบบเรียบร้อยแล้ว`;
-                        
+        // วนลูปส่งให้ครูแต่ละคนแบบส่วนตัว เพราะลิงก์ต้องมี userId เฉพาะตัว
         teachers.forEach(t => {
-            if (t.telegramChatId) sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId, message);
+            if (!t.telegramChatId) return;
+
+            let message = `<b>${isOrder ? '📝 มีคำสั่งปฏิบัติราชการใหม่' : '📩 มีหนังสือราชการใหม่'}</b>\n` +
+                            `----------------------------------\n` +
+                            `<b>เลขที่:</b> ${bookNumber}\n` +
+                            `<b>เรื่อง:</b> ${title}\n` +
+                            `<b>จาก:</b> ${fromStr}\n` +
+                            `----------------------------------\n`;
+            
+            if (attachments && attachments.length > 0) {
+                message += `<b>📎 คลิกเพื่อดูเอกสารและยืนยันรับทราบ:</b>\n`;
+                attachments.forEach((att, idx) => {
+                    const directFileUrl = getPreviewUrl(att.url);
+                    // สร้าง Tracking Link: เมื่อกดระบบจะไปที่ GAS เพื่ออัปเดต DB แล้วค่อยไปที่ไฟล์
+                    const trackingLink = `${scriptUrl}?action=ack&docId=${docId}&userId=${t.id}&target=${encodeURIComponent(directFileUrl)}`;
+                    message += `${idx + 1}. <a href=\"${trackingLink}\">${att.name}</a>\n`;
+                });
+                message += `----------------------------------\n`;
+            }
+
+            message += `✅ ระบบจะบันทึกสถานะ "รับทราบ" ให้ท่านทันทีเมื่อกดดูไฟล์เอกสาร`;
+            
+            const appLink = `${baseUrl}?view=DOCUMENTS&id=${docId}`;
+            sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId, message, appLink);
         });
     }
 
@@ -393,6 +401,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             const trimmedUrl = url.trim();
             const protocolPart = trimmedUrl.indexOf('https://') === 0 ? 'https://' : 'http://';
             const bodyPart = trimmedUrl.replace(protocolPart, "").replace(/\/+/g, "/");
+            const normalizedUrl = protocolPart + bodyPart;
 
             updateTask(taskId, { message: 'กำลังดาวน์โหลดไฟล์ผ่าน Deep Proxy Bridge...' });
             const response = await fetch(sysConfig.scriptUrl.trim(), {
@@ -431,7 +440,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             }
 
             updateTask(taskId, { message: 'กำลังบันทึกเข้า Google Drive โรงเรียน...' });
-            // Fix: Properly escape forward slash in regex literal inside character set
             const safeBookNumber = (newDoc.bookNumber || 'unknown').replace(/[\\\/ :*?"<>|]/g, '-');
             const uploadName = `${safeBookNumber}_${finalName}`;
 
@@ -469,7 +477,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         }
 
         const taskId = `upload_${Date.now()}`;
-        // Fix: Properly escape forward slash in regex literal inside character set
         const safeBookNumber = (newDoc.bookNumber || 'unknown').replace(/[\\\/ :*?"<>|]/g, '-');
         const finalFileName = `${safeBookNumber}_${file.name}`;
 
@@ -640,7 +647,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             let signedUrl = null;
             if (pdfBase64 && sysConfig?.scriptUrl) {
                 updateTask(taskId, { status: 'uploading', message: 'กำลังบันทึกไฟล์ข้อสั่งการลงคลาวด์...' });
-                // Fix: Properly escape forward slash in regex literal inside character set
                 const safeBookNumber = targetDoc.bookNumber.replace(/[\\\/ :*?"<>|]/g, '-');
                 const finalFileName = `${safeBookNumber}_signed.pdf`;
 
@@ -755,7 +761,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
 
     const handleOpenAndAck = (docItem: DocumentItem, url: string) => {
         if (!url) return; 
-        // แปลงลิงก์ให้เป็นรูปแบบ Preview เพื่อเปิดบน Browser ได้โดยตรง (ลดปัญหา Chrome บังคับดาวน์โหลด)
         const viewUrl = getPreviewUrl(url);
         window.open(viewUrl, '_blank');
         handleTeacherAcknowledge(docItem.id, docItem.acknowledgedBy || []);
@@ -766,6 +771,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         if (isDirector || isDocOfficer || isSystemAdmin) {
             isVisible = true;
         } else if (isViceDirector || (doc.assignedViceDirectorId === currentUser.id)) {
+            // Fix: Use camelCase assignedViceDirectorId from DocumentItem type instead of snake_case db field name
             isVisible = (doc.status === 'PendingViceDirector' && doc.assignedViceDirectorId === currentUser.id) ||
                         (doc.status === 'Distributed' && (doc.targetTeachers || []).includes(currentUser.id));
         } else {
@@ -952,7 +958,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                         {displayedDocs.length === 0 ? (
                             <div className="text-center py-20 text-slate-400 bg-white rounded-xl border border-dashed flex flex-col items-center gap-2">
                                 <Search size={48} className="opacity-20" />
-                                <p>{searchTerm ? `ไม่พบข้อมูลที่ค้นหาสำหรับ \"${searchTerm}\"` : 'ไม่มีรายการหนังสือราชการ'}</p>
+                                <p>{searchTerm ? `ไม่พบข้อมูลที่ค้นหาสำหรับ "${searchTerm}"` : 'ไม่มีรายการหนังสือราชการ'}</p>
                                 {searchTerm && <button onClick={() => setSearchTerm('')} className="text-blue-600 text-sm font-bold hover:underline">ล้างการค้นหา</button>}
                             </div>
                         ) : displayedDocs.map((docItem, index) => {
@@ -1137,7 +1143,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                     </div>
                                     
                                     <label className="block w-full text-center py-5 bg-white border-2 border-blue-200 rounded-2xl border-dashed cursor-pointer hover:bg-blue-50 hover:border-blue-400 transition-all font-black text-blue-700 text-xs shadow-sm">
-                                        <input type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) { Array.from(e.target.files).forEach(file => handleFileUploadInBackground(file)); e.target.value = ''; } }} />
+                                        <input type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) { (Array.from(e.target.files) as File[]).forEach(file => handleFileUploadInBackground(file)); e.target.value = ''; } }} />
                                         <Plus size={16} className="inline mr-2"/> เลือกไฟล์ PDF จากเครื่อง
                                     </label>
                                     
@@ -1194,6 +1200,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             {viewMode === 'DETAIL' && selectedDoc && (
                 <div className="max-w-6xl mx-auto space-y-8 animate-fade-in pb-20">
                     <div className="flex justify-between items-center px-2">
+                        {/* Fix: Fixed incorrectly escaped double quotes which broke TSX parsing */}
                         <button type="button" onClick={() => setViewMode('LIST')} className="flex items-center gap-2 text-slate-400 hover:text-slate-800 font-black uppercase text-xs transition-colors group">
                             <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform"/> ย้อนกลับรายการ
                         </button>
@@ -1424,7 +1431,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                                                     {t?.name[0] || '?'}
                                                                 </div>
                                                                 {isRead ? <CheckCircle size={16} className="text-emerald-500"/> : <Clock size={16} className="text-slate-300"/>}
-                                                            </div>
+                             </div>
                                                             <div className="truncate">
                                                                 <p className={`text-[11px] font-black truncate ${isRead ? 'text-emerald-900' : 'text-slate-500'}`}>{t?.name || tid}</p>
                                                                 <p className="text-[9px] font-bold text-slate-400 uppercase truncate mt-0.5">{t?.position}</p>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import DocumentsSystem from './components/DocumentsSystem';
 import LeaveSystem from './components/LeaveSystem';
@@ -321,13 +320,13 @@ const App: React.FC = () => {
 
     return (
         <div className="flex flex-col min-h-screen bg-slate-50 font-sarabun relative overflow-x-hidden">
-            {/* Background Decorative Curved Lines */}
-            <div className="fixed inset-0 pointer-events-none opacity-[0.03] z-0">
-                <svg width="100%" height="100%" viewBox="0 0 1440 800" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M0 100 Q 360 200 720 100 T 1440 100" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-blue-600" />
-                    <path d="M0 300 Q 360 400 720 300 T 1440 300" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-indigo-600" />
-                    <path d="M0 500 Q 360 600 720 500 T 1440 500" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-purple-600" />
-                    <path d="M0 700 Q 360 800 720 700 T 1440 700" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-blue-600" />
+            {/* Background Decorative Curved Lines (Elegant Patterns) */}
+            <div className="fixed inset-0 pointer-events-none opacity-[0.04] z-0">
+                <svg width="100%" height="100%" viewBox="0 0 1440 900" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                    <path d="M0,200 C300,100 600,300 900,200 T1440,250" stroke="currentColor" fill="transparent" strokeWidth="3" className="text-blue-600" />
+                    <path d="M-100,450 C200,350 500,550 800,450 S1200,350 1540,450" stroke="currentColor" fill="transparent" strokeWidth="2" className="text-indigo-600" />
+                    <path d="M0,700 C400,600 800,800 1200,700 T1600,750" stroke="currentColor" fill="transparent" strokeWidth="4" className="text-purple-600" />
+                    <path d="M200,-50 C400,150 100,400 600,600 S1000,400 1200,1000" stroke="currentColor" fill="transparent" strokeWidth="1" className="text-slate-400" />
                 </svg>
             </div>
 
@@ -359,11 +358,39 @@ const App: React.FC = () => {
                             {modules.filter(m => m.visible).map((module: any) => (
                                 <button key={module.id} onClick={() => setCurrentView(module.id)} className={`group relative bg-white p-8 rounded-[2rem] border border-slate-100 shadow-lg ${module.shadow} hover:-translate-y-2 transition-all text-left overflow-hidden`}>
                                     
-                                    {/* Curved Lines Graphic Element */}
-                                    <div className="absolute top-0 right-0 w-full h-full pointer-events-none opacity-[0.07] group-hover:opacity-[0.15] transition-opacity">
-                                        <svg width="100%" height="100%" viewBox="0 0 300 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                            <path d="M300 0C250 50 150 0 100 100C50 200 0 150 0 200" stroke="currentColor" strokeWidth="15" className={`text-${module.blob.split('-')[1]}-600`} strokeLinecap="round" />
-                                            <path d="M300 50C200 100 100 50 0 150" stroke="currentColor" strokeWidth="8" className={`text-${module.blob.split('-')[1]}-400`} strokeLinecap="round" />
+                                    {/* Multi-layered Curved Lines Pattern on Cards */}
+                                    <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-[0.06] group-hover:opacity-[0.14] transition-opacity duration-700">
+                                        <svg width="100%" height="100%" viewBox="0 0 300 200" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            {/* Primary Wavy Path */}
+                                            <path 
+                                                d="M0,120 C80,80 220,160 300,120 L300,200 L0,200 Z" 
+                                                fill="currentColor" 
+                                                className={`text-${module.blob.split('-')[1]}-500`} 
+                                            />
+                                            {/* Secondary Delicate Curve Lines */}
+                                            <path 
+                                                d="M-20,80 C100,30 200,130 320,80" 
+                                                stroke="currentColor" 
+                                                strokeWidth="10" 
+                                                className={`text-${module.blob.split('-')[1]}-600`} 
+                                                strokeLinecap="round" 
+                                                opacity="0.3"
+                                            />
+                                            <path 
+                                                d="M-20,100 C100,50 200,150 320,100" 
+                                                stroke="currentColor" 
+                                                strokeWidth="4" 
+                                                className={`text-${module.blob.split('-')[1]}-400`} 
+                                                strokeLinecap="round" 
+                                                opacity="0.5"
+                                            />
+                                            <path 
+                                                d="M0,140 C120,100 180,180 300,140" 
+                                                stroke="currentColor" 
+                                                strokeWidth="1" 
+                                                className={`text-${module.blob.split('-')[1]}-300`} 
+                                                strokeLinecap="round" 
+                                            />
                                         </svg>
                                     </div>
 
