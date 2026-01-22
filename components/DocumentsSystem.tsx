@@ -180,8 +180,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         status: d.status,
         director_command: d.directorCommand,
         director_signature_date: d.directorSignatureDate,
-        signed_file_url: d.signedFileUrl,
-        assigned_vice_director_id: d.assignedViceDirectorId,
+        signed_file_url: d.signed_file_url,
+        assigned_vice_director_id: d.assigned_vice_director_id,
         vice_director_command: d.viceDirectorCommand,
         vice_director_signature_date: d.viceDirectorSignatureDate,
         target_teachers: d.targetTeachers,
@@ -421,7 +421,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                         date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }),
                         time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
                         schoolName: currentSchool.name,
-                        schoolLogoBase64: sysConfig.schoolLogoBase64
+                        schoolLogoBase64: sysConfig.officialGarudaBase64
                     });
                 } catch (e) {
                     console.warn("Stamping link file failed, continuing with original", e);
@@ -491,7 +491,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                                 date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }),
                                 time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
                                 schoolName: currentSchool.name,
-                                schoolLogoBase64: sysConfig.schoolLogoBase64
+                                schoolLogoBase64: sysConfig.officialGarudaBase64
                             });
                         } catch (e) {
                             console.error("Stamping failed, uploading original", e);
@@ -614,7 +614,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                     directorPosition: currentUser.position, 
                     signatureImageBase64: signatureToUse,
                     schoolName: currentSchool.name, 
-                    schoolLogoBase64: sysConfig?.schoolLogoBase64, targetPage, 
+                    schoolLogoBase64: sysConfig?.officialGarudaBase64, targetPage, 
                     onStatusChange: (m) => updateTask(taskId, { message: m }),
                     signatureScale: sysConfig?.directorSignatureScale || 1, 
                     signatureYOffset: sysConfig?.directorSignatureYOffset || 0,
@@ -628,7 +628,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                     directorPosition: currentUser.position, 
                     signatureImageBase64: signatureToUse,
                     schoolName: currentSchool.name, 
-                    schoolLogoBase64: sysConfig?.schoolLogoBase64, targetPage: 1,
+                    schoolLogoBase64: sysConfig?.officialGarudaBase64, targetPage: 1,
                     onStatusChange: (m) => updateTask(taskId, { message: m }),
                     alignment: stampAlignment
                 });
