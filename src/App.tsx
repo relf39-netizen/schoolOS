@@ -74,7 +74,7 @@ const App: React.FC = () => {
     }, []);
 
     const fetchSqlData = useCallback(async () => {
-        const client = supabase;
+        const client = supabase; // Narrowing locally
         if (!isSupabaseConfigured || !client) return false;
         
         try {
@@ -116,8 +116,9 @@ const App: React.FC = () => {
         const sync = async () => {
             setIsLoading(true);
             
-            // 1. Try SQL (Supabase) first
-            if (isSupabaseConfigured && supabase) {
+            // Fix TS18047: Use local constant for narrowing
+            const client = supabase;
+            if (isSupabaseConfigured && client) {
                 const ok = await fetchSqlData();
                 if (ok) {
                     setIsLoading(false);
@@ -183,6 +184,7 @@ const App: React.FC = () => {
 
     // Real-time SQL Notifications
     useEffect(() => {
+        // Fix TS18047: Local variable narrowing
         const client = supabase;
         if (!currentUser || !isSupabaseConfigured || !client) return;
         
@@ -206,7 +208,9 @@ const App: React.FC = () => {
             .subscribe();
 
         return () => { 
-            if (client) client.removeChannel(channel); 
+            if (client) {
+                client.removeChannel(channel); 
+            }
         };
     }, [currentUser]);
 
@@ -238,6 +242,7 @@ const App: React.FC = () => {
         setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
         setCurrentUser(updated);
         
+        // Fix TS18047: Local variable narrowing
         const client = supabase;
         if (isSupabaseConfigured && client) {
             await client.from('profiles').update({
