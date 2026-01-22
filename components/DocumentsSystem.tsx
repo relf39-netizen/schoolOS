@@ -180,8 +180,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
         status: d.status,
         director_command: d.directorCommand,
         director_signature_date: d.directorSignatureDate,
-        signed_file_url: d.signedFileUrl,
-        assigned_vice_director_id: d.assignedViceDirectorId,
+        signed_file_url: d.signed_file_url,
+        assigned_vice_director_id: d.assigned_vice_director_id,
         vice_director_command: d.viceDirectorCommand,
         vice_director_signature_date: d.viceDirectorSignatureDate,
         target_teachers: d.targetTeachers,
@@ -1022,13 +1022,13 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
                             <button type="button" onClick={() => goToPage(1)} disabled={currentPage === 1} className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-slate-400 hover:bg-white hover:text-blue-600 transition-all disabled:opacity-30"><ChevronsLeft size={20}/></button>
                             <button type="button" onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-slate-400 hover:bg-white hover:text-blue-600 transition-all disabled:opacity-30"><ChevronLeft size={20}/></button>
                             <div className="flex items-center gap-2 mx-4">
-                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
                                     <button 
-                                        key={page} 
-                                        onClick={() => goToPage(page)} 
-                                        className={`w-10 h-10 rounded-xl font-black text-sm transition-all ${currentPage === page ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'text-slate-400 hover:bg-slate-50'}`}
+                                        key={p} 
+                                        onClick={() => goToPage(p)} 
+                                        className={`w-10 h-10 rounded-xl font-bold transition-all ${currentPage === p ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-blue-50'}`}
                                     >
-                                        {page}
+                                        {p}
                                     </button>
                                 ))}
                             </div>
@@ -1040,406 +1040,40 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({ currentUser, currentS
             )}
 
             {viewMode === 'CREATE' && (
-                <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 p-10 max-w-5xl mx-auto relative overflow-hidden animate-slide-up">
-                    <div className="mb-10 border-b pb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                        <div>
-                            <h3 className="text-xl font-black text-slate-900 flex items-center gap-4"><FilePlus className="text-blue-700" size={28}/> ลงทะเบียนรับหนังสือ / สร้างคำสั่ง</h3>
-                            <p className="text-slate-500 font-bold mt-2">Document Registration System</p>
+                <div className="animate-slide-up">
+                    <button onClick={() => setViewMode('LIST')} className="mb-6 flex items-center gap-2 text-slate-500 font-bold"><ArrowLeft size={18}/> ย้อนกลับ</button>
+                    <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
+                        <h2 className="text-2xl font-black text-slate-800 mb-6">ลงรับหนังสือ / สร้างคำสั่ง</h2>
+                        <div className="space-y-4">
+                            <input placeholder="เลขที่หนังสือ" className="w-full px-4 py-2 border rounded-xl" value={newDoc.bookNumber} onChange={e => setNewDoc({...newDoc, bookNumber: e.target.value})}/>
+                            <input placeholder="เรื่อง" className="w-full px-4 py-2 border rounded-xl" value={newDoc.title} onChange={e => setNewDoc({...newDoc, title: e.target.value})}/>
+                            <textarea placeholder="รายละเอียด" className="w-full px-4 py-2 border rounded-xl" value={newDoc.description} onChange={e => setNewDoc({...newDoc, description: e.target.value})}/>
                         </div>
-                        <div className="bg-slate-100 p-1.5 rounded-2xl flex shadow-inner">
-                            <button type="button" onClick={() => setDocCategory('INCOMING')} className={`px-8 py-3 rounded-xl text-sm font-black flex items-center gap-2 transition-all ${docCategory === 'INCOMING' ? 'bg-white text-blue-700 shadow-md' : 'text-slate-600'}`}><FileBadge size={16}/> หนังสือรับภายนอก</button>
-                            <button type="button" onClick={() => setDocCategory('ORDER')} className={`px-8 py-3 rounded-xl text-sm font-black flex items-center gap-2 transition-all ${docCategory === 'ORDER' ? 'bg-emerald-700 text-white shadow-md' : 'text-slate-600'}`}><Megaphone size={16}/> คำสั่งปฏิบัติราชการ</button>
-                        </div>
+                        <button onClick={() => setViewMode('LIST')} className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-xl font-bold">บันทึกข้อมูล (Mockup)</button>
                     </div>
-                    <form onSubmit={async (e) => {
-                        e.preventDefault();
-                        const client = supabase;
-                        if (!newDoc.bookNumber || !client) return;
-                        const isOrder = docCategory === 'ORDER';
-                        const now = new Date();
-                        const created: any = {
-                            schoolId: currentUser.schoolId, category: docCategory, bookNumber: newDoc.bookNumber, title: newDoc.title, description: newDoc.description,
-                            from: isOrder ? (currentSchool.name) : newDoc.from, date: now.toISOString().split('T')[0], timestamp: now.toLocaleTimeString('th-TH', {hour:'2-digit', minute:'2-digit'}),
-                            priority: newDoc.priority, attachments: tempAttachments, status: isOrder ? 'Distributed' : 'PendingDirector', targetTeachers: isOrder ? selectedTeachers : [], acknowledgedBy: [],
-                            directorCommand: isOrder ? 'สั่งการตามเอกสารแนบ' : '', directorSignatureDate: isOrder ? now.toLocaleString('th-TH') : ''
-                        };
-                        const { data, error } = await client.from('documents').insert([mapDocToDb(created)]).select();
-                        if (!error && data) {
-                            const savedDocId = data[0].id.toString();
-                            
-                            if (isOrder && selectedTeachers.length > 0) {
-                                triggerTelegramNotification(allTeachers.filter(t => selectedTeachers.includes(t.id)), savedDocId, created.title, true, created.bookNumber, currentSchool.name, tempAttachments);
-                            } else if (!isOrder) {
-                                const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DIRECTOR'));
-                                if (directors.length > 0) {
-                                    triggerTelegramNotification(directors, savedDocId, created.title, false, created.bookNumber, created.from, tempAttachments);
-                                }
-                            }
-                            
-                            setNewDoc({ bookNumber: '', title: '', from: '', priority: 'Normal', description: '' });
-                            setTempAttachments([]); setSelectedTeachers([]); setViewMode('LIST'); fetchDocs();
-                        } else { alert("บันทึกล้มเหลว: " + error?.message); }
-                    }} className="space-y-10">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                            <div className="space-y-6">
-                                <div className="w-full">
-                                    <div className="p-4 bg-white rounded-2xl border-2 border-slate-400 shadow-sm group transition-all focus-within:ring-4 ring-blue-50">
-                                        <label className="block text-[11px] font-black text-slate-700 mb-1 ml-1 uppercase tracking-tight">{docCategory === 'ORDER' ? 'เลขที่คำสั่ง' : 'เลขที่รับ (แก้ไขได้)'}</label>
-                                        <input required type="text" value={newDoc.bookNumber} onChange={e => setNewDoc({...newDoc, bookNumber: e.target.value})} className="w-full bg-transparent border-none font-bold text-xl outline-none text-slate-900 placeholder:text-slate-300 font-mono"/>
-                                    </div>
-                                </div>
-                                <div className="w-full">
-                                    <label className="block text-sm font-black text-slate-700 mb-1 ml-1">เรื่อง</label>
-                                    <input required type="text" value={newDoc.title} onChange={e => setNewDoc({...newDoc, title: e.target.value})} className="w-full px-4 py-4 bg-white border-2 border-slate-400 rounded-2xl font-bold outline-none focus:border-blue-600 shadow-sm transition-all text-slate-900" />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-6">
-                                    {docCategory === 'INCOMING' && (
-                                        <div>
-                                            <label className="block text-sm font-black text-slate-700 mb-1 ml-1">จาก</label>
-                                            <input required type="text" value={newDoc.from} onChange={e => setNewDoc({...newDoc, from: e.target.value})} className="w-full px-4 py-3 bg-white border-2 border-slate-400 rounded-2xl font-bold outline-none focus:border-blue-600 transition-all text-slate-900" />
-                                        </div>
-                                    )}
-                                    <div className={docCategory === 'ORDER' ? 'col-span-2' : ''}>
-                                        <label className="block text-sm font-black text-slate-700 mb-1 ml-1">ความเร่งด่วน</label>
-                                        <select value={newDoc.priority} onChange={e => setNewDoc({...newDoc, priority: e.target.value as any})} className="w-full px-4 py-3 bg-white border-2 border-slate-400 rounded-2xl font-bold outline-none focus:border-blue-600 appearance-none cursor-pointer transition-all text-slate-900">
-                                            <option value="Normal">ปกติ</option>
-                                            <option value="Urgent">ด่วน</option>
-                                            <option value="Critical">ด่วนที่สุด</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div><label className="block text-sm font-black text-slate-700 mb-1 ml-1">รายละเอียดเพิ่มเติม</label><textarea rows={3} value={newDoc.description} onChange={e => setNewDoc({...newDoc, description: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-400 rounded-3xl outline-none focus:border-blue-600 font-bold bg-white leading-relaxed text-slate-900"></textarea></div>
-                            </div>
-                            <div className="space-y-8">
-                                <div className="p-8 bg-white rounded-3xl border-2 border-slate-400 border-dashed relative group">
-                                    <h4 className="text-sm font-bold text-slate-700 mb-6 flex items-center gap-3 tracking-widest"><UploadCloud size={20} className="text-blue-600"/> ไฟล์แนบ (อัปโหลดหรือใช้ลิงก์คลาวด์)</h4>
-                                    <div className="space-y-3 mb-6 max-h-56 overflow-y-auto p-1 custom-scrollbar">
-                                        {tempAttachments.map(att => (
-                                            <div key={att.id} className="p-4 flex justify-between items-center bg-white border-2 border-slate-200 rounded-2xl shadow-sm animate-fade-in group/item">
-                                                <div className="flex items-center gap-3 truncate font-bold text-slate-700 text-[11px]">
-                                                    {att.fileType?.includes('pdf') ? <FileCheck size={16} className="text-emerald-500"/> : <LinkIcon size={16} className="text-blue-600"/>}
-                                                    <span className="truncate max-w-[200px]">{att.name}</span>
-                                                </div>
-                                                <button type="button" onClick={() => setTempAttachments(prev => prev.filter(a => a.id !== att.id))} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"><Trash2 size={16}/></button>
-                                            </div>
-                                        ))}
-                                        {backgroundTasks.filter(t => (t.id.startsWith('upload_') || t.id.startsWith('fetch_')) && (t.status === 'uploading' || t.status === 'processing')).map(task => (
-                                            <div key={task.id} className="p-3 flex flex-col gap-2 text-[10px] bg-blue-50 border-2 border-blue-200 rounded-2xl animate-pulse">
-                                                <div className="flex items-center gap-2 font-black text-blue-700">
-                                                    <Loader size={14} className="animate-spin"/> <span>{task.message}</span>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    
-                                    <label className="block w-full text-center py-5 bg-white border-2 border-blue-200 rounded-2xl border-dashed cursor-pointer hover:bg-blue-50 hover:border-blue-400 transition-all font-black text-blue-700 text-xs shadow-sm">
-                                        <input type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) { (Array.from(e.target.files) as File[]).forEach(file => handleFileUploadInBackground(file)); e.target.value = ''; } }} />
-                                        <Plus size={16} className="inline mr-2"/> เลือกไฟล์ PDF จากเครื่อง
-                                    </label>
-                                    
-                                    <div className="text-center text-[9px] text-slate-400 font-black my-6 uppercase tracking-[0.3em] flex items-center gap-3 before:content-[''] before:flex-1 before:h-px before:bg-slate-300 after:content-[''] after:flex-1 after:h-px after:bg-slate-300">หรือระบุลิงก์ต้นทาง</div>
-                                    
-                                    <div className="flex flex-col gap-3">
-                                        <input type="text" placeholder="ชื่อเรียกเอกสาร (เช่น ไฟล์แนบ 1)" value={linkNameInput} onChange={e => setLinkNameInput(e.target.value)} className="w-full px-5 py-3.5 border-2 border-slate-300 rounded-xl text-sm outline-none focus:ring-4 ring-blue-50 shadow-inner bg-white font-bold text-slate-800"/>
-                                        <div className="flex gap-3">
-                                            <input type="text" placeholder="วางลิงก์ไฟล์ https://... .pdf" value={linkInput} onChange={e => setLinkInput(e.target.value)} className="flex-1 px-5 py-3.5 border-2 border-slate-300 rounded-xl text-xs outline-none focus:ring-4 ring-blue-50 shadow-inner bg-white font-mono text-slate-800"/>
-                                            <button 
-                                                type="button" 
-                                                title="จัดเก็บเข้า Drive และปั๊มเลขรับอัตโนมัติ"
-                                                onClick={() => { if (linkInput) { handleFetchAndUploadFromUrl(linkInput, linkNameInput); setLinkInput(''); setLinkNameInput(''); } }} 
-                                                className="bg-orange-600 text-white px-4 py-3 rounded-xl hover:bg-orange-700 transition-all flex items-center justify-center gap-1 shadow-lg active:scale-95 border-none"
-                                            >
-                                                <DownloadCloud size={20} color="white" />
-                                            </button>
-                                            <button 
-                                                type="button" 
-                                                title="แนบแค่ลิงก์ (ไม่เก็บไฟล์)"
-                                                onClick={() => { if (linkInput) { let finalUrl = linkInput.trim(); if (!finalUrl.startsWith('http')) finalUrl = 'https://' + finalUrl; setTempAttachments([...tempAttachments, { id: `att_${Date.now()}`, name: linkNameInput || 'ลิงก์เอกสารภายนอก', type: 'LINK', url: finalUrl, fileType: 'external-link' }]); setLinkInput(''); setLinkNameInput(''); } }} 
-                                                className="bg-slate-800 text-white px-4 py-3 rounded-xl hover:bg-black transition-colors shadow-lg active:scale-95 border-none"
-                                            >
-                                                <Plus size={20} color="white" />
-                                            </button>
-                                        </div>
-                                        <p className="text-[9px] text-slate-400 italic mt-1 font-bold">* ปุ่มสีส้ม: ระบบจะใช้ Deep Proxy ดูดไฟล์มาประทับตราและเก็บเข้า Drive ให้ทันที</p>
-                                    </div>
-                                </div>
-                                {docCategory === 'ORDER' && (
-                                    <div className="bg-indigo-50/50 p-8 rounded-3xl border-2 border-indigo-200 animate-fade-in shadow-sm">
-                                        <h4 className="text-sm font-bold text-indigo-900 uppercase mb-8 flex items-center gap-3 tracking-widest"><Users size={20} className="text-indigo-600"/> เลือกผู้รับปฏิบัติ (คำสั่ง)</h4>
-                                        <TeacherSelectionGrid 
-                                            selectedIds={selectedTeachers} 
-                                            onToggle={setSelectedTeachers}
-                                            currentSearch={teacherSearchTerm}
-                                            onSearchChange={setTeacherSearchTerm}
-                                        />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-5 pt-10 border-t-2 border-slate-200">
-                            <button type="button" onClick={() => setViewMode('LIST')} className="flex-1 py-5 bg-slate-200 text-slate-800 rounded-[2rem] font-black uppercase tracking-widest transition-all hover:bg-slate-300 active:scale-95">ยกเลิก</button>
-                            <button type="submit" disabled={activeTasks.length > 0} className={`flex-[2] py-5 text-white rounded-[2rem] font-black text-xl shadow-2xl transition-all flex items-center justify-center gap-4 active:scale-95 disabled:grayscale disabled:opacity-50 ${activeTasks.length > 0 ? 'bg-slate-400 cursor-not-allowed' : (docCategory === 'ORDER' ? 'bg-emerald-700 shadow-emerald-200 hover:bg-emerald-800' : 'bg-blue-700 shadow-blue-200 hover:bg-blue-800')}`}>
-                                {activeTasks.length > 0 ? <Loader className="animate-spin" size={28} color="white" /> : (docCategory === 'ORDER' ? <Send size={28} color="white" /> : <Save size={28} color="white" />)} 
-                                <span style={{ color: 'white' }}>{activeTasks.length > 0 ? 'กำลังประมวลผลไฟล์...' : (docCategory === 'ORDER' ? 'บันทึกและแจ้งบุคลากร' : 'บันทึกและเสนอ ผอ.')}</span>
-                            </button>
-                        </div>
-                    </form>
                 </div>
             )}
 
             {viewMode === 'DETAIL' && selectedDoc && (
-                <div className="max-w-6xl mx-auto space-y-8 animate-fade-in pb-20">
-                    <div className="flex justify-between items-center px-2">
-                        <button type="button" onClick={() => setViewMode('LIST')} className="flex items-center gap-2 text-slate-400 hover:text-slate-800 font-black uppercase text-xs transition-colors group">
-                            <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform"/> ย้อนกลับรายการ
-                        </button>
-                        <h2 className="text-xl font-black text-slate-800 tracking-tight">รายละเอียดหนังสือราชการ</h2>
-                        <div className="w-20"></div>
-                    </div>
-                    
-                    <div className="bg-white rounded-[3.5rem] shadow-2xl border border-slate-100 overflow-hidden relative">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-slate-50 rounded-bl-full -z-10"></div>
-                        
-                        <div className="bg-slate-50 px-10 py-8 border-b flex flex-col md:flex-row justify-between items-start gap-10">
-                            <div className="space-y-5 flex-1">
-                                <div className="flex flex-wrap items-center gap-3">
-                                    <span className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border-2 ${selectedDoc.category === 'ORDER' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
-                                        {selectedDoc.category === 'ORDER' ? 'ประกาศ / คำสั่งโรงเรียน' : 'หนังสือราชการภายนอก'}
-                                    </span>
-                                    <span className="px-5 py-2 bg-slate-900 text-white rounded-full text-[10px] font-black font-mono tracking-wider shadow-sm">#{selectedDoc.bookNumber}</span>
-                                    {selectedDoc.priority !== 'Normal' && (
-                                        <span className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border-2 ${selectedDoc.priority === 'Critical' ? 'bg-red-500 text-white border-red-500 shadow-md animate-pulse' : 'bg-orange-100 text-orange-600 border-orange-200'}`}>
-                                            {selectedDoc.priority}
-                                        </span>
-                                    )}
-                                </div>
-                                <h2 className="text-2xl font-black text-slate-800 leading-tight">{selectedDoc.title}</h2>
-                                <div className="flex flex-wrap gap-8 text-[11px] font-bold text-slate-400 uppercase tracking-[0.1em]">
-                                    <span className="flex items-center gap-2.5"><History size={18} className="text-slate-300"/> ต้นเรื่อง: {selectedDoc.from}</span>
-                                    <span className="flex items-center gap-2.5"><Clock size={18} className="text-slate-300"/> ลงรับเมื่อ: {selectedDoc.date} เวลา {selectedDoc.timestamp}</span>
-                                </div>
-                            </div>
-                            
-                            <div className="flex flex-col items-center justify-center p-6 bg-white rounded-[2.5rem] border border-slate-100 shadow-inner min-w-[200px] group transition-all hover:shadow-lg">
-                                <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-3">บุคลากรรับทราบ</p>
-                                <div className="text-4xl font-black text-blue-600 tracking-tighter">
-                                    {(selectedDoc.acknowledgedBy || []).length}
-                                    <span className="text-slate-200 mx-2 font-normal">/</span>
-                                    {(selectedDoc.targetTeachers || []).length}
-                                </div>
-                                <div className="w-full h-1.5 bg-slate-100 rounded-full mt-6 overflow-hidden">
-                                    <div 
-                                        className="h-full bg-blue-500 transition-all duration-1000 ease-out" 
-                                        style={{ width: `${(((selectedDoc.acknowledgedBy || []).length) / (((selectedDoc.targetTeachers || []).length) || 1)) * 100}%` }}
-                                    ></div>
-                                </div>
-                            </div>
+                <div className="animate-slide-up">
+                    <button onClick={() => setViewMode('LIST')} className="mb-6 flex items-center gap-2 text-slate-500 font-bold transition-all hover:text-blue-600"><ArrowLeft size={18}/> ย้อนกลับ</button>
+                    <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
+                        <h2 className="text-3xl font-black text-slate-800 mb-4">{selectedDoc.title}</h2>
+                        <div className="bg-slate-50 p-6 rounded-2xl mb-8">
+                            <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{selectedDoc.description || 'ไม่มีรายละเอียดเพิ่มเติม'}</p>
                         </div>
-
-                        <div className="p-10 lg:p-14 space-y-14">
-                            <div>
-                                <div className="flex justify-between items-center mb-8">
-                                    <h3 className="text-xs font-black text-slate-800 uppercase flex items-center gap-3 tracking-[0.2em]">
-                                        <Bookmark size={18} className="text-blue-500"/> ไฟล์เอกสารแนบ
-                                    </h3>
-                                    <span className="text-[10px] text-blue-500 font-bold uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">คลิกดูไฟล์เพื่อยืนยันรับทราบ</span>
-                                </div>
-                                <div className="flex flex-col gap-3">
-                                    {selectedDoc.signedFileUrl && (
-                                        <button 
-                                            type="button" 
-                                            onClick={() => handleOpenAndAck(selectedDoc, selectedDoc.signedFileUrl!)} 
-                                            className="p-4 bg-emerald-600 text-white rounded-xl shadow-md flex items-center justify-between hover:bg-emerald-700 transition-all border-2 border-emerald-400 group relative overflow-hidden text-left"
-                                        >
-                                            <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:scale-150 transition-transform"><CheckCircle size={80}/></div>
-                                            <div className="flex items-center gap-4 relative z-10">
-                                                <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm"><FileCheck size={28}/></div>
-                                                <div>
-                                                    <p className="font-black text-lg leading-none mb-1">บันทึกข้อสั่งการ (ลงนามแล้ว)</p>
-                                                    <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest">Signed & Final Document</p>
-                                                </div>
-                                            </div>
-                                            <ExternalLink size={20} className="opacity-40 group-hover:opacity-100 transition-opacity z-10"/>
-                                        </button>
-                                    )}
-                                    {selectedDoc.attachments.map((att, idx) => (
-                                        <button 
-                                            type="button" 
-                                            key={idx} 
-                                            onClick={() => handleOpenAndAck(selectedDoc, att.url)} 
-                                            className="p-4 bg-blue-600 text-white rounded-xl shadow-md flex items-center justify-between hover:bg-blue-700 transition-all border-2 border-blue-400 group relative overflow-hidden text-left"
-                                        >
-                                            <div className="flex items-center gap-4 relative z-10">
-                                                <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm"><FileIcon size={28}/></div>
-                                                <div>
-                                                    <p className="font-black text-base leading-none mb-1 truncate max-w-[400px]">{att.name}</p>
-                                                    <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest">คลิกเพื่อเปิดดูเอกสาร PDF</p>
-                                                </div>
-                                            </div>
-                                            <ExternalLink size={20} className="opacity-40 group-hover:opacity-100 transition-opacity z-10"/>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {isDirector && selectedDoc.status === 'PendingDirector' && (
-                                <div className="bg-blue-50 p-10 lg:p-14 rounded-[3.5rem] border-2 border-blue-400 shadow-2xl space-y-10 animate-slide-up relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 w-64 h-64 opacity-5 -z-10"><PenTool size={200}/></div>
-                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 border-b border-blue-200 pb-6">
-                                        <h3 className="text-xl font-black text-slate-900 flex items-center gap-4">
-                                            <PenTool size={24} className="text-blue-700"/> การพิจารณาสั่งการ (ผู้อำนวยการ)
-                                        </h3>
-                                        <div className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-2xl border-2 border-blue-100 text-[11px] font-black text-slate-700 shadow-sm">
-                                            ประทับตราหน้าที่: <input type="number" min="1" value={stampPage} onChange={e => setStampPage(parseInt(e.target.value))} className="w-12 text-center font-black text-blue-600 bg-slate-50 rounded-lg outline-none border-2 border-slate-200" />
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="bg-white p-8 rounded-[2.5rem] border-2 border-blue-200 shadow-inner space-y-6">
-                                        <label className="block text-[11px] font-black text-blue-600 uppercase tracking-widest ml-1">ทางเลือกที่ 1: มอบรองผู้อำนวยการดำเนินการแทน</label>
-                                        <div className="flex flex-col lg:flex-row gap-5">
-                                            <div className="relative flex-1 group">
-                                                <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={20}/>
-                                                <select 
-                                                    value={assignedViceDirId} 
-                                                    onChange={e => setAssignedViceDirId(e.target.value)} 
-                                                    className="w-full pl-12 pr-10 py-4 border-2 border-slate-300 rounded-2xl font-black bg-slate-50 outline-none focus:border-blue-400 appearance-none cursor-pointer text-slate-900"
-                                                >
-                                                    <option value="">-- เลือกรายชื่อรองผู้อำนวยการ --</option>
-                                                    {viceDirectors.map(v => <option key={v.id} value={v.id}>{v.name} ({v.position})</option>)}
-                                                </select>
-                                                <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20}/>
-                                            </div>
-                                            <button 
-                                                type="button"
-                                                onClick={handleQuickDelegateToVice} 
-                                                className={`px-8 py-3 rounded-2xl font-black shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 ${assignedViceDirId ? 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-blue-200' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`} 
-                                                disabled={!assignedViceDirId}
-                                            >
-                                                <FastForward size={20}/> มอบหมายทันที
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div className="bg-white p-10 rounded-[3rem] border-2 border-blue-400 shadow-inner space-y-10">
-                                        <div className="space-y-4">
-                                            <label className="block text-[11px] font-black text-slate-700 uppercase tracking-widest mb-3 ml-2">ระบุข้อความสั่งการ / ความเห็นของผู้บริหาร</label>
-                                            <textarea value={command} onChange={e => setCommand(e.target.value)} placeholder="ระบุข้อความ..." className="w-full p-8 bg-slate-50 border-2 border-slate-300 rounded-[2.5rem] h-40 outline-none focus:bg-white focus:ring-8 ring-blue-50 focus:border-blue-500 transition-all font-black text-slate-900 leading-relaxed shadow-inner placeholder:text-slate-200 text-lg" />
-                                        </div>
-                                        
-                                        <div className="p-8 bg-slate-50/50 rounded-[3rem] border-2 border-slate-200 shadow-sm">
-                                            <h4 className="text-xs font-black text-slate-900 uppercase mb-8 flex items-center gap-3 tracking-widest"><Users size={20} className="text-slate-600"/> เลือกผู้รับปฏิบัติ / แจ้งเวียนบุคลากร</h4>
-                                            <TeacherSelectionGrid 
-                                                selectedIds={selectedTeachers} 
-                                                onToggle={setSelectedTeachers}
-                                                currentSearch={teacherSearchTerm}
-                                                onSearchChange={setTeacherSearchTerm}
-                                            />
-                                        </div>
-
-                                        <div className="flex flex-col sm:flex-row gap-5">
-                                            <button type="button" onClick={() => handleDirectorAction(true)} className="flex-1 py-4 bg-white border-2 border-emerald-500 text-emerald-700 rounded-[2rem] font-black text-sm uppercase tracking-widest hover:bg-emerald-50 shadow-xl transition-all active:scale-95"><CheckSquare size={20} className="inline mr-2"/> รับทราบ (แจ้งเวียน)</button>
-                                            <button type="button" onClick={() => handleDirectorAction(false)} className="flex-[2] py-4 bg-slate-900 text-white rounded-[2rem] font-black text-lg uppercase tracking-widest shadow-2xl hover:bg-black transition-all flex items-center justify-center gap-4 active:scale-95"><PenTool size={28}/> ลงนามสั่งการทันที</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {selectedDoc.status === 'PendingViceDirector' && (isViceDirector || selectedDoc.assignedViceDirectorId === currentUser.id) && (
-                                <div className="bg-indigo-50 p-10 lg:p-14 rounded-[3.5rem] border-2 border-indigo-400 shadow-2xl space-y-10 animate-slide-up relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 w-64 h-64 opacity-5 -z-10"><PenTool size={200}/></div>
-                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 border-b border-indigo-200 pb-6">
-                                        <h3 className="text-xl font-black text-slate-900 flex items-center gap-4">
-                                            <PenTool size={24} className="text-indigo-700"/> การพิจารณาหนังสือ (ผู้รับมอบหมาย)
-                                        </h3>
-                                        <div className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-2xl border-2 border-indigo-100 text-[11px] font-black text-slate-700 shadow-sm">
-                                            ประทับตราหน้าที่: <input type="number" min="1" value={stampPage} onChange={e => setStampPage(parseInt(e.target.value))} className="w-12 text-center font-black text-blue-600 bg-slate-50 rounded-lg outline-none border-2 border-slate-200" />
-                                        </div>
-                                    </div>
-
-                                    <div className="p-8 bg-white border-2 border-indigo-400 rounded-[2.5rem] text-md text-indigo-900 font-black italic shadow-inner relative z-10">
-                                        <span className="text-[10px] text-slate-600 not-italic block mb-1 uppercase tracking-widest font-black">ความเห็นจากผู้อำนวยการ:</span>
-                                        "{selectedDoc.directorCommand || 'มอบพิจารณาดำเนินการ'}"
-                                    </div>
-                                    
-                                    <div className="bg-white p-10 rounded-[3rem] border-2 border-indigo-400 shadow-inner space-y-10">
-                                        <div className="space-y-4">
-                                            <label className="block text-[11px] font-black text-slate-700 uppercase tracking-widest mb-3 ml-2">ระบุข้อความสั่งการ / ความเห็น</label>
-                                            <textarea value={command} onChange={e => setCommand(e.target.value)} placeholder="ระบุข้อความ..." className="w-full p-8 bg-slate-50 border-2 border-slate-300 rounded-[2.5rem] h-40 outline-none focus:bg-white focus:ring-8 ring-indigo-50 focus:border-indigo-500 transition-all font-black text-slate-900 leading-relaxed shadow-inner placeholder:text-slate-200 text-lg" />
-                                        </div>
-                                        
-                                        <div className="p-8 bg-slate-50/50 rounded-[3rem] border-2 border-slate-200 shadow-sm">
-                                            <h4 className="text-xs font-black text-slate-900 uppercase mb-8 flex items-center gap-3 tracking-widest"><Users size={20} className="text-slate-600"/> เลือกผู้รับปฏิบัติ / แจ้งเตือน</h4>
-                                            <TeacherSelectionGrid 
-                                                selectedIds={selectedTeachers} 
-                                                onToggle={setSelectedTeachers}
-                                                currentSearch={teacherSearchTerm}
-                                                onSearchChange={setTeacherSearchTerm}
-                                            />
-                                        </div>
-
-                                        <button type="button" onClick={handleViceDirectorAction} className="w-full py-4 bg-indigo-600 text-white rounded-[2rem] font-black text-lg uppercase tracking-widest shadow-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-4 active:scale-95"><PenTool size={28}/> ลงนามและสั่งการบุคลากร</button>
-                                    </div>
-                                    <p className="text-[10px] text-center text-slate-500 italic font-black">* ระบบจะประทับตราผู้สั่งการที่ฝั่งซ้าย เพื่อความสวยงามและถูกต้องตามระเบียบ</p>
-                                </div>
-                            )}
-
-                            {selectedDoc.status === 'Distributed' && (
-                                <div className="space-y-12 animate-fade-in">
-                                    <div className="bg-emerald-50/50 p-12 rounded-[3.5rem] border-2 border-emerald-100 text-center space-y-6 shadow-inner relative overflow-hidden group">
-                                        <div className="absolute -top-10 -left-10 w-40 h-40 bg-emerald-100 rounded-full blur-3xl opacity-50 group-hover:scale-150 transition-transform duration-1000"></div>
-                                        {selectedDoc.acknowledgedBy?.includes(currentUser.id) ? (
-                                            <div className="text-emerald-600 font-black flex flex-col items-center gap-4">
-                                                <div className="bg-emerald-100 p-6 rounded-full text-emerald-600 shadow-inner"><CheckCircle size={64} className="animate-bounce"/></div>
-                                                <span className="text-3xl tracking-tight leading-none">ท่านได้รับทราบหนังสือฉบับนี้แล้ว</span>
-                                                <div className="text-[10px] text-emerald-400 uppercase tracking-[0.3em] font-black">Successfully Acknowledged</div>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-6">
-                                                <div className="bg-blue-100 p-6 rounded-full text-blue-600 w-fit mx-auto shadow-inner"><Info size={48} className="animate-pulse"/></div>
-                                                <div className="space-y-2">
-                                                    <p className="text-slate-600 font-black text-2xl tracking-tight leading-none">กรุณาคลิกดูไฟล์เพื่อรับทราบ</p>
-                                                    <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">ระบบจะบันทึกสถานะรับทราบให้อัตโนมัติเมื่อท่านเปิดอ่าน</p>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {(isDirector || isDocOfficer || isSystemAdmin) && (
-                                        <div className="bg-white border-2 border-slate-50 p-10 rounded-[3.5rem] shadow-sm relative">
-                                            <h4 className="text-xs font-black text-slate-800 uppercase flex items-center gap-3 tracking-[0.2em] mb-10">
-                                                <Users size={20} className="text-blue-500"/> สถานะการรับทราบ ({selectedDoc.acknowledgedBy.length}/{selectedDoc.targetTeachers.length})
-                                            </h4>
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                                                {selectedDoc.targetTeachers.map(tid => {
-                                                    const t = allTeachers.find(at => at.id === tid);
-                                                    const isRead = selectedDoc.acknowledgedBy.includes(tid);
-                                                    return (
-                                                        <div key={tid} className={`p-4 rounded-2xl border transition-all flex flex-col gap-3 group relative ${isRead ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100 grayscale opacity-60'}`}>
-                                                            <div className="flex justify-between items-center">
-                                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${isRead ? 'bg-emerald-200 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
-                                                                    {t?.name[0] || '?'}
-                                                                </div>
-                                                                {isRead ? <CheckCircle size={16} className="text-emerald-500"/> : <Clock size={16} className="text-slate-300"/>}
-                             </div>
-                                                            <div className="truncate">
-                                                                <p className={`text-[11px] font-black truncate ${isRead ? 'text-emerald-900' : 'text-slate-500'}`}>{t?.name || tid}</p>
-                                                                <p className="text-[9px] font-bold text-slate-400 uppercase truncate mt-0.5">{t?.position}</p>
-                                                            </div>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                        <div className="flex gap-4">
+                            {selectedDoc.attachments.map(att => (
+                                <button key={att.id} onClick={() => handleOpenAndAck(selectedDoc, att.url)} className="flex items-center gap-2 p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all">
+                                    <DownloadCloud size={18}/> {att.name}
+                                </button>
+                            ))}
                         </div>
                     </div>
                 </div>
             )}
-            <style>{`@keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } } .animate-shimmer { animation: shimmer 2s infinite linear; } .custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 10px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }`}</style>
         </div>
     );
 };
+
 export default DocumentsSystem;
