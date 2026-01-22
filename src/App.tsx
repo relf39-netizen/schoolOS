@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import DocumentsSystem from './components/DocumentsSystem';
@@ -19,7 +18,7 @@ import {
     RefreshCw, Cloud, Database, Monitor, Smartphone,
     ChevronRight, Info, AlertTriangle, CheckCircle2,
     Calendar as CalendarIcon, UserCircle, Globe,
-    FileText // Fix: Added missing FileText icon import
+    FileText 
 } from 'lucide-react';
 import { MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
 import { db, isConfigured as isFirebaseConfigured } from './firebaseConfig';
@@ -78,7 +77,7 @@ const App: React.FC = () => {
         if (!isSupabaseConfigured || !supabase) return false;
         try {
             // Fetch Schools
-            const { data: schoolsData, error: schoolsError } = await supabase.from('schools').select('*');
+            const { data: schoolsData, error: schoolsError } = await supabase!.from('schools').select('*');
             if (schoolsError) throw schoolsError;
             
             // Map SQL names to CamelCase for frontend
@@ -90,7 +89,7 @@ const App: React.FC = () => {
             setAllSchools(mappedSchools);
 
             // Fetch Teachers (Profiles)
-            const { data: teachersData, error: teachersError } = await supabase.from('profiles').select('*');
+            const { data: teachersData, error: teachersError } = await supabase!.from('profiles').select('*');
             if (teachersError) throw teachersError;
 
             const mappedTeachers: Teacher[] = (teachersData || []).map(t => ({
@@ -187,7 +186,7 @@ const App: React.FC = () => {
     useEffect(() => {
         if (!currentUser || !isSupabaseConfigured || !supabase) return;
         
-        const channel = supabase.channel('app_global_notifications')
+        const channel = supabase!.channel('app_global_notifications')
             .on('postgres_changes', { 
                 event: 'INSERT', schema: 'public', table: 'documents', 
                 filter: `school_id=eq.${currentUser.schoolId}` 
@@ -207,7 +206,7 @@ const App: React.FC = () => {
             })
             .subscribe();
 
-        return () => { supabase.removeChannel(channel); };
+        return () => { supabase!.removeChannel(channel); };
     }, [currentUser]);
 
     // --- Core Action Handlers ---
@@ -240,9 +239,8 @@ const App: React.FC = () => {
         setCurrentUser(updated);
         // Sync to SQL if possible
         if (isSupabaseConfigured && supabase) {
-            await supabase.from('profiles').update({
+            await supabase!.from('profiles').update({
                 name: updated.name, position: updated.position,
-                // Fix: Access camelCase properties from Teacher object instead of snake_case
                 password: updated.password, signature_base_64: updated.signatureBase64,
                 telegram_chat_id: updated.telegramChatId
             }).eq('id', updated.id);
@@ -525,7 +523,7 @@ const App: React.FC = () => {
                 {/* Sync Status Floating Badge */}
                 <div className="fixed bottom-6 left-6 z-50 pointer-events-none hidden md:block">
                     <div className="bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl border border-white/10">
-                        <div className={`w-2 h-2 rounded-full ${syncSource === 'SQL' ? 'bg-emerald-500 animate-pulse' : 'bg-blue-500'}`}></div>
+                        <div className={`w-2 h-2 rounded-full ${syncSource === 'SQL' ? 'bg-emerald-50 animate-pulse' : 'bg-blue-500'}`}></div>
                         <span>CLOUD STATUS: {syncSource} CONNECTED</span>
                     </div>
                 </div>
