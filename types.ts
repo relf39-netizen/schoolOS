@@ -8,105 +8,129 @@ export enum SystemView {
   FINANCE = 'FINANCE',
   ATTENDANCE = 'ATTENDANCE',
   PLAN = 'PLAN',
-  ACADEMIC = 'ACADEMIC',
+  ACADEMIC = 'ACADEMIC', // New View
   ADMIN_USERS = 'ADMIN_USERS',
   PROFILE = 'PROFILE',
   DIRECTOR_CALENDAR = 'DIRECTOR_CALENDAR'
 }
 
+// Fix: Added VICE_DIRECTOR and FINANCE_COOP to TeacherRole to resolve type assignment errors
 export type TeacherRole = 
-  | 'SYSTEM_ADMIN'      
-  | 'DIRECTOR'          
-  | 'VICE_DIRECTOR'      
-  | 'DOCUMENT_OFFICER'  
-  | 'FINANCE_BUDGET'    
-  | 'FINANCE_NONBUDGET' 
-  | 'FINANCE_COOP'      // เพิ่มบทบาทเจ้าหน้าที่สหกรณ์
-  | 'PLAN_OFFICER'      
-  | 'ACADEMIC_OFFICER'  
-  | 'TEACHER';          
+  | 'SYSTEM_ADMIN'      // ผู้ดูแลระบบ (จัดการข้อมูลครู)
+  | 'DIRECTOR'          // ผู้อำนวยการ
+  | 'VICE_DIRECTOR'     // รองผู้อำนวยการ
+  | 'DOCUMENT_OFFICER'  // ธุรการ (รับหนังสือ)
+  | 'FINANCE_BUDGET'    // การเงิน (งบประมาณ)
+  | 'FINANCE_NONBUDGET' // การเงิน (นอกงบ)
+  | 'FINANCE_COOP'      // การเงิน (สหกรณ์)
+  | 'PLAN_OFFICER'      // งานแผน (สร้างโครงการ)
+  | 'ACADEMIC_OFFICER'  // งานวิชาการ (New)
+  | 'TEACHER';          // ครูทั่วไป
 
 export interface School {
-  id: string;      
-  name: string;    
+  id: string;      // รหัสโรงเรียน 8 หลัก เช่น 31030019
+  name: string;    // ชื่อโรงเรียน
   district?: string;
   province?: string;
-  logoBase64?: string; 
-  lat?: number;        
-  lng?: number;        
-  radius?: number;     
-  lateTimeThreshold?: string; 
-  academicYearStart?: string; 
-  academic_year_end?: string;
+  // Fix: Added isSuspended to support school suspension logic
   isSuspended?: boolean;
+  
+  // School Settings
+  logoBase64?: string; // Logo specific to this school
+  lat?: number;        // Latitude for Attendance
+  lng?: number;        // Longitude for Attendance
+  radius?: number;     // Allowed radius in meters
+  lateTimeThreshold?: string; // Time string e.g., "08:15"
+  
+  // Academic Year Settings (MM-DD)
+  academicYearStart?: string; // e.g. "05-16"
+  academicYearEnd?: string;   // e.g. "03-31" or next year "05-15"
 }
 
 export interface Attachment {
   id: string;
   name: string;
-  type: 'FILE' | 'LINK'; 
-  url: string; 
-  fileType?: string; 
+  type: 'FILE' | 'LINK'; // FILE = Base64/Storage, LINK = External URL
+  url: string; // This holds Base64 for FILE or URL for LINK
+  fileType?: string; // MIME type e.g. 'image/png', 'application/pdf'
 }
 
 export interface DocumentItem {
   id: string;
-  schoolId?: string; 
-  category?: 'INCOMING' | 'ORDER'; 
-  bookNumber: string; 
+  schoolId?: string; // Filter by school
+  category?: 'INCOMING' | 'ORDER'; // NEW: INCOMING=หนังสือรับ, ORDER=หนังสือคำสั่ง
+  bookNumber: string; // เลขที่รับหนังสือ หรือ เลขที่คำสั่ง
   title: string;
   description: string;
-  from: string; 
+  from: string; // หน่วยงานต้นเรื่อง
   date: string;
-  timestamp: string; 
+  timestamp: string; // เวลาที่รับ
   priority: 'Normal' | 'Urgent' | 'Critical';
+  
+  // Updated Attachments System
   attachments: Attachment[];
-  status: 'PendingDirector' | 'PendingViceDirector' | 'Distributed'; 
-  directorCommand?: string; 
+
+  // Fix: Added PendingViceDirector to status to support multi-level command hierarchy
+  status: 'PendingDirector' | 'Distributed' | 'PendingViceDirector'; // รอเกษียณ | สั่งการแล้ว | รอรองเกษียณ
+  
+  // Director Actions
+  directorCommand?: string; // ข้อความเกษียณหนังสือ
   directorSignatureDate?: string;
-  signedFileUrl?: string; 
-  targetTeachers: string[]; 
-  assignedViceDirectorId?: string; 
+  signedFileUrl?: string; // URL of the captured image after signing
+  targetTeachers: string[]; // IDs of teachers assigned
+  
+  // Fix: Added missing properties for Vice Director command support
+  assignedViceDirectorId?: string;
   viceDirectorCommand?: string;
   viceDirectorSignatureDate?: string;
-  acknowledgedBy: string[]; 
+
+  // Teacher Actions
+  acknowledgedBy: string[]; // IDs of teachers who clicked 'Read'
 }
 
 export interface LeaveRequest {
   id: string;
-  schoolId: string;
+  schoolId?: string;
   teacherId: string;
   teacherName: string;
-  teacherPosition?: string; 
+  teacherPosition?: string; // Snapshot of position at time of request
   type: 'Sick' | 'Personal' | 'OffCampus' | 'Late' | 'Maternity';
   startDate: string;
   endDate: string;
-  startTime?: string; 
-  endTime?: string;   
-  substituteName?: string; 
+  // For OffCampus or Late
+  startTime?: string;
+  endTime?: string;
+  
   reason: string;
-  contactInfo?: string; 
-  mobilePhone?: string; 
+  contactInfo?: string; // Address/Contact info during leave
+  mobilePhone?: string; // New: Mobile Phone Number
   status: 'Pending' | 'Approved' | 'Rejected';
+  
+  // Approval Data
   approvedDate?: string;
-  directorSignature?: string; 
-  teacherSignature?: string; 
-  createdAt?: string; 
-  evidenceUrl?: string; 
-  approvedPdfUrl?: string; 
-  attachedFileUrl?: string; 
+  directorSignature?: string; // Director Name
+  teacherSignature?: string; // Teacher Name
+  createdAt?: string; // ISO String
+  
+  // Cloud Storage
+  evidenceUrl?: string; // URL to the uploaded evidence (e.g. Medical Cert) - User uploaded
+  approvedPdfUrl?: string; // URL to the generated PDF with Director Signature - System generated
+  attachedFileUrl?: string; // Legacy field, keeping for compatibility
 }
 
+// New Interface for Director's Calendar
 export interface DirectorEvent {
   id: string;
   schoolId: string;
   title: string;
   description?: string;
-  date: string; 
-  startTime: string; 
-  endTime?: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:MM
+  endTime?: string; // HH:MM
   location: string;
-  createdBy: string; 
+  createdBy: string; // User ID (Officer)
+  
+  // Notification Tracking (to prevent spam on reload)
   notifiedOneDayBefore?: boolean;
   notifiedOnDay?: boolean;
 }
@@ -115,29 +139,31 @@ export interface FinanceAccount {
   id: string;
   schoolId?: string;
   name: string;
-  type: 'Budget' | 'NonBudget' | 'Coop'; // เพิ่มประเภท Coop (สหกรณ์)
+  // Fix: Added Coop to account types to support cooperative finance
+  type: 'Budget' | 'NonBudget' | 'Coop';
   description?: string;
 }
 
 export interface Transaction {
   id: string;
   schoolId?: string;
-  accountId: string; 
+  accountId: string; // Links to FinanceAccount
   date: string;
   description: string;
   amount: number;
   type: 'Income' | 'Expense';
-  refDoc?: string; 
+  refDoc?: string; // Optional reference document
 }
 
+// New Interface for Secret Audit Logs
 export interface FinanceAuditLog {
   id: string;
   schoolId?: string;
   timestamp: string;
-  actorName: string; 
+  actorName: string; // Who performed the action
   actionType: 'EDIT' | 'DELETE';
   transactionDescription: string;
-  details: string; 
+  details: string; // Text description of what changed (e.g. "Changed amount from 500 to 1000")
   amountInvolved: number;
 }
 
@@ -150,74 +176,87 @@ export interface AttendanceRecord {
   checkInTime: string;
   checkOutTime: string | null;
   status: 'OnTime' | 'Late' | 'Absent' | 'Leave';
-  leaveType?: string; 
-  isAutoCheckout?: boolean; 
+  leaveType?: string; // If status is Leave
+  isAutoCheckout?: boolean; // True if system auto-filled 17:00
   coordinate?: { lat: number; lng: number };
 }
 
 export interface Teacher {
-  id: string;             
-  schoolId: string;       
+  id: string;             // เลขบัตรประชาชน (Username)
+  schoolId: string;       // รหัสโรงเรียน
   name: string;
-  password?: string;      
+  password?: string;      // Password (hashed or plain for mock)
   position: string;
   roles: TeacherRole[];
-  isFirstLogin?: boolean; 
-  signatureBase64?: string; 
-  telegramChatId?: string; 
+  isFirstLogin?: boolean; // True = ต้องเปลี่ยนรหัสผ่าน
+  signatureBase64?: string; // User's signature for forms
+  telegramChatId?: string; // Telegram Chat ID for notifications
+  // Fix: Added isSuspended to support account suspension logic
   isSuspended?: boolean;
 }
+
+// --- Action Plan Types ---
 
 export type ProjectStatus = 'Draft' | 'Approved' | 'Completed';
 
 export interface Project {
   id: string;
   name: string;
-  subsidyBudget: number; 
-  learnerDevBudget: number; 
-  actualExpense?: number; 
+  subsidyBudget: number; // เงินอุดหนุน (แผน)
+  learnerDevBudget: number; // เงินกิจกรรมพัฒนาผู้เรียน (แผน)
+  actualExpense?: number; // NEW: ยอดใช้จ่ายจริง
   status: ProjectStatus;
   rationale?: string;
-  fiscalYear?: string; 
+  fiscalYear?: string; // ปีงบประมาณ (e.g. "2567", "2568")
 }
 
 export interface PlanDepartment {
   id: string;
   schoolId?: string;
-  name: string; 
+  name: string; // e.g., กลุ่มบริหารวิชาการ
   projects: Project[];
 }
 
+// --- Academic Types (New) ---
+
 export interface EnrollmentData {
-  id: string; 
+  id: string; // e.g., "enroll_2567"
   schoolId: string;
-  year: string; 
+  year: string; // "2567"
   levels: {
-      [key: string]: { m: number; f: number }; 
+      [key: string]: { m: number; f: number }; // key: "Anuban1", "Prathom1"
   };
 }
 
 export type TestType = 'RT' | 'NT' | 'ONET';
 
 export interface TestScoreData {
-  id: string; 
+  id: string; // e.g., "score_onet_2567"
   schoolId: string;
   year: string;
   testType: TestType;
   results: {
-      [subject: string]: number; 
+      [subject: string]: number; // e.g., "Thai": 50.5
   };
 }
 
+// --- System Configuration ---
 export interface SystemConfig {
-  driveFolderId: string; 
-  scriptUrl: string;     
-  schoolName?: string;   
-  directorSignatureBase64?: string; 
-  schoolLogoBase64?: string; 
+  driveFolderId: string; // Google Drive Folder ID for uploads
+  scriptUrl: string;     // Google Apps Script Web App URL for handling uploads
+  schoolName?: string;   // School Name for Headers
+  directorSignatureBase64?: string; // Base64 PNG of Director Signature
+  schoolLogoBase64?: string; // Base64 PNG of School Logo / Garuda
+  
+  // Official Document Logo (Garuda) - New
   officialGarudaBase64?: string;
-  directorSignatureScale?: number;    
-  directorSignatureYOffset?: number;  
-  telegramBotToken?: string; 
-  appBaseUrl?: string; 
+
+  // Signature Customization
+  directorSignatureScale?: number;    // Scale factor (default 1.0)
+  directorSignatureYOffset?: number;  // Vertical offset in pixels (default 0)
+
+  // Telegram Notification
+  telegramBotToken?: string; // Token from @BotFather
+  telegramBotUsername?: string; // Username of the bot (e.g. SchoolOS_Bot)
+  appBaseUrl?: string; // The deployed URL of this app (e.g., https://myschool.vercel.app)
 }

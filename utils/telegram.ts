@@ -1,28 +1,35 @@
 
-// Utility for sending Telegram Notifications
+// Utility for sending Telegram Notifications with rich formatting
 
 interface SendMessagePayload {
     chat_id: string;
     text: string;
     parse_mode?: 'HTML' | 'Markdown';
+    disable_web_page_preview?: boolean;
 }
 
-export const sendTelegramMessage = async (botToken: string, chatId: string, message: string, linkUrl?: string) => {
+/**
+ * Sends a formatted message to a Telegram chat.
+ * Supports HTML tags like <b>, <i>, <a>, <code>, <pre>
+ */
+export const sendTelegramMessage = async (botToken: string, chatId: string, message: string, deepLinkUrl?: string) => {
     if (!botToken || !chatId) {
-        console.warn("Telegram Bot Token or Chat ID is missing");
+        console.warn("Telegram Bot Token or Chat ID is missing. Notification skipped.");
         return;
     }
 
     let finalMessage = message;
-    if (linkUrl) {
-        // Use HTML parse mode to create a clickable link
-        finalMessage += `\n\n<a href="${linkUrl}">👉 คลิกเพื่อเปิดดูเอกสาร</a>`;
+    
+    // Add an action button-like link if provided
+    if (deepLinkUrl) {
+        finalMessage += `\n\n<b>🔗 ดำเนินการต่อในระบบ:</b>\n<a href="${deepLinkUrl}">คลิกที่นี่เพื่อเปิดแอปและลงชื่อรับทราบ</a>`;
     }
 
     const payload: SendMessagePayload = {
         chat_id: chatId,
         text: finalMessage,
-        parse_mode: 'HTML'
+        parse_mode: 'HTML',
+        disable_web_page_preview: false
     };
 
     try {
@@ -36,11 +43,11 @@ export const sendTelegramMessage = async (botToken: string, chatId: string, mess
 
         const data = await response.json();
         if (!data.ok) {
-            console.error("Telegram API Error:", data);
+            console.error("Telegram API Error Response:", data);
         } else {
-            console.log("Telegram notification sent to", chatId);
+            console.log("Telegram notification sent successfully to chat:", chatId);
         }
     } catch (error) {
-        console.error("Failed to send Telegram message:", error);
+        console.error("Failed to send Telegram message fetch error:", error);
     }
 };

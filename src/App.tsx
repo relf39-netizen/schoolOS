@@ -1,813 +1,549 @@
 
-import React, { useState, useEffect } from 'react';
-// Sidebar is removed
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import Sidebar from './components/Sidebar';
 import DocumentsSystem from './components/DocumentsSystem';
 import LeaveSystem from './components/LeaveSystem';
 import FinanceSystem from './components/FinanceSystem';
 import AttendanceSystem from './components/AttendanceSystem';
 import ActionPlanSystem from './components/ActionPlanSystem';
-import AcademicSystem from './components/AcademicSystem'; // Import
+import AcademicSystem from './components/AcademicSystem';
 import AdminUserManagement from './components/AdminUserManagement';
 import UserProfile from './components/UserProfile';
 import LoginScreen from './components/LoginScreen';
 import FirstLoginSetup from './components/FirstLoginSetup';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import DirectorCalendar from './components/DirectorCalendar'; 
-import { SystemView, Teacher, School, TeacherRole, DirectorEvent, SystemConfig } from './types';
+import { SystemView, Teacher, School, DirectorEvent, SystemConfig } from './types';
 import { 
-    Activity, Users, Clock, FileText, CalendarRange, 
-    Loader, Database, ServerOff, Home, LogOut, 
-    Settings, ChevronLeft, Building2, LayoutGrid, Bell, UserCircle, ExternalLink, X, Calendar, GraduationCap
+    Loader, LogOut, LayoutGrid, Bell, ShieldAlert,
+    RefreshCw, Cloud, Database, Monitor, Smartphone,
+    ChevronRight, Info, AlertTriangle, CheckCircle2,
+    Calendar as CalendarIcon, UserCircle, Globe,
+    FileText // Fix: Added missing FileText icon import
 } from 'lucide-react';
-import { MOCK_DOCUMENTS, MOCK_LEAVE_REQUESTS, MOCK_TRANSACTIONS, MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
-import { db, isConfigured } from './firebaseConfig';
-import { collection, onSnapshot, setDoc, doc, deleteDoc, query, where, QuerySnapshot, DocumentData, getDocs, updateDoc, getDoc } from 'firebase/firestore';
-import { sendTelegramMessage } from './utils/telegram';
+import { MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
+import { db, isConfigured as isFirebaseConfigured } from './firebaseConfig';
+import { supabase, isConfigured as isSupabaseConfigured } from './supabaseClient';
+import { collection, onSnapshot, doc, query, where, QuerySnapshot, DocumentData, getDocs, updateDoc } from 'firebase/firestore';
 
-// Keys for LocalStorage
-const SESSION_KEY = 'schoolos_session_v1';
+/**
+ * Session persistence version key
+ */
+const SESSION_KEY = 'schoolos_secure_session_v3';
 
+/**
+ * App Notification Structure
+ */
 interface AppNotification {
+    id: string;
     message: string;
-    type: 'info' | 'alert';
-    linkTo?: SystemView;
-    linkId?: string;
+    type: 'info' | 'alert' | 'success';
+    timestamp: number;
+    read: boolean;
+    view?: SystemView;
+    targetId?: string;
 }
 
 const App: React.FC = () => {
-    // Global Data State
+    // --- Global Data State ---
     const [allTeachers, setAllTeachers] = useState<Teacher[]>([]);
     const [allSchools, setAllSchools] = useState<School[]>([]);
     const [isDataLoaded, setIsDataLoaded] = useState(false);
     
-    // Auth State
+    // --- Authentication & Session State ---
     const [currentUser, setCurrentUser] = useState<Teacher | null>(null);
     const [isSuperAdminMode, setIsSuperAdminMode] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [syncSource, setSyncSource] = useState<'LOCAL' | 'SQL' | 'FIREBASE'>('LOCAL');
 
-    // Notification State
-    const [notification, setNotification] = useState<AppNotification | null>(null);
-    const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+    // --- Navigation & UI State ---
+    const [currentView, setCurrentView] = useState<SystemView>(SystemView.DASHBOARD);
+    const [isMobileOpen, setIsMobileOpen] = useState(false);
+    const [notifications, setNotifications] = useState<AppNotification[]>([]);
+    const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
-    // Deep Link State (For clicking notification)
+    // --- Deep Link State ---
     const [focusItem, setFocusItem] = useState<{ view: SystemView, id: string } | null>(null);
-    const [pendingDeepLink, setPendingDeepLink] = useState<{ view: SystemView, id: string } | null>(null);
 
-    // --- DATA SYNCHRONIZATION (FIREBASE) ---
-    useEffect(() => {
-        let unsubSchools: (() => void) | undefined;
-        let unsubTeachers: (() => void) | undefined;
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    // --- Data Synchronization (Cloud Native) ---
 
-        if (isConfigured && db) {
-            // SAFETY: Set a timeout to fallback to Mocks if Firestore is unreachable/slow (e.g. 3 seconds)
-            timeoutId = setTimeout(() => {
-                console.warn("Firestore connection timeout. Falling back to Mock Data.");
-                setAllSchools(MOCK_SCHOOLS);
-                setAllTeachers(MOCK_TEACHERS);
-                setIsDataLoaded(true);
-            }, 3000);
-
-            // 1. Sync Schools
-            unsubSchools = onSnapshot(collection(db, 'schools'), (snapshot: QuerySnapshot<DocumentData>) => {
-                const schoolsData = snapshot.docs.map(doc => doc.data() as School);
-                if (schoolsData.length > 0) {
-                    setAllSchools(schoolsData);
-                } else {
-                    setAllSchools(MOCK_SCHOOLS);
-                }
-            }, (err) => {
-                console.error("School Sync Error:", err);
-                setAllSchools(MOCK_SCHOOLS);
-            });
-
-            // 2. Sync Teachers
-            unsubTeachers = onSnapshot(collection(db, 'teachers'), (snapshot: QuerySnapshot<DocumentData>) => {
-                if (timeoutId) clearTimeout(timeoutId);
-                const teachersData = snapshot.docs.map(doc => doc.data() as Teacher);
-                if (teachersData.length > 0) {
-                    setAllTeachers(teachersData);
-                } else {
-                    setAllTeachers(MOCK_TEACHERS);
-                }
-                setIsDataLoaded(true);
-            }, (err) => {
-                if (timeoutId) clearTimeout(timeoutId);
-                console.error("Teacher Sync Error:", err);
-                setAllTeachers(MOCK_TEACHERS);
-                setIsDataLoaded(true);
-            });
-        } else {
-            setAllSchools(MOCK_SCHOOLS);
-            setAllTeachers(MOCK_TEACHERS);
-            setIsDataLoaded(true);
-        }
-
-        return () => {
-            if (timeoutId) clearTimeout(timeoutId);
-            if (unsubSchools) unsubSchools();
-            if (unsubTeachers) unsubTeachers();
-        };
+    const loadLocalData = useCallback(() => {
+        setAllSchools(MOCK_SCHOOLS);
+        setAllTeachers(MOCK_TEACHERS);
+        setIsDataLoaded(true);
+        setSyncSource('LOCAL');
     }, []);
 
-    // Check LocalStorage on Mount AND Handle URL Deep Linking
+    const fetchSqlData = useCallback(async () => {
+        if (!isSupabaseConfigured || !supabase) return false;
+        try {
+            // Fetch Schools
+            const { data: schoolsData, error: schoolsError } = await supabase.from('schools').select('*');
+            if (schoolsError) throw schoolsError;
+            
+            // Map SQL names to CamelCase for frontend
+            const mappedSchools: School[] = (schoolsData || []).map(s => ({
+                id: s.id, name: s.name, district: s.district, province: s.province,
+                isSuspended: s.is_suspended, logoBase64: s.logo_base_64, lat: s.lat, lng: s.lng,
+                radius: s.radius, lateTimeThreshold: s.late_time_threshold
+            }));
+            setAllSchools(mappedSchools);
+
+            // Fetch Teachers (Profiles)
+            const { data: teachersData, error: teachersError } = await supabase.from('profiles').select('*');
+            if (teachersError) throw teachersError;
+
+            const mappedTeachers: Teacher[] = (teachersData || []).map(t => ({
+                id: t.id, schoolId: t.school_id, name: t.name, password: t.password,
+                position: t.position, roles: t.roles || [], isFirstLogin: t.is_first_login,
+                signatureBase64: t.signature_base_64, telegramChatId: t.telegram_chat_id,
+                isSuspended: t.is_suspended
+            }));
+            setAllTeachers(mappedTeachers);
+            
+            setSyncSource('SQL');
+            setIsDataLoaded(true);
+            return true;
+        } catch (e) {
+            console.error("SQL Sync Failed:", e);
+            return false;
+        }
+    }, []);
+
+    // Initial Data Orchestration
+    useEffect(() => {
+        const sync = async () => {
+            setIsLoading(true);
+            
+            // 1. Try SQL (Supabase) first - The new primary source
+            if (isSupabaseConfigured) {
+                const ok = await fetchSqlData();
+                if (ok) {
+                    setIsLoading(false);
+                    return;
+                }
+            }
+
+            // 2. Fallback to Firebase if SQL failed or not configured
+            if (isFirebaseConfigured && db) {
+                try {
+                    // Firebase realtime listener
+                    const unsubSchools = onSnapshot(collection(db, 'schools'), (snap) => {
+                        setAllSchools(snap.docs.map(d => d.data() as School));
+                    });
+                    const unsubTeachers = onSnapshot(collection(db, 'teachers'), (snap) => {
+                        setAllTeachers(snap.docs.map(d => d.data() as Teacher));
+                        setIsDataLoaded(true);
+                        setSyncSource('FIREBASE');
+                    });
+                    setIsLoading(false);
+                    return;
+                } catch (e) { console.error("Firebase Sync Failed:", e); }
+            }
+
+            // 3. Last resort: Mock Local Data
+            loadLocalData();
+            setIsLoading(false);
+        };
+        sync();
+    }, [fetchSqlData, loadLocalData]);
+
+    // Session Management & URL Deep Link Parsing
     useEffect(() => {
         if (!isDataLoaded) return;
         
-        // 1. Restore Session
-        const storedSession = localStorage.getItem(SESSION_KEY);
-        if (storedSession) {
+        // Restore Session
+        const stored = localStorage.getItem(SESSION_KEY);
+        if (stored) {
             try {
-                const session = JSON.parse(storedSession);
-                if (session.isSuperAdmin) {
+                const session = JSON.parse(stored);
+                if (session.isSA) {
                     setIsSuperAdminMode(true);
                 } else {
-                    const user = allTeachers.find(t => t.id === session.userId);
-                    if (user) setCurrentUser(user);
+                    const found = allTeachers.find(t => t.id === session.userId);
+                    if (found && !found.isSuspended) {
+                        setCurrentUser(found);
+                    } else {
+                        localStorage.removeItem(SESSION_KEY);
+                    }
                 }
-            } catch (e) {
-                localStorage.removeItem(SESSION_KEY);
-            }
+            } catch (e) { localStorage.removeItem(SESSION_KEY); }
         }
 
-        // 2. Parse URL Parameters for Deep Linking (e.g., from Telegram)
+        // Parse Deep Links (?view=DOCUMENTS&id=123)
         const params = new URLSearchParams(window.location.search);
-        const viewParam = params.get('view');
-        const idParam = params.get('id');
-
-        if (viewParam && idParam) {
-            // Check if view matches enum
-            if (Object.values(SystemView).includes(viewParam as SystemView)) {
-                setPendingDeepLink({ view: viewParam as SystemView, id: idParam });
+        const v = params.get('view');
+        const id = params.get('id');
+        if (v && id) {
+            const viewKey = Object.keys(SystemView).find(k => k === v) as SystemView;
+            if (viewKey) {
+                setCurrentView(viewKey);
+                setFocusItem({ view: viewKey, id });
             }
         }
-
-        setIsLoading(false);
     }, [isDataLoaded, allTeachers]);
 
-    // Apply Deep Link once User is Logged In
+    // Real-time SQL Notifications (If enabled)
     useEffect(() => {
-        if (currentUser && pendingDeepLink) {
-            setCurrentView(pendingDeepLink.view);
-            setFocusItem({ view: pendingDeepLink.view, id: pendingDeepLink.id });
-            setPendingDeepLink(null); // Clear after applying
-            
-            // Clean URL
-            window.history.replaceState({}, document.title, window.location.pathname);
-        }
-    }, [currentUser, pendingDeepLink]);
-
-    // --- DIRECTOR CALENDAR AUTO-CHECK NOTIFICATIONS ---
-    useEffect(() => {
-        // Run this check once when app loads (if user is logged in)
-        // Ideally, this should be a Server Function (Cloud Functions), but for Client-side only app,
-        // we run it when ANY authorized user opens the app to trigger notifications for the director.
-        const checkCalendarNotifications = async () => {
-            if (!currentUser || !isConfigured || !db) return;
-
-            try {
-                // Fetch Config: Try LocalStorage first, then Firestore
-                let config: SystemConfig | null = null;
-                
-                try {
-                    const local = localStorage.getItem('schoolos_system_config');
-                    if (local) config = JSON.parse(local);
-                } catch(e) {}
-
-                try {
-                    const configDoc = await getDoc(doc(db, "system_config", "settings"));
-                    if (configDoc.exists()) {
-                        config = configDoc.data() as SystemConfig;
-                    }
-                } catch(e) {}
-
-                if (!config || !config.telegramBotToken) return;
-
-                // Find Director(s)
-                const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DIRECTOR') && t.telegramChatId);
-                if (directors.length === 0) return;
-
-                const todayStr = new Date().toISOString().split('T')[0];
-                const tomorrow = new Date(); 
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                const tomorrowStr = tomorrow.toISOString().split('T')[0];
-
-                // Query Events matching Today or Tomorrow that haven't been notified
-                const q = query(
-                    collection(db, "director_events"),
-                    where("schoolId", "==", currentUser.schoolId),
-                    where("date", "in", [todayStr, tomorrowStr])
-                );
-
-                const snapshot = await getDocs(q);
-                
-                snapshot.forEach(async (docSnap) => {
-                    const evt = docSnap.data() as DirectorEvent;
-                    let shouldUpdate = false;
-                    let notifType = '';
-
-                    // Check Tomorrow (1 Day Before)
-                    if (evt.date === tomorrowStr && !evt.notifiedOneDayBefore) {
-                        notifType = 'TOMORROW';
-                        shouldUpdate = true;
-                    }
-                    // Check Today (On Day)
-                    else if (evt.date === todayStr && !evt.notifiedOnDay) {
-                        notifType = 'TODAY';
-                        shouldUpdate = true;
-                    }
-
-                    if (shouldUpdate && notifType && config) {
-                        // 1. Send Telegram
-                        const title = notifType === 'TOMORROW' ? "แจ้งเตือนภารกิจวันพรุ่งนี้" : "แจ้งเตือนภารกิจวันนี้";
-                        const icon = notifType === 'TOMORROW' ? "⏰" : "🔔";
-                        const message = `${icon} <b>${title}</b>\n` +
-                                        `เรื่อง: ${evt.title}\n` +
-                                        `วันที่: ${evt.date}\n` +
-                                        `เวลา: ${evt.startTime}\n` +
-                                        `สถานที่: ${evt.location}`;
-                        
-                        const baseUrl = config.appBaseUrl || window.location.origin;
-                        const deepLink = `${baseUrl}?view=DIRECTOR_CALENDAR`;
-
-                        directors.forEach(d => {
-                            // Ensure config is not null before accessing token
-                            if (config && config.telegramBotToken && d.telegramChatId) {
-                                sendTelegramMessage(config.telegramBotToken, d.telegramChatId, message, deepLink);
-                            }
-                        });
-
-                        // 2. Mark as Notified in DB to prevent spam
-                        const updateField = notifType === 'TOMORROW' ? { notifiedOneDayBefore: true } : { notifiedOnDay: true };
-                        await updateDoc(docSnap.ref, updateField);
-                    }
-                });
-
-            } catch (e) {
-                console.error("Auto-Notification Check Failed:", e);
-            }
-        };
-
-        // Delay slightly to ensure auth loaded
-        const timer = setTimeout(checkCalendarNotifications, 3000);
-        return () => clearTimeout(timer);
-
-    }, [currentUser, isDataLoaded]);
-
-
-    // --- NOTIFICATION HELPERS ---
-    const requestNotificationPermission = async () => {
-        if ('Notification' in window && Notification.permission !== 'granted') {
-            await Notification.requestPermission();
-        }
-    };
-
-    useEffect(() => {
-        requestNotificationPermission();
-    }, []);
-
-    const sendSystemNotification = (title: string, body: string, linkTo?: SystemView, linkId?: string) => {
-        // 1. Browser Notification
-        if ('Notification' in window && Notification.permission === 'granted') {
-            const notif = new Notification(title, { body, icon: '/vite.svg' });
-            
-            // Handle click on the system notification
-            if (linkTo) {
-                notif.onclick = (e) => {
-                    e.preventDefault();
-                    window.focus();
-                    setCurrentView(linkTo);
-                    if (linkId) {
-                        setFocusItem({ view: linkTo, id: linkId });
-                    }
-                    setNotification(null); // Clear toast
-                    notif.close();
-                };
-            }
-        }
-        // 2. Sound
-        try {
-            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-            audio.volume = 0.5;
-            audio.play().catch(() => {}); // Catch autoplay blocks
-        } catch(e) {}
-    };
-
-    // --- LEAVE LISTENER ---
-    useEffect(() => {
-        let unsubLeave: (() => void) | undefined;
+        if (!currentUser || !isSupabaseConfigured || !supabase) return;
         
-        if (currentUser && isConfigured && db) {
-            // Query for Pending requests in this school
-            const q = query(
-                collection(db, "leave_requests"), 
-                where("status", "==", "Pending"),
-                where("schoolId", "==", currentUser.schoolId) 
-            );
-            
-            // To handle "New Notification" sound, we track changes
-            let isInitial = true;
-
-            unsubLeave = onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
-                // Update Count for Badge
-                setPendingLeaveCount(snapshot.size);
-
-                if (currentUser.roles.includes('DIRECTOR')) {
-                    if (isInitial) {
-                        isInitial = false;
-                        return;
-                    }
-                    
-                    snapshot.docChanges().forEach((change) => {
-                        if (change.type === 'added') {
-                            const data = change.doc.data();
-                            const teacherName = data.teacherName || 'บุคลากร';
-                            const msg = `มีรายการลาใหม่จาก: ${teacherName} รอการอนุมัติ`;
-                            const leaveId = change.doc.id;
-
-                            setNotification({
-                                message: msg,
-                                type: 'info',
-                                linkTo: SystemView.LEAVE,
-                                linkId: leaveId
-                            });
-                            // Trigger system notification with link
-                            sendSystemNotification('อนุมัติการลา', msg, SystemView.LEAVE, leaveId);
-                        }
-                    });
+        const channel = supabase.channel('app_global_notifications')
+            .on('postgres_changes', { 
+                event: 'INSERT', schema: 'public', table: 'documents', 
+                filter: `school_id=eq.${currentUser.schoolId}` 
+            }, (payload) => {
+                // Document assigned to current user?
+                if (payload.new.target_teachers?.includes(currentUser.id)) {
+                    addNotification(`ได้รับหนังสือใหม่: ${payload.new.title}`, 'info', SystemView.DOCUMENTS, payload.new.id.toString());
                 }
-            });
-        } else if (!isConfigured) {
-            // Mock Mode count
-            const pending = MOCK_LEAVE_REQUESTS.filter(l => l.status === 'Pending').length;
-            setPendingLeaveCount(pending);
-        }
+            })
+            .on('postgres_changes', {
+                event: 'UPDATE', schema: 'public', table: 'leave_requests',
+                filter: `teacher_id=eq.${currentUser.id}`
+            }, (payload) => {
+                if (payload.new.status !== payload.old.status) {
+                    addNotification(`การลาของคุณได้รับสถานะ: ${payload.new.status}`, 'success', SystemView.LEAVE, payload.new.id.toString());
+                }
+            })
+            .subscribe();
 
-        return () => {
-            if (unsubLeave) unsubLeave();
-        };
+        return () => { supabase.removeChannel(channel); };
     }, [currentUser]);
 
-    // --- DOCUMENTS LISTENER ---
-    useEffect(() => {
-        let unsubDocs: (() => void) | undefined;
+    // --- Core Action Handlers ---
 
-        if (currentUser && isConfigured && db) {
-            // Query documents for this school
-            const qDocs = query(
-                collection(db, "documents"), 
-                where("schoolId", "==", currentUser.schoolId)
-            );
-
-            let isInitial = true;
-
-            unsubDocs = onSnapshot(qDocs, (snapshot: QuerySnapshot<DocumentData>) => {
-                if (isInitial) {
-                    isInitial = false;
-                    return;
-                }
-
-                snapshot.docChanges().forEach((change) => {
-                    const docData = change.doc.data();
-                    const docId = change.doc.id;
-
-                    // 1. Notify Director for New Pending Documents
-                    if (change.type === 'added' && docData.status === 'PendingDirector' && currentUser.roles.includes('DIRECTOR')) {
-                        const msg = `หนังสือราชการใหม่: ${docData.title} รอเกษียณ`;
-                        setNotification({
-                            message: msg,
-                            type: 'info',
-                            linkTo: SystemView.DOCUMENTS,
-                            linkId: docId
-                        });
-                        sendSystemNotification('งานสารบรรณ', msg, SystemView.DOCUMENTS, docId);
-                    }
-
-                    // 2. Notify Teachers for Distributed Documents
-                    if ((change.type === 'added' || change.type === 'modified') && docData.status === 'Distributed') {
-                        const targets = docData.targetTeachers || [];
-                        const acks = docData.acknowledgedBy || [];
-
-                        // If user is target and hasn't acknowledged yet
-                        if (targets.includes(currentUser.id) && !acks.includes(currentUser.id)) {
-                             const msg = `มีหนังสือสั่งการถึงท่าน: ${docData.title}`;
-                            setNotification({
-                                message: msg,
-                                type: 'alert',
-                                linkTo: SystemView.DOCUMENTS,
-                                linkId: docId
-                            });
-                            sendSystemNotification('หนังสือสั่งการ', msg, SystemView.DOCUMENTS, docId);
-                        }
-                    }
-                });
-            });
-        }
-
-        return () => {
-            if (unsubDocs) unsubDocs();
-        };
-    }, [currentUser]);
-
-
-    // UI State
-    const [currentView, setCurrentView] = useState<SystemView>(SystemView.DASHBOARD);
-
-    // --- Auth Handlers ---
     const handleLogin = (user: Teacher) => {
         setCurrentUser(user);
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ userId: user.id, isSuperAdmin: false }));
-    };
-
-    const handleRegister = async (schoolId: string, id: string, name: string) => {
-        const newUser: Teacher = {
-            id, schoolId, name, password: '123456', position: 'ครู', roles: ['TEACHER'], isFirstLogin: true
-        };
-        if (isConfigured && db) {
-            try { await setDoc(doc(db, 'teachers', newUser.id), newUser); } 
-            catch (e) { alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล"); return; }
-        } else {
-            setAllTeachers([...allTeachers, newUser]);
-        }
-        handleLogin(newUser);
-    };
-
-    const handleSuperAdminLogin = () => {
-        setIsSuperAdminMode(true);
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ isSuperAdmin: true }));
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ userId: user.id, isSA: false }));
+        addNotification(`ยินดีต้อนรับกลับ ${user.name}`, 'success');
     };
 
     const handleLogout = () => {
+        if (!confirm("ยืนยันการออกจากระบบ?")) return;
         setCurrentUser(null);
         setIsSuperAdminMode(false);
         localStorage.removeItem(SESSION_KEY);
-        setCurrentView(SystemView.DASHBOARD);
+        // Reset URL params
+        window.history.replaceState({}, document.title, window.location.pathname);
     };
 
-    const handleFirstLoginComplete = async (newPass: string, position: string) => {
-        if (!currentUser) return;
-        const updatedUser: Teacher = { 
-            ...currentUser, 
-            password: newPass, 
-            position: position, 
-            isFirstLogin: false, 
-            roles: position.includes('ผู้อำนวยการ') ? (['DIRECTOR', 'TEACHER'] as TeacherRole[]) : currentUser.roles
+    const addNotification = (message: string, type: 'info' | 'alert' | 'success' = 'info', view?: SystemView, targetId?: string) => {
+        const newNotif: AppNotification = {
+            id: Math.random().toString(36).substring(7),
+            message, type, timestamp: Date.now(), read: false, view, targetId
         };
-
-        if (isConfigured && db) {
-            await setDoc(doc(db, 'teachers', updatedUser.id), updatedUser);
-        } else {
-            const updatedList = allTeachers.map(t => t.id === currentUser.id ? updatedUser : t);
-            setAllTeachers(updatedList);
-        }
-        setCurrentUser(updatedUser);
-        alert('ตั้งค่าเรียบร้อยแล้ว ยินดีต้อนรับเข้าสู่ระบบ');
+        setNotifications(prev => [newNotif, ...prev].slice(0, 10)); // Keep last 10
     };
 
-    // --- School & User CRUD ---
-    const handleCreateSchool = async (newSchool: School) => {
-        if (isConfigured && db) await setDoc(doc(db, 'schools', newSchool.id), newSchool);
-        else setAllSchools([...allSchools, newSchool]);
-    };
-    const handleUpdateSchool = async (updatedSchool: School) => {
-        if (isConfigured && db) await setDoc(doc(db, 'schools', updatedSchool.id), updatedSchool);
-        else setAllSchools(allSchools.map(s => s.id === updatedSchool.id ? updatedSchool : s));
-    };
-    const handleDeleteSchool = async (schoolId: string) => {
-        if (isConfigured && db) await deleteDoc(doc(db, 'schools', schoolId));
-        else setAllSchools(allSchools.filter(s => s.id !== schoolId));
-    };
-    const handleAddTeacher = async (newTeacher: Teacher) => {
-        if (isConfigured && db) await setDoc(doc(db, 'teachers', newTeacher.id), newTeacher);
-        else setAllTeachers([...allTeachers, newTeacher]);
-    };
-    const handleEditTeacher = async (updatedTeacher: Teacher) => {
-        if (isConfigured && db) await setDoc(doc(db, 'teachers', updatedTeacher.id), updatedTeacher);
-        else setAllTeachers(allTeachers.map(t => t.id === updatedTeacher.id ? updatedTeacher : t));
-    };
-    const handleDeleteTeacher = async (teacherId: string) => {
-        if (isConfigured && db) await deleteDoc(doc(db, 'teachers', teacherId));
-        else setAllTeachers(allTeachers.filter(t => t.id !== teacherId));
-    };
-
-    const handleNotificationClick = () => {
-        if (notification?.linkTo) {
-            setCurrentView(notification.linkTo);
-            if (notification.linkId) {
-                setFocusItem({ view: notification.linkTo, id: notification.linkId });
-            }
-            setNotification(null);
+    const handleUpdateUser = async (updated: Teacher) => {
+        setAllTeachers(prev => prev.map(t => t.id === updated.id ? updated : t));
+        setCurrentUser(updated);
+        // Sync to SQL if possible
+        if (isSupabaseConfigured && supabase) {
+            await supabase.from('profiles').update({
+                name: updated.name, position: updated.position,
+                // Fix: Access camelCase properties from Teacher object instead of snake_case
+                password: updated.password, signature_base_64: updated.signatureBase64,
+                telegram_chat_id: updated.telegramChatId
+            }).eq('id', updated.id);
         }
     };
 
-    // --- Renderers ---
-    if (isLoading || !isDataLoaded) {
-        return <div className="h-screen flex items-center justify-center bg-slate-100 text-slate-400 gap-2"><Loader className="animate-spin"/> กำลังเชื่อมต่อฐานข้อมูล...</div>;
+    // --- UI Layout Renderers ---
+
+    if (isLoading) {
+        return (
+            <div className="h-screen flex flex-col items-center justify-center bg-slate-50 gap-6 font-sarabun">
+                <div className="relative">
+                    <div className="w-24 h-24 border-4 border-blue-100 rounded-full"></div>
+                    <Loader className="absolute top-0 animate-spin text-blue-600" size={96} />
+                </div>
+                <div className="text-center">
+                    <h2 className="text-xl font-black text-slate-800 tracking-tight">SCHOOL OS</h2>
+                    <p className="text-slate-400 font-bold text-xs uppercase tracking-[0.3em] mt-1">Booting Smart Platform</p>
+                </div>
+            </div>
+        );
+    }
+    
+    if (!currentUser && !isSuperAdminMode) {
+        return (
+            <LoginScreen 
+                schools={allSchools} 
+                teachers={allTeachers} 
+                onLogin={handleLogin} 
+                onRegister={(sid, id, n) => {
+                     const newUser: Teacher = { id, schoolId: sid, name: n, position: 'ครู', roles: ['TEACHER'], password: '123456', isFirstLogin: true };
+                     setAllTeachers(prev => [...prev, newUser]);
+                     handleLogin(newUser);
+                }} 
+                onSuperAdminLogin={() => setIsSuperAdminMode(true)} 
+            />
+        );
     }
 
     if (isSuperAdminMode) {
-        return <SuperAdminDashboard schools={allSchools} teachers={allTeachers} onCreateSchool={handleCreateSchool} onUpdateSchool={handleUpdateSchool} onDeleteSchool={handleDeleteSchool} onUpdateTeacher={handleEditTeacher} onLogout={handleLogout} />;
+        return (
+            <SuperAdminDashboard 
+                schools={allSchools} 
+                teachers={allTeachers} 
+                onCreateSchool={async (s) => setAllSchools([...allSchools, s])} 
+                onUpdateSchool={async (s) => setAllSchools(allSchools.map(x => x.id === s.id ? s : x))} 
+                onDeleteSchool={async (id) => setAllSchools(allSchools.filter(x => x.id !== id))} 
+                onUpdateTeacher={async (t) => setAllTeachers(allTeachers.map(x => x.id === t.id ? t : x))} 
+                onDeleteTeacher={async (id) => setAllTeachers(allTeachers.filter(x => x.id !== id))} 
+                onLogout={handleLogout} 
+            />
+        );
     }
 
-    if (!currentUser) {
-        return <LoginScreen schools={allSchools} teachers={allTeachers} onLogin={handleLogin} onRegister={handleRegister} onSuperAdminLogin={handleSuperAdminLogin} />;
+    if (currentUser?.isFirstLogin) {
+        return (
+            <FirstLoginSetup 
+                user={currentUser} 
+                onComplete={async (p, pos) => {
+                    const updated = { ...currentUser, password: p, position: pos, isFirstLogin: false };
+                    await handleUpdateUser(updated);
+                }} 
+                onLogout={handleLogout} 
+            />
+        );
     }
 
-    if (currentUser.isFirstLogin) {
-        return <FirstLoginSetup user={currentUser} onComplete={handleFirstLoginComplete} onLogout={handleLogout} />;
-    }
+    const currentSchool = allSchools.find(s => s.id === currentUser?.schoolId) || MOCK_SCHOOLS[0];
 
-    // --- Main App Logic ---
-    const schoolTeachers = allTeachers.filter(t => t.schoolId === currentUser.schoolId);
-    const currentSchool = allSchools.find(s => s.id === currentUser.schoolId);
-
-    // --- CARD DATA DEFINITION ---
-    // REORDERED MODULES: Documents -> Leave -> Calendar -> Academic -> Finance -> Plan -> Attendance -> Admin -> Profile
-    const modules = [
-        {
-            id: SystemView.DOCUMENTS,
-            title: 'งานสารบรรณ',
-            slogan: 'รับ-ส่ง รวดเร็ว ทันใจ',
-            icon: FileText,
-            color: 'from-blue-500 to-cyan-400',
-            shadow: 'shadow-blue-200',
-            visible: true
-        },
-        {
-            id: SystemView.LEAVE,
-            title: 'ระบบการลา',
-            slogan: 'โปร่งใส ตรวจสอบง่าย',
-            icon: Users,
-            color: 'from-emerald-500 to-teal-400',
-            shadow: 'shadow-emerald-200',
-            visible: true,
-            // Add notification badge logic here
-            badge: pendingLeaveCount > 0 ? `มีใบลา ${pendingLeaveCount} ใบ` : null
-        },
-        {
-            id: SystemView.DIRECTOR_CALENDAR,
-            title: 'ปฏิทินปฏิบัติงาน ผอ.',
-            slogan: 'แจ้งเตือนนัดหมาย และภารกิจ',
-            icon: Calendar,
-            color: 'from-indigo-500 to-blue-400',
-            shadow: 'shadow-indigo-200',
-            visible: true 
-        },
-        {
-            id: SystemView.ACADEMIC, // NEW
-            title: 'งานวิชาการ',
-            slogan: 'สถิตินักเรียน / ผลสอบ O-NET',
-            icon: GraduationCap,
-            color: 'from-violet-500 to-fuchsia-400', // Adjusted color
-            shadow: 'shadow-violet-200',
-            visible: true 
-        },
-        {
-            id: SystemView.FINANCE,
-            title: 'ระบบการเงิน',
-            slogan: 'คุมงบประมาณ อย่างมีประสิทธิภาพ',
-            icon: Activity,
-            color: 'from-amber-500 to-orange-400',
-            shadow: 'shadow-amber-200',
-            visible: currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('FINANCE_BUDGET') || currentUser.roles.includes('FINANCE_NONBUDGET')
-        },
-        {
-            id: SystemView.PLAN,
-            title: 'แผนปฏิบัติการ',
-            slogan: 'วางแผนแม่นยำ สู่ความสำเร็จ',
-            icon: CalendarRange,
-            color: 'from-cyan-500 to-sky-400', // Adjusted color
-            shadow: 'shadow-cyan-200',
-            visible: true
-        },
-        {
-            id: SystemView.ATTENDANCE,
-            title: 'ลงเวลาทำงาน',
-            slogan: 'เช็คเวลาแม่นยำ ด้วย GPS',
-            icon: Clock,
-            color: 'from-rose-500 to-pink-400',
-            shadow: 'shadow-rose-200',
-            visible: true
-        },
-        {
-            id: SystemView.ADMIN_USERS,
-            title: 'ผู้ดูแลระบบ',
-            slogan: 'ตั้งค่าระบบ และกำหนดสิทธิ์',
-            icon: Settings,
-            color: 'from-slate-600 to-slate-400',
-            shadow: 'shadow-slate-200',
-            visible: currentUser.roles.includes('SYSTEM_ADMIN') || currentUser.roles.includes('DIRECTOR')
-        },
-        {
-            id: SystemView.PROFILE,
-            title: 'ข้อมูลส่วนตัว',
-            slogan: 'แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล',
-            icon: UserCircle,
-            color: 'from-purple-500 to-indigo-400',
-            shadow: 'shadow-purple-200',
-            visible: true
-        }
-    ];
-
-    // --- DASHBOARD COMPONENT ---
-    const DashboardCards = () => (
-        <div className="p-4 md:p-8 animate-fade-in pb-24">
-            <div className="max-w-7xl mx-auto">
-                <div className="mb-8 flex items-center gap-4">
-                    {currentSchool?.logoBase64 ? (
-                        <img src={currentSchool.logoBase64} alt="Logo" className="w-16 h-16 rounded-xl object-contain bg-white shadow-sm border" />
-                    ) : (
-                        <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center text-white shadow-lg">
-                            <Building2 size={32}/>
-                        </div>
-                    )}
-                    <div>
-                        <h2 className="text-3xl font-bold text-slate-800">สวัสดี, {currentUser.name}</h2>
-                        <p className="text-slate-500">{currentUser.position} | {currentSchool?.name}</p>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {modules.filter(m => m.visible).map((module) => {
-                        const Icon = module.icon;
-                        return (
-                            <button
-                                key={module.id}
-                                onClick={() => setCurrentView(module.id)}
-                                className={`group relative overflow-hidden rounded-3xl p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl bg-white border border-slate-100 shadow-lg ${module.shadow}`}
-                            >
-                                <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${module.color} opacity-10 rounded-bl-full transition-transform group-hover:scale-110`}></div>
-                                
-                                <div className="flex flex-col h-full justify-between items-start relative z-10">
-                                    <div className="flex justify-between w-full items-start">
-                                        <div className={`p-4 rounded-2xl bg-gradient-to-br ${module.color} text-white shadow-md mb-6`}>
-                                            <Icon size={32} />
-                                        </div>
-                                        {/* Notification Badge */}
-                                        {module.badge && (
-                                            <div className="bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-md border-2 border-white">
-                                                {module.badge}
-                                            </div>
-                                        )}
-                                    </div>
-                                    
-                                    <div className="text-left w-full">
-                                        <h3 className="text-xl font-bold text-slate-800 mb-1 group-hover:text-blue-700 transition-colors">
-                                            {module.title}
-                                        </h3>
-                                        <p className="text-slate-500 font-medium text-sm">
-                                            {module.slogan}
-                                        </p>
-                                    </div>
-
-                                    <div className="mt-4 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
-                                        <div className={`h-full bg-gradient-to-r ${module.color} w-0 group-hover:w-full transition-all duration-500 ease-out`}></div>
-                                    </div>
-                                </div>
-                            </button>
-                        );
-                    })}
-                </div>
-
-                <div className="mt-8 flex justify-end">
-                     <div className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 ${isConfigured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {isConfigured ? <Database size={14}/> : <ServerOff size={14}/>}
-                        {isConfigured ? 'System Online' : 'Offline Mode'}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-
-    const getSystemTitle = () => {
-        const activeModule = modules.find(m => m.id === currentView);
-        return activeModule ? activeModule.title : 'หน้าหลัก';
-    };
-
-    const renderContent = () => {
-        if (!currentSchool) return <div className="p-8 text-center text-slate-500">ไม่พบข้อมูลโรงเรียน</div>;
+    const renderView = () => {
         switch (currentView) {
-            case SystemView.PROFILE: return <UserProfile currentUser={currentUser} onUpdateUser={setCurrentUser} />;
-            case SystemView.DIRECTOR_CALENDAR: return <DirectorCalendar currentUser={currentUser} allTeachers={schoolTeachers} />;
-            case SystemView.ACADEMIC: return <AcademicSystem currentUser={currentUser} />; // NEW
+            case SystemView.DASHBOARD: 
+                return (
+                    <div className="space-y-8 animate-fade-in pb-20">
+                         {/* Welcome Banner */}
+                         <div className="bg-white p-10 rounded-[3rem] shadow-xl shadow-blue-900/5 border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-8 relative overflow-hidden">
+                             <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-bl-full -z-10 opacity-50"></div>
+                             <div className="flex items-center gap-6">
+                                <div className="p-5 bg-blue-600 text-white rounded-[2rem] shadow-2xl shadow-blue-500/20">
+                                    <Monitor size={36}/>
+                                </div>
+                                <div>
+                                    <h2 className="text-4xl font-black text-slate-800 tracking-tight">ยินดีต้อนรับสู่ระบบบริหารจัดการ</h2>
+                                    <p className="text-slate-400 font-bold text-lg mt-1">Smart SchoolOS v5.0 | {currentSchool.name}</p>
+                                </div>
+                             </div>
+                             <div className="flex gap-3">
+                                 <button onClick={() => setCurrentView(SystemView.DOCUMENTS)} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:scale-105 transition-all">งานสารบรรณ</button>
+                                 <button onClick={() => setCurrentView(SystemView.LEAVE)} className="bg-blue-50 text-blue-600 px-8 py-3 rounded-2xl font-black border border-blue-100 hover:bg-blue-100 transition-all">ระบบการลา</button>
+                             </div>
+                         </div>
+
+                         {/* Status Grid */}
+                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-50 shadow-sm flex flex-col gap-4">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">บุคลากรทั้งหมด</p>
+                                <div className="flex items-end justify-between">
+                                    <span className="text-4xl font-black text-slate-800">{allTeachers.filter(t => t.schoolId === currentSchool.id).length}</span>
+                                    <UserCircle className="text-slate-100" size={48}/>
+                                </div>
+                             </div>
+                             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-50 shadow-sm flex flex-col gap-4">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">ฐานข้อมูลเชื่อมต่อ</p>
+                                <div className="flex items-end justify-between">
+                                    <span className={`text-xl font-black uppercase tracking-widest ${syncSource === 'SQL' ? 'text-emerald-600' : 'text-blue-600'}`}>{syncSource} Cloud</span>
+                                    <Database className="text-slate-100" size={48}/>
+                                </div>
+                             </div>
+                             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-50 shadow-sm flex flex-col gap-4">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">สถานะระบบ</p>
+                                <div className="flex items-end justify-between">
+                                    <span className="text-xl font-black text-emerald-600 flex items-center gap-2">
+                                        <CheckCircle2 size={24}/> Online
+                                    </span>
+                                    <Globe className="text-slate-100" size={48}/>
+                                </div>
+                             </div>
+                         </div>
+                         
+                         {/* Empty Space Placeholder */}
+                         <div className="py-20 text-center bg-white rounded-[3.5rem] border-2 border-dashed border-slate-100">
+                             <LayoutGrid className="mx-auto text-slate-100 mb-4" size={64}/>
+                             <p className="text-slate-400 font-black uppercase tracking-[0.3em]">กรุณาเลือกเมนูเพื่อแสดงข้อมูลเชิงลึก</p>
+                         </div>
+                    </div>
+                );
             case SystemView.DOCUMENTS: 
                 return <DocumentsSystem 
-                    currentUser={currentUser} 
-                    allTeachers={schoolTeachers} 
-                    focusDocId={focusItem?.view === SystemView.DOCUMENTS ? focusItem.id : null}
-                    onClearFocus={() => setFocusItem(null)}
+                    currentUser={currentUser!} 
+                    currentSchool={currentSchool} 
+                    allTeachers={allTeachers} 
+                    focusDocId={focusItem?.view === SystemView.DOCUMENTS ? focusItem.id : null} 
+                    onClearFocus={() => setFocusItem(null)} 
                 />;
             case SystemView.LEAVE: 
                 return <LeaveSystem 
-                    currentUser={currentUser} 
-                    allTeachers={schoolTeachers} 
+                    currentUser={currentUser!} 
                     currentSchool={currentSchool} 
-                    focusRequestId={focusItem?.view === SystemView.LEAVE ? focusItem.id : null}
-                    onClearFocus={() => setFocusItem(null)}
+                    allTeachers={allTeachers} 
+                    focusRequestId={focusItem?.view === SystemView.LEAVE ? focusItem.id : null} 
+                    onClearFocus={() => setFocusItem(null)} 
                 />;
-            case SystemView.FINANCE: return <FinanceSystem currentUser={currentUser} allTeachers={schoolTeachers} />; // Pass schoolTeachers as allTeachers
-            case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool} />;
-            case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} />;
-            case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool} onUpdateSchool={handleUpdateSchool} onAddTeacher={handleAddTeacher} onEditTeacher={handleEditTeacher} onDeleteTeacher={handleDeleteTeacher} />;
-            default: return <DashboardCards />;
+            case SystemView.FINANCE: 
+                return <FinanceSystem currentUser={currentUser!} allTeachers={allTeachers} />;
+            case SystemView.ATTENDANCE: 
+                return <AttendanceSystem currentUser={currentUser!} currentSchool={currentSchool} allTeachers={allTeachers} />;
+            case SystemView.PLAN: 
+                return <ActionPlanSystem currentUser={currentUser!} />;
+            case SystemView.ACADEMIC: 
+                return <AcademicSystem currentUser={currentUser!} />;
+            case SystemView.ADMIN_USERS: 
+                return <AdminUserManagement 
+                    teachers={allTeachers.filter(t => t.schoolId === currentSchool.id)} 
+                    onAddTeacher={(t) => setAllTeachers([...allTeachers, t])} 
+                    onEditTeacher={(t) => setAllTeachers(allTeachers.map(x => x.id === t.id ? t : x))} 
+                    onDeleteTeacher={(id) => setAllTeachers(allTeachers.filter(x => x.id !== id))} 
+                    currentSchool={currentSchool} 
+                    onUpdateSchool={(s) => setAllSchools(allSchools.map(x => x.id === s.id ? s : x))} 
+                />;
+            case SystemView.PROFILE: 
+                return <UserProfile currentUser={currentUser!} onUpdateUser={handleUpdateUser} />;
+            case SystemView.DIRECTOR_CALENDAR: 
+                return <DirectorCalendar currentUser={currentUser!} allTeachers={allTeachers} />;
+            default: 
+                return <div>Unexpected Navigation State. Return to <button onClick={() => setCurrentView(SystemView.DASHBOARD)}>Home</button></div>;
         }
     };
 
     return (
-        <div className="flex flex-col min-h-screen bg-slate-50 font-sarabun">
-            
-            {/* --- NOTIFICATION TOAST --- */}
-            {notification && (
-                <div 
-                    onClick={handleNotificationClick}
-                    className="fixed bottom-6 right-6 z-50 animate-slide-up print:hidden cursor-pointer"
-                >
-                    <div className={`border-l-4 shadow-2xl rounded-lg p-4 flex items-start gap-4 max-w-sm transition-transform hover:scale-105 bg-white ${
-                        notification.type === 'alert' ? 'border-red-500 ring-1 ring-red-100' : 'border-blue-500 ring-1 ring-blue-100'
-                    }`}>
-                        <div className={`p-2.5 rounded-full shrink-0 ${
-                            notification.type === 'alert' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'
-                        }`}>
-                            <Bell size={24}/>
+        <div className="flex h-screen bg-[#f8fafc] overflow-hidden font-sarabun text-slate-900">
+            {/* Sidebar Component */}
+            <Sidebar
+                currentView={currentView}
+                onChangeView={setCurrentView}
+                isMobileOpen={isMobileOpen}
+                toggleMobile={() => setIsMobileOpen(!isMobileOpen)}
+                currentUser={currentUser!}
+                allTeachers={allTeachers}
+                onSwitchUser={(id) => {
+                    const user = allTeachers.find(t => t.id === id);
+                    if (user) {
+                        setCurrentUser(user);
+                        localStorage.setItem(SESSION_KEY, JSON.stringify({ userId: id, isSA: false }));
+                        addNotification(`สลับผู้ใช้งานเป็น: ${user.name}`, 'info');
+                    }
+                }}
+                schoolLogo={currentSchool.logoBase64}
+            />
+
+            <div className="flex-1 flex flex-col overflow-hidden relative">
+                
+                {/* Global Application Header */}
+                <header className="h-20 bg-white/80 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-8 lg:px-14 shrink-0 z-40 sticky top-0">
+                    <div className="flex items-center gap-6">
+                        <button onClick={() => setIsMobileOpen(true)} className="lg:hidden p-3 bg-slate-50 text-slate-600 rounded-2xl hover:bg-slate-100 transition-colors">
+                            <LayoutGrid size={24}/>
+                        </button>
+                        <div className="flex flex-col">
+                            <h1 className="text-2xl font-black text-slate-800 tracking-tight truncate max-w-[200px] md:max-w-md">{currentSchool.name}</h1>
+                            <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">
+                                <span className="flex items-center gap-1"><RefreshCw size={10} className="text-blue-500"/> SYNCED</span>
+                                <span className="w-1 h-1 bg-slate-200 rounded-full"></span>
+                                <span>{currentView}</span>
+                            </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                            <h4 className="font-bold text-slate-800 text-sm mb-1">{notification.type === 'alert' ? 'แจ้งเตือนด่วน' : 'แจ้งเตือนระบบ'}</h4>
-                            <p className="text-sm text-slate-600 leading-snug break-words">{notification.message}</p>
-                            {notification.linkTo && (
-                                <p className="text-xs text-blue-600 mt-2 flex items-center gap-1 font-bold bg-blue-50 w-fit px-2 py-1 rounded hover:bg-blue-100 transition-colors">
-                                    คลิกเพื่อเปิดดู <ExternalLink size={10}/>
-                                </p>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        {/* Notification Bell */}
+                        <div className="relative">
+                            <button 
+                                onClick={() => setShowNotificationCenter(!showNotificationCenter)}
+                                className={`p-3 rounded-2xl transition-all relative ${notifications.filter(n => !n.read).length > 0 ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                            >
+                                <Bell size={22}/>
+                                {notifications.filter(n => !n.read).length > 0 && (
+                                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-white text-[10px] font-black flex items-center justify-center border-2 border-white animate-bounce">
+                                        {notifications.filter(n => !n.read).length}
+                                    </span>
+                                )}
+                            </button>
+                            
+                            {/* Notification Dropdown */}
+                            {showNotificationCenter && (
+                                <div className="absolute top-full right-0 mt-4 w-80 bg-white rounded-[2rem] shadow-2xl border border-slate-100 p-4 animate-scale-up z-50">
+                                    <div className="flex justify-between items-center px-4 mb-4 border-b pb-3 border-slate-50">
+                                        <h4 className="font-black text-slate-800 text-xs uppercase tracking-widest">การแจ้งเตือน</h4>
+                                        <button onClick={() => setNotifications([])} className="text-[10px] font-bold text-slate-400 hover:text-red-500 transition-colors">ล้างทั้งหมด</button>
+                                    </div>
+                                    <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+                                        {notifications.length === 0 ? (
+                                            <p className="text-center py-10 text-[10px] text-slate-300 font-black uppercase tracking-widest">ไม่มีการแจ้งเตือนใหม่</p>
+                                        ) : notifications.map(n => (
+                                            <div 
+                                                key={n.id} 
+                                                onClick={() => {
+                                                    if(n.view) {
+                                                        setCurrentView(n.view);
+                                                        if(n.targetId) setFocusItem({ view: n.view, id: n.targetId });
+                                                    }
+                                                    setNotifications(prev => prev.map(x => x.id === n.id ? {...x, read: true} : x));
+                                                    setShowNotificationCenter(false);
+                                                }}
+                                                className={`p-4 rounded-2xl cursor-pointer transition-all border-l-4 ${n.read ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-blue-500 hover:shadow-lg'}`}
+                                            >
+                                                <p className="text-xs font-bold text-slate-800 leading-relaxed">{n.message}</p>
+                                                <p className="text-[9px] text-slate-400 mt-2 font-mono">{new Date(n.timestamp).toLocaleTimeString()}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             )}
                         </div>
+
+                        {/* Power/Logout */}
                         <button 
-                            onClick={(e) => { e.stopPropagation(); setNotification(null); }} 
-                            className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-full"
+                            onClick={handleLogout} 
+                            className="p-3 bg-rose-50 text-rose-500 rounded-2xl hover:bg-rose-500 hover:text-white transition-all active:scale-90"
                         >
-                            <X size={16}/>
+                            <LogOut size={22}/>
                         </button>
                     </div>
-                </div>
-            )}
+                </header>
 
-            {/* --- HEADER --- */}
-            <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-200 shadow-sm print:hidden">
-                <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 flex items-center justify-center md:justify-between relative">
-                     {/* Left: Title & Back */}
-                     <div className="absolute left-4 md:static flex items-center gap-2 md:gap-4">
-                        {currentView !== SystemView.DASHBOARD && (
-                            <button 
-                                onClick={() => setCurrentView(SystemView.DASHBOARD)}
-                                className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"
-                            >
-                                <ChevronLeft size={24} />
-                            </button>
-                        )}
-                         <h1 className="text-lg md:text-xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent flex items-center gap-2">
-                            {currentView === SystemView.DASHBOARD ? (
-                                <><LayoutGrid className="text-slate-800 hidden md:block" size={24}/> Dashboard</>
-                            ) : getSystemTitle()}
-                        </h1>
+                {/* Main Dynamic Viewport */}
+                <main className="flex-1 overflow-y-auto p-6 md:p-10 lg:p-14 custom-scrollbar">
+                    <div className="max-w-[1600px] mx-auto">
+                        {renderView()}
                     </div>
+                </main>
 
-                    {/* Right: User Profile & Logout */}
-                    <div className="absolute right-4 md:static flex items-center gap-4">
-                        <div className="hidden md:flex flex-col items-end mr-2">
-                            <span className="text-sm font-bold text-slate-800">{currentUser.name}</span>
-                            <span className="text-[10px] text-slate-500">{currentUser.position}</span>
-                        </div>
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold shadow-md border-2 border-white cursor-pointer hover:scale-105 transition-transform">
-                            {currentUser.name[0]}
-                        </div>
-                        <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors p-2">
-                            <LogOut size={20} />
-                        </button>
+                {/* Mobile Bottom Navigation (Optional Enhancement) */}
+                <div className="lg:hidden h-16 bg-white border-t flex items-center justify-around px-4 shrink-0 z-40">
+                    <button onClick={() => setCurrentView(SystemView.DASHBOARD)} className={`p-2 rounded-xl ${currentView === SystemView.DASHBOARD ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><LayoutGrid size={24}/></button>
+                    <button onClick={() => setCurrentView(SystemView.DOCUMENTS)} className={`p-2 rounded-xl ${currentView === SystemView.DOCUMENTS ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><FileText size={24}/></button>
+                    <button onClick={() => setCurrentView(SystemView.LEAVE)} className={`p-2 rounded-xl ${currentView === SystemView.LEAVE ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><CalendarIcon size={24}/></button>
+                    <button onClick={() => setCurrentView(SystemView.PROFILE)} className={`p-2 rounded-xl ${currentView === SystemView.PROFILE ? 'text-blue-600 bg-blue-50' : 'text-slate-400'}`}><UserCircle size={24}/></button>
+                </div>
+
+                {/* Sync Status Floating Badge */}
+                <div className="fixed bottom-6 left-6 z-50 pointer-events-none hidden md:block">
+                    <div className="bg-slate-900/90 text-white backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl border border-white/10">
+                        <div className={`w-2 h-2 rounded-full ${syncSource === 'SQL' ? 'bg-emerald-500 animate-pulse' : 'bg-blue-500'}`}></div>
+                        <span>CLOUD STATUS: {syncSource} CONNECTED</span>
                     </div>
                 </div>
-            </header>
+            </div>
 
-            {/* --- MAIN CONTENT --- */}
-            <main className="flex-1 w-full">
-                {currentView !== SystemView.DASHBOARD ? (
-                    <div className="max-w-7xl mx-auto p-4 md:p-8 pb-24 animate-fade-in">
-                         {renderContent()}
-                    </div>
-                ) : (
-                    renderContent()
-                )}
-            </main>
-
-            {/* --- STICKY FOOTER --- */}
-            <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-3 px-6 z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] print:hidden">
-                <div className="max-w-7xl mx-auto flex justify-between items-center">
-                    <div className="flex items-center gap-2 text-slate-600">
-                        <Building2 size={18} className="text-blue-600"/>
-                        <span className="font-bold text-sm md:text-base">{currentSchool?.name || 'SchoolOS System'}</span>
-                    </div>
-                    <div className="text-[10px] md:text-xs text-slate-400">
-                        © MR SIAM CH
-                    </div>
-                </div>
-            </footer>
+            {/* Application-wide Transitions & Scrollbars */}
+            <style>{`
+                .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+                .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 20px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+                
+                @keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+                .animate-scale-up { animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+                
+                @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+                .animate-fade-in { animation: fade-in 0.4s ease-out; }
+            `}</style>
         </div>
     );
 };
