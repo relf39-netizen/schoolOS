@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceRecord, Teacher, School, LeaveRequest } from '../types';
 import { 
@@ -55,18 +54,19 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
     );
 
     const fetchData = async () => {
-        if (!isConfigured || !supabase) return;
+        const client = supabase;
+        if (!isConfigured || !client) return;
         setIsLoadingData(true);
         setErrorMsg(null);
 
         try {
-            let query = supabase!.from('attendance').select('*').eq('school_id', currentUser.schoolId);
+            let queryBuilder = client.from('attendance').select('*').eq('school_id', currentUser.schoolId);
             if (isAdminView) {
-                query = query.eq('date', selectedDate);
+                queryBuilder = queryBuilder.eq('date', selectedDate);
             } else {
-                query = query.eq('teacher_id', currentUser.id).order('date', { ascending: false });
+                queryBuilder = queryBuilder.eq('teacher_id', currentUser.id).order('date', { ascending: false });
             }
-            const { data, error } = await query;
+            const { data, error } = await queryBuilder;
             if (error) throw error;
             const mappedData: AttendanceRecord[] = (data || []).map((r: any) => ({
                 id: r.id.toString(),
@@ -81,7 +81,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
             }));
             setHistory(mappedData);
 
-            const { data: leaves } = await supabase!.from('leave_requests')
+            const { data: leaves } = await client.from('leave_requests')
                 .select('*')
                 .eq('school_id', currentUser.schoolId)
                 .eq('status', 'Approved')
@@ -101,7 +101,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
             }
 
             const today = getTodayDateStr();
-            const { data: todayData } = await supabase!.from('attendance')
+            const { data: todayData } = await client.from('attendance')
                 .select('*')
                 .eq('teacher_id', currentUser.id)
                 .eq('date', today)
@@ -130,7 +130,8 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
     }, [currentUser.id, currentUser.schoolId, selectedDate, isAdminView]);
 
     const handleAttendanceAction = async (type: 'IN' | 'OUT') => {
-        if (!supabase) return;
+        const client = supabase;
+        if (!client) return;
         setIsProcessing(true);
         setErrorMsg(null);
         try {
@@ -155,7 +156,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
             const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
             if (type === 'IN') {
                 const status = timeStr > (currentSchool.lateTimeThreshold || '08:30') ? 'Late' : 'OnTime';
-                const { error } = await supabase!.from('attendance').insert([{
+                const { error } = await client.from('attendance').insert([{
                     school_id: currentUser.schoolId,
                     teacher_id: currentUser.id,
                     teacher_name: currentUser.name,
@@ -167,7 +168,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 if (error) throw error;
                 alert(`ลงเวลาเข้างานสำเร็จ: ${timeStr} น.`);
             } else {
-                const { error } = await supabase!.from('attendance')
+                const { error } = await client.from('attendance')
                     .update({ check_out_time: timeStr })
                     .eq('teacher_id', currentUser.id)
                     .eq('date', dateStr);
@@ -246,7 +247,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     </div>
                 </div>
 
-                {/* A4 Sheet Container: Absolutely NO shadows or borders on web preview as requested */}
+                {/* A4 Sheet Container */}
                 <div className="mx-auto bg-white my-0 print:my-0 min-h-[297mm] w-[210mm] print:w-full box-border p-[2.5cm_2cm_2cm_2.5cm] print:p-0 no-scrollbar overflow-visible print:overflow-visible">
                     <div className="flex flex-col h-full bg-white print:p-0 border-none outline-none">
                         {/* Header Section */}
@@ -273,103 +274,70 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                                 {teachersToDisplay.map((t, i) => {
                                     const record = history.find(h => h.teacherId === t.id);
                                     const leave = approvedLeaves.find(l => l.teacherId === t.id);
-                                    let statusText = 'ขาด / ยังไม่ลงชื่อ';
-                                    let statusClass = 'text-red-600 font-bold';
+                                    
+                                    let statusText = 'ขาด / ยังไม่ลงเวลา';
+                                    let statusColor = 'text-red-600';
+                                    
                                     if (record) {
                                         statusText = record.status === 'OnTime' ? 'มาปกติ' : 'มาสาย';
-                                        statusClass = record.status === 'OnTime' ? 'text-green-700' : 'text-orange-600';
+                                        statusColor = record.status === 'OnTime' ? 'text-green-600' : 'text-orange-600';
                                     } else if (leave) {
-                                        statusText = `ลา (${getLeaveTypeName(leave.type)})`;
-                                        statusClass = 'text-blue-700';
+                                        statusText = getLeaveTypeName(leave.type);
+                                        statusColor = 'text-blue-600';
                                     }
 
                                     return (
-                                        <tr key={t.id} className="break-inside-avoid">
-                                            <td className="border border-black p-2 text-center font-mono">{i + 1}</td>
-                                            <td className="border border-black p-2 font-bold">{t.name}</td>
-                                            <td className="border border-black p-2 text-slate-600">{t.position}</td>
-                                            <td className="border border-black p-2 text-center font-bold">{record?.checkInTime || '-'}</td>
-                                            <td className="border border-black p-2 text-center font-bold">{record?.checkOutTime || '-'}</td>
-                                            <td className={`border border-black p-2 text-center ${statusClass}`}>{statusText}</td>
+                                        <tr key={t.id} className="text-center font-medium">
+                                            <td className="border border-black p-2">{i + 1}</td>
+                                            <td className="border border-black p-2 text-left">{t.name}</td>
+                                            <td className="border border-black p-2 text-left">{t.position}</td>
+                                            <td className="border border-black p-2">{record?.checkInTime || '-'}</td>
+                                            <td className="border border-black p-2">{record?.checkOutTime || '-'}</td>
+                                            <td className={`border border-black p-2 font-bold ${statusColor}`}>{statusText}</td>
                                         </tr>
-                                    )
+                                    );
                                 })}
                             </tbody>
                         </table>
 
-                        {/* Signature Grid */}
-                        <div className="grid grid-cols-2 gap-4 mt-4 print:break-inside-avoid">
-                            {/* Left Side Summary */}
-                            <div className="border border-slate-300 bg-slate-50/20 p-4 rounded-xl">
-                                <h4 className="font-black text-slate-800 mb-2 border-b border-slate-300 pb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider">
-                                    <Users size={14}/> สรุปยอด (ไม่รวม ผอ.)
-                                </h4>
-                                <div className="space-y-1 text-xs font-bold">
-                                    <div className="flex justify-between"><span>มาปฏิบัติราชการ:</span><span className="text-green-700">{presentCount} ท่าน</span></div>
-                                    <div className="flex justify-between"><span>ลาป่วย / กิจ / อื่นๆ:</span><span className="text-blue-600">{leaveCount} ท่าน</span></div>
-                                    <div className="flex justify-between text-red-600"><span>ขาด / ยังไม่ลงเวลา:</span><span>{absentCount} ท่าน</span></div>
-                                    <div className="flex justify-between border-t border-slate-300 pt-1 font-black text-sm"><span>รวมบุคลากร:</span><span>{teachersToDisplay.length} ท่าน</span></div>
-                                </div>
+                        {/* Footer / Summary */}
+                        <div className="mt-auto grid grid-cols-3 gap-4 text-center text-sm font-bold pt-8">
+                            <div className="p-4 border border-black bg-slate-50">
+                                <p>มาปฏิบัติราชการ</p>
+                                <p className="text-2xl font-black mt-2">{presentCount} ท่าน</p>
                             </div>
-
-                            {/* Right Side Signature */}
-                            <div className="flex flex-col justify-end items-center text-center space-y-4">
-                                <div className="w-full">
-                                    <p className="mb-2 text-xs">ลงชื่อ..........................................................ผู้ตรวจสอบ</p>
-                                    <p className="font-black text-sm">({currentUser.name})</p>
-                                    <p className="text-[10px] text-slate-500 font-bold">ตำแหน่ง {currentUser.position}</p>
-                                </div>
+                            <div className="p-4 border border-black bg-slate-50">
+                                <p>ลา / ไปราชการ</p>
+                                <p className="text-2xl font-black mt-2">{leaveCount} ท่าน</p>
+                            </div>
+                            <div className="p-4 border border-black bg-slate-50">
+                                <p>ขาด / ไม่ลงเวลา</p>
+                                <p className="text-2xl font-black mt-2">{absentCount} ท่าน</p>
                             </div>
                         </div>
 
-                        {/* Director Signature */}
-                        <div className="text-center mt-12 pb-10 print:break-inside-avoid">
-                            <p className="mb-4 text-xs">ลงชื่อ......................................................ผู้อำนวยการโรงเรียน</p>
-                            <p className="font-black text-md">
-                                ( {allTeachers.find(t => t.roles.includes('DIRECTOR'))?.name || '......................................................'} )
-                            </p>
-                            <p className="text-[9px] mt-2 text-slate-400 font-black uppercase tracking-widest italic">ผู้อนุมัติและรับรองเวลาปฏิบัติราชการ</p>
+                        <div className="mt-20 flex justify-between px-10">
+                            <div className="text-center">
+                                <div className="mb-16">ลงชื่อ......................................................ผู้ตรวจ</div>
+                                <div>( {isAdminView ? currentUser.name : '......................................................'} )</div>
+                                <div className="mt-2">ตำแหน่ง......................................................</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="mb-16">ลงชื่อ......................................................ผู้อำนวยการ</div>
+                                <div>( {allTeachers.find(t => t.roles.includes('DIRECTOR'))?.name || '......................................................'} )</div>
+                                <div className="mt-2">ผู้อำนวยการโรงเรียน{currentSchool.name}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <style>{`
-                    /* บังคับลบ Scrollbar ทั้งหมดเพื่อป้องกันเส้นตรงเหมือนเคอร์เซอร์ */
                     .no-scrollbar-container::-webkit-scrollbar { display: none !important; width: 0 !important; }
-                    .no-scrollbar-container { -ms-overflow-style: none !important; scrollbar-width: none !important; }
-                    
-                    /* ลบ Scrollbar สำหรับตัวกระดาษ A4 */
                     .no-scrollbar::-webkit-scrollbar { display: none !important; width: 0 !important; }
-                    .no-scrollbar { -ms-overflow-style: none !important; scrollbar-width: none !important; }
-
                     @media print {
-                        @page { 
-                            size: A4 portrait; 
-                            margin: 0; 
-                        }
-                        body { 
-                            background: white !important; 
-                            -webkit-print-color-adjust: exact; 
-                            margin: 0 !important; 
-                            padding: 0 !important;
-                            overflow: visible !important;
-                        }
-                        /* บังคับระยะขอบกระดาษจริงและลบทุกอย่างที่เป็น UI */
-                        div.mx-auto { 
-                            width: 100% !important; 
-                            height: 100% !important;
-                            margin: 0 !important; 
-                            padding: 2.5cm 2cm 2cm 2.5cm !important; /* บน ซ้าย ล่าง ขวา */
-                            box-shadow: none !important;
-                            border: none !important;
-                            outline: none !important;
-                            page-break-after: always;
-                            overflow: visible !important;
-                        }
-                        div.no-scrollbar-container { overflow: visible !important; }
-                        thead { display: table-header-group !important; }
-                        tr { page-break-inside: avoid !important; }
-                        .no-print { display: none !important; }
+                        @page { size: A4 portrait; margin: 0; }
+                        body { background: white !important; -webkit-print-color-adjust: exact; }
+                        div.mx-auto { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 2.5cm 2cm 2cm 2.5cm !important; box-shadow: none !important; border: none !important; outline: none !important; page-break-after: always; }
                     }
                 `}</style>
             </div>
@@ -538,7 +506,6 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     )}
                 </div>
             </div>
-
             <style>{`
                 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } } .animate-shake { animation: shake 0.3s ease-in-out; }
             `}</style>
