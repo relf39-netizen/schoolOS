@@ -594,15 +594,18 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const notifyAtts = [...targetDoc.attachments];
             if (signedUrl) notifyAtts.unshift({ id: 'signed', name: 'บันทึกข้อสั่งการ (ศธ.)', type: 'LINK', url: signedUrl });
 
-            // 1. แจ้งเตือนผู้รับมอบหมาย (ครู หรือ รองฯ)
+            // 1. แจ้งเตือนผู้รับมอบหมาย (ครู หรือ รองฯ) - กรองไม่แจ้งเตือน ผอ.
             const notifyIds = nextStatus === 'PendingViceDirector' ? [viceId!] : targetTeacherIds;
             if (notifyIds.length > 0) {
-                const notifyList = allTeachers.filter(t => notifyIds.includes(t.id));
-                triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts);
+                // กรองเอาเฉพาะครูที่ไม่ใช่ ผอ. และ รองฯ ที่ถูกมอบหมาย
+                const notifyList = allTeachers.filter(t => notifyIds.includes(t.id) && !t.roles.includes('DIRECTOR'));
+                if (notifyList.length > 0) {
+                    triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts);
+                }
             }
 
-            // 2. แจ้งเตือนเจ้าหน้าที่ธุรการทราบ (ผอ. เกษียณแล้ว)
-            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER'));
+            // 2. แจ้งเตือนเจ้าหน้าที่ธุรการทราบ (ผอ. เกษียณแล้ว) - กรองไม่แจ้งเตือน ผอ.
+            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
             if (officers.length > 0) {
                 triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, `ผู้อำนวยการโรงเรียน`, notifyAtts, "✅ ผอ. เกษียณหนังสือเรียบร้อยแล้ว");
             }
@@ -626,10 +629,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const nowStr = new Date().toLocaleString('th-TH');
             const { error } = await client.from('documents').update({ status: 'PendingViceDirector', assigned_vice_director_id: assignedViceDirId, director_command: finalCommand, director_signature_date: nowStr }).eq('id', taskId);
             if (error) throw error;
-            if (vice) triggerTelegramNotification([vice], taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments);
             
-            // แจ้งธุรการทราบ
-            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER'));
+            // แจ้งเตือนรองฯ (ถ้าไม่ใช่ ผอ. - ซึ่งปกติรองฯ ก็ไม่ใช่ ผอ. อยู่แล้วแต่กันไว้ก่อน)
+            if (vice && !vice.roles.includes('DIRECTOR')) {
+                triggerTelegramNotification([vice], taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments);
+            }
+            
+            // แจ้งธุรการทราบ (ไม่แจ้งเตือน ผอ.)
+            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
             if (officers.length > 0) {
                 triggerTelegramNotification(officers, taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, "✅ ผอ. มอบหมายรองผู้อำนวยการดำเนินการแล้ว");
             }
@@ -1042,7 +1049,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         )}
                     </div>
 
-                    {/* Pagination Buttons */}
+                    {/* Pagination Buttons - RE-ADDED & VERIFIED */}
                     {totalPages > 1 && (
                         <div className="flex justify-center items-center gap-2 mt-8 py-4 bg-white rounded-2xl shadow-sm border border-slate-100 animate-fade-in">
                             <button 
@@ -1302,7 +1309,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
                             {/* Director Action Panel */}
                             {isDirector && selectedDoc.status === 'PendingDirector' && (
-                                <div className="bg-blue-50 p-2 md:p-10 rounded-xl md:rounded-[3.5rem] border-2 border-blue-400 shadow-2xl space-y-4 md:space-y-10 animate-slide-up relative overflow-hidden">
+                                <div className="bg-blue-50 p-2 md:p-10 rounded-xl md:rounded-[3.5rem] border-2 border-blue-400 shadow-2xl shadow-blue-500/10 space-y-4 md:space-y-10 animate-slide-up relative overflow-hidden">
                                     <div className="flex flex-col sm:flex-row justify-between items-center gap-4 border-b border-blue-200 pb-4 md:pb-6 relative z-10 px-4 md:px-0 pt-4 md:pt-0">
                                         <h3 className="text-base md:text-xl font-black text-slate-900 flex items-center gap-3"><PenTool size={18} className="text-blue-700"/> การสั่งการ (สร้างบันทึกข้อความ)</h3>
                                     </div>
@@ -1333,7 +1340,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
                             {/* Vice-Director Action Panel */}
                             {selectedDoc.status === 'PendingViceDirector' && (isViceDirector || selectedDoc.assignedViceDirectorId === currentUser.id) && (
-                                <div className="bg-indigo-50 p-2 md:p-10 rounded-xl md:rounded-[3.5rem] border-2 border-indigo-400 shadow-2xl space-y-4 md:space-y-10 animate-slide-up relative overflow-hidden">
+                                <div className="bg-indigo-50 p-2 md:p-10 rounded-xl md:rounded-[3.5rem] border-2 border-indigo-400 shadow-2xl shadow-indigo-500/10 space-y-4 md:space-y-10 animate-slide-up relative overflow-hidden">
                                     <div className="flex justify-between items-center relative z-10 px-4 md:px-0 pt-4 md:pt-0">
                                         <h3 className="text-base md:text-xl font-black text-slate-900 flex items-center gap-3"><PenTool size={18} className="text-indigo-700"/> การพิจารณา (ผู้รับมอบหมาย)</h3>
                                     </div>
