@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { LeaveRequest, Teacher, School, SystemConfig } from '../types';
 import { 
@@ -407,6 +408,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                 <div className="max-w-3xl mx-auto space-y-6 animate-slide-up">
                     <button onClick={() => setViewMode('LIST')} className="flex items-center gap-2 text-slate-500 font-black hover:text-emerald-600"><ArrowLeft size={18}/> ย้อนกลับ</button>
                     <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100">
+                        {/* Fix: Removed invalid escaped quotes around className value */}
                         <h3 className="text-3xl font-black text-slate-800 mb-8 flex items-center gap-3"><FilePlus className="text-emerald-600" size={36}/> แบบฟอร์มขออนุญาตลา</h3>
                         <form onSubmit={e => { e.preventDefault(); submitRequest(); }} className="space-y-8">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -417,12 +419,14 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
 
                             {leaveType === 'OffCampus' ? (
                                 <div className="space-y-6 animate-fade-in bg-blue-50 p-6 rounded-[2rem] border-2 border-blue-100">
+                                    {/* Fix: Removed invalid escaped quotes around className value */}
                                     <div className="flex items-center gap-2 text-blue-800 font-black mb-2"><Timer size={20}/> ระบุเวลาออกนอกบริเวณ (วันนี้: {getThaiDate(new Date().toISOString())})</div>
                                     <div className="grid grid-cols-2 gap-6">
                                         <div className="space-y-2"><label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest ml-1">เวลาที่ไป</label><input type="time" value={startTime} onChange={e=>setStartTime(e.target.value)} className="w-full px-5 py-4 border-2 border-white rounded-2xl font-bold outline-none focus:border-blue-500" required/></div>
                                         <div className="space-y-2"><label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest ml-1">เวลาที่กลับ</label><input type="time" value={endTime} onChange={e=>setEndTime(e.target.value)} className="w-full px-5 py-4 border-2 border-white rounded-2xl font-bold outline-none focus:border-blue-500" required/></div>
                                     </div>
                                     <div className="space-y-2">
+                                        {/* Fix: Removed invalid escaped quotes around className value */}
                                         <label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest ml-1 flex items-center gap-1"><UserPlus size={12}/> ครูผู้ดูแลนักเรียนแทน (ครูสอนแทน)</label>
                                         <input type="text" placeholder="ระบุชื่อครูที่ฝากห้อง/ฝากสอนแทน..." value={substituteName} onChange={e=>setSubstituteName(e.target.value)} className="w-full px-5 py-4 border-2 border-white rounded-2xl font-bold outline-none focus:border-blue-500" required/>
                                     </div>
@@ -514,6 +518,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
 
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 items-center justify-between">
                         <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
+                            {/* Fix: Removed invalid escaped quotes around className value */}
                             <div className="flex items-center gap-2 text-slate-400">
                                 <Filter size={20}/>
                                 <span className="text-sm font-bold text-slate-500 whitespace-nowrap">เลือกช่วงวันลา:</span>
@@ -562,23 +567,23 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                                             <div className="bg-red-50 p-4 rounded-2xl border border-red-100 text-center shadow-sm">
                                                 <div className="text-[10px] font-bold text-red-400 uppercase mb-1">ลาป่วย (วัน)</div>
-                                                <div className="text-2xl font-black text-red-600">{toThaiDigits(s.sick)}</div>
+                                                <div className="text-2xl font-black text-red-600">{s.sick}</div>
                                             </div>
                                             <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 text-center shadow-sm">
                                                 <div className="text-[10px] font-bold text-orange-400 uppercase mb-1">ลากิจ (วัน)</div>
-                                                <div className="text-2xl font-black text-orange-600">{toThaiDigits(s.personal)}</div>
+                                                <div className="text-2xl font-black text-orange-600">{s.personal}</div>
                                             </div>
                                             <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100 text-center shadow-sm">
                                                 <div className="text-[10px] font-bold text-purple-400 uppercase mb-1">ลาคลอด (วัน)</div>
-                                                <div className="text-2xl font-black text-purple-600">{toThaiDigits(s.maternity)}</div>
+                                                <div className="text-2xl font-black text-purple-600">{s.maternity}</div>
                                             </div>
                                             <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 text-center shadow-sm">
                                                 <div className="text-[10px] font-bold text-indigo-400 uppercase mb-1">มาสาย (ครั้ง)</div>
-                                                <div className="text-2xl font-black text-indigo-600">{toThaiDigits(s.late)}</div>
+                                                <div className="text-2xl font-black text-indigo-600">{s.late}</div>
                                             </div>
                                             <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 text-center shadow-sm">
                                                 <div className="text-[10px] font-bold text-emerald-400 uppercase mb-1">ออกนอก (ครั้ง)</div>
-                                                <div className="text-2xl font-black text-emerald-600">{toThaiDigits(s.offCampus)}</div>
+                                                <div className="text-2xl font-black text-emerald-600">{s.offCampus}</div>
                                             </div>
                                         </div>
                                     );
@@ -610,9 +615,9 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                                         <div className="font-bold text-slate-800 whitespace-nowrap">{t.name}</div>
                                                         <div className="text-[10px] text-slate-400">{t.position}</div>
                                                     </td>
-                                                    <td className="px-6 py-4 text-center font-bold text-red-600">{toThaiDigits(s.sick)}</td>
-                                                    <td className="px-6 py-4 text-center font-bold text-orange-600">{toThaiDigits(s.personal)}</td>
-                                                    <td className="px-6 py-4 text-center font-bold text-indigo-600">{toThaiDigits(s.late)}</td>
+                                                    <td className="px-6 py-4 text-center font-bold text-red-600">{s.sick}</td>
+                                                    <td className="px-6 py-4 text-center font-bold text-orange-600">{s.personal}</td>
+                                                    <td className="px-6 py-4 text-center font-bold text-indigo-600">{s.late}</td>
                                                     <td className="px-6 py-4 text-right">
                                                         <button 
                                                             onClick={() => setStatTeacher(t)}

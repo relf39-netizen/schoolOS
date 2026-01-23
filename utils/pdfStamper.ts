@@ -1,3 +1,4 @@
+
 import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
@@ -14,7 +15,7 @@ const THAI_FONT_SOURCES = [
 ];
 
 const THAI_FONT_BOLD_SOURCES = [
-    "https://cdn.jsdelivr.gh/googlefonts/sarabun@master/fonts/Sarabun-Bold.ttf",
+    "https://cdn.jsdelivr.net/gh/googlefonts/sarabun@master/fonts/Sarabun-Bold.ttf",
     "https://raw.githack.com/googlefonts/sarabun/master/fonts/Sarabun-Bold.ttf",
     "https://github.com/googlefonts/sarabun/raw/master/fonts/Sarabun-Bold.ttf",
     "https://fonts.gstatic.com/s/sarabun/v12/dt8vE6GCcm61WObS-2VvPIdtM_E.ttf"
@@ -485,8 +486,129 @@ export const generateLeaveSummaryPdf = async (opt: any): Promise<string> => {
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit as any);
     const thaiFont = await pdfDoc.embedFont(await fetchThaiFont(opt.proxyUrl, opt.thaiFontBase64));
-    const page = pdfDoc.addPage([595.28, 841.89]);
-    page.drawText(`สรุปสถิติการลา - ${opt.schoolName}`, { x: 50, y: 800, size: 20, font: thaiFont });
+    const thaiFontBold = await pdfDoc.embedFont(await fetchThaiFontBold(opt.proxyUrl, opt.thaiFontBoldBase64));
+
+    let page = pdfDoc.addPage([595.28, 841.89]);
+    const { width, height } = page.getSize();
+    const margin = 50;
+    const contentWidth = width - (2 * margin);
+    const cmToPoints = 28.35;
+    const indentPointsNormal = 2.5 * cmToPoints;
+
+    let curY = height - margin;
+
+    // Header: Garuda & บันทึกข้อความ
+    if (opt.officialGarudaBase64) {
+        try {
+            const garuda = await pdfDoc.embedPng(dataURItoUint8Array(opt.officialGarudaBase64));
+            const gDim = garuda.scaleToFit(60, 60);
+            page.drawImage(garuda, { x: margin, y: curY - 60, width: gDim.width, height: gDim.height });
+        } catch (e) {}
+    }
+    
+    const memoTitle = "บันทึกข้อความ";
+    const memoTitleW = thaiFontBold.widthOfTextAtSize(memoTitle, 24);
+    page.drawText(memoTitle, { x: (width - memoTitleW) / 2, y: curY - 45, size: 24, font: thaiFontBold });
+    curY -= 100;
+
+    const labelSize = 16, textSize = 16;
+    
+    // ส่วนราชการ
+    page.drawText("ส่วนราชการ", { x: margin, y: curY, size: labelSize, font: thaiFontBold });
+    page.drawText(opt.schoolName, { x: margin + 85, y: curY, size: textSize, font: thaiFont });
+    curY -= 25;
+
+    // ที่ & วันที่
+    page.drawText("ที่", { x: margin, y: curY, size: labelSize, font: thaiFontBold });
+    page.drawText(".................................................................", { x: margin + 25, y: curY, size: textSize, font: thaiFont });
+    const dateText = `วันที่  ${formatDateThai(new Date())}`; 
+    page.drawText(dateText, { x: 300, y: curY, size: textSize, font: thaiFont });
+    curY -= 25;
+    
+    const startThai = formatDateThaiStr(opt.startDate);
+    const endThai = formatDateThaiStr(opt.endDate);
+    page.drawText("เรื่อง", { x: margin, y: curY, size: labelSize, font: thaiFontBold });
+    page.drawText(`สรุปสถิติการลาของบุคลากร ระหว่างวันที่ ${startThai} ถึงวันที่ ${endThai}`, { x: margin + 45, y: curY, size: textSize, font: thaiFont });
+    curY -= 35;
+
+    page.drawText(`เรียน  ผู้อำนวยการ${opt.schoolName}`, { x: margin, y: curY, size: textSize, font: thaiFont });
+    curY -= 35;
+
+    // Intro Paragraph
+    const intro = `ตามที่ ${opt.schoolName} ได้ดำเนินการรวบรวมข้อมูลสถิติการปฏิบัติราชการและการลาของบุคลากรเพื่อประกอบการพิจารณาเลื่อนเงินเดือนและการประเมินผลการปฏิบัติงานนั้น ในการนี้ จึงขอส่งสรุปสถิติการลาประเภทต่างๆ ประจำปีการศึกษา ดังรายละเอียดตามตารางที่แนบมาพร้อมนี้`;
+    
+    const introLines = splitTextIntoLines(intro, contentWidth - indentPointsNormal, textSize, thaiFont);
+    introLines.forEach((l, idx) => {
+        page.drawText(l, { x: margin + (idx === 0 ? indentPointsNormal : 0), y: curY, size: textSize, font: thaiFont });
+        curY -= 22;
+    });
+    curY -= 20;
+
+    // Table
+    const colX = [margin, margin + 30, margin + 180, margin + 225, margin + 270, margin + 315, margin + 360, margin + 405];
+    const tableHeaders = ["ที่", "ชื่อ-นามสกุล", "ป่วย", "กิจ", "คลอด", "สาย", "นอก", "ลงชื่อรับทราบ"];
+    
+    const drawTableHeader = (y: number) => {
+        page.drawRectangle({ x: margin, y: y - 5, width: contentWidth, height: 25, color: rgb(0.95, 0.95, 0.95), borderColor: rgb(0,0,0), borderWidth: 1 });
+        tableHeaders.forEach((h, i) => {
+            page.drawText(h, { x: colX[i] + 5, y, size: 12, font: thaiFontBold });
+        });
+    };
+
+    drawTableHeader(curY);
+    curY -= 25;
+
+    opt.teachers.forEach((t: any, idx: number) => {
+        if (curY < 150) { 
+            page = pdfDoc.addPage([595.28, 841.89]);
+            curY = height - margin - 50;
+            drawTableHeader(curY);
+            curY -= 25;
+        }
+
+        const s = opt.getStatsFn(t.id, opt.startDate, opt.endDate);
+        const rowData = [
+            (idx + 1).toString(),
+            t.name,
+            s.sick.toString(),
+            s.personal.toString(),
+            s.maternity.toString(),
+            s.late.toString(),
+            s.offCampus.toString(),
+            ".............................."
+        ];
+
+        page.drawRectangle({ x: margin, y: curY - 5, width: contentWidth, height: 25, borderColor: rgb(0,0,0), borderWidth: 0.5 });
+        rowData.forEach((d, i) => {
+            page.drawText(d, { x: colX[i] + 5, y: curY, size: 11, font: thaiFont });
+        });
+        curY -= 25;
+    });
+
+    curY -= 60;
+    if (curY < 150) {
+        page = pdfDoc.addPage([595.28, 841.89]);
+        curY = height - margin - 100;
+    }
+
+    // Signature Area
+    const sigX = 320;
+    if (opt.directorSignatureBase64) {
+        try {
+            const dSigBytes = dataURItoUint8Array(opt.directorSignatureBase64);
+            let dSigImage;
+            try { dSigImage = await pdfDoc.embedPng(dSigBytes); } catch { dSigImage = await pdfDoc.embedJpg(dSigBytes); }
+            const dDim = dSigImage.scaleToFit(100 * (opt.directorSignatureScale || 1), 45);
+            page.drawImage(dSigImage, { x: sigX + 40, y: curY + (opt.directorSignatureYOffset || 0) + 15, width: dDim.width, height: dDim.height });
+        } catch (e) {}
+    }
+    
+    page.drawText(`(ลงชื่อ).................................................`, { x: sigX, y: curY, size: 14, font: thaiFont });
+    curY -= 25;
+    page.drawText(`(${opt.directorName})`, { x: sigX + 25, y: curY, size: 14, font: thaiFont });
+    curY -= 25;
+    page.drawText(`ตำแหน่ง ผู้อำนวยการ${opt.schoolName}`, { x: sigX + 15, y: curY, size: 14, font: thaiFont });
+
     return await pdfDoc.saveAsBase64({ dataUri: true });
 };
 
