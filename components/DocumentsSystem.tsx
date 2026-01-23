@@ -313,7 +313,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         handleSaveAgencies(updated);
     };
 
-    async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, bookNumber: string, isOrder: boolean, fromStr: string, attachments: Attachment[] = []) {
+    async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, bookNumber: string, isOrder: boolean, fromStr: string, attachments: Attachment[] = [], customTitle?: string) {
         if (!sysConfig?.telegramBotToken || !sysConfig?.scriptUrl) return;
         const baseUrl = sysConfig.appBaseUrl || window.location.origin;
         const scriptUrl = sysConfig.scriptUrl;
@@ -321,7 +321,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         teachers.forEach(t => {
             if (!t.telegramChatId) return;
 
-            let message = `<b>${isOrder ? '📝 มีคำสั่งปฏิบัติราชการใหม่' : '📩 มีหนังสือราชการใหม่'}</b>\n` +
+            let message = `<b>${customTitle || (isOrder ? '📝 มีคำสั่งปฏิบัติราชการใหม่' : '📩 มีหนังสือราชการใหม่')}</b>\n` +
                             `----------------------------------\n` +
                             `<b>เลขที่:</b> ${bookNumber}\n` +
                             `<b>เรื่อง:</b> ${title}\n` +
@@ -586,13 +586,22 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const { error } = await client.from('documents').update(updateData).eq('id', taskId);
             if (error) throw error;
 
+            const notifyAtts = [...targetDoc.attachments];
+            if (signedUrl) notifyAtts.unshift({ id: 'signed', name: 'บันทึกข้อสั่งการ (ศธ.)', type: 'LINK', url: signedUrl });
+
+            // 1. แจ้งเตือนผู้รับมอบหมาย (ครู หรือ รองฯ)
             const notifyIds = nextStatus === 'PendingViceDirector' ? [viceId!] : targetTeacherIds;
             if (notifyIds.length > 0) {
                 const notifyList = allTeachers.filter(t => notifyIds.includes(t.id));
-                const notifyAtts = [...targetDoc.attachments];
-                if (signedUrl) notifyAtts.unshift({ id: 'signed', name: 'บันทึกข้อสั่งการ (ศธ.)', type: 'LINK', url: signedUrl });
                 triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts);
             }
+
+            // 2. แจ้งเตือนเจ้าหน้าที่ธุรการทราบ (NEW FEATURE)
+            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER'));
+            if (officers.length > 0) {
+                triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, `ผู้อำนวยการ (เกษียณแล้ว)`, notifyAtts, "✅ ผอ. เกษียณหนังสือแล้ว");
+            }
+
             updateTask(taskId, { status: 'done', message: 'สร้างบันทึกข้อความสั่งการเรียบร้อย' }); 
             fetchDocs();
         } catch (e: any) { updateTask(taskId, { status: 'error', message: `ล้มเหลว: ${e.message}` }); }
@@ -613,6 +622,13 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const { error } = await client.from('documents').update({ status: 'PendingViceDirector', assigned_vice_director_id: assignedViceDirId, director_command: finalCommand, director_signature_date: nowStr }).eq('id', taskId);
             if (error) throw error;
             if (vice) triggerTelegramNotification([vice], taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments);
+            
+            // แจ้งธุรการทราบด้วย
+            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER'));
+            if (officers.length > 0) {
+                triggerTelegramNotification(officers, taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, "✅ ผอ. มอบหมายรองผู้อำนวยการแล้ว");
+            }
+
             updateTask(taskId, { status: 'done', message: 'มอบหมายสำเร็จ' });
             fetchDocs();
         } catch (e: any) { updateTask(taskId, { status: 'error', message: `ล้มเหลว: ${e.message}` }); }
@@ -861,7 +877,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         </div>
                         <div className="p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
                             <div className="bg-blue-50 p-4 rounded-2xl border-2 border-blue-100 flex gap-3 items-center">
-                                <Info size={20} className="text-blue-500 shrink-0"/>
+                                <div className="p-4 bg-white/20 rounded-3xl backdrop-blur-md shadow-inner"><Info size={20}/></div>
                                 <p className="text-xs font-bold text-blue-700 leading-relaxed">บันทึกชื่อหน่วยงานภายนอกที่ส่งหนังสือมาบ่อยๆ เพื่อให้สะดวกต่อการเลือกในหน้าลงทะเบียนหนังสือ</p>
                             </div>
 
@@ -954,6 +970,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                             <span className="text-[9px] md:text-[10px] font-black font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600">{docItem.bookNumber}</span>
                                             <span className={`px-2 py-0.5 rounded text-[8px] md:text-[9px] font-black uppercase tracking-widest ${docItem.priority === 'Critical' ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border'}`}>{docItem.priority === 'Normal' ? 'ปกติ' : docItem.priority === 'Urgent' ? 'ด่วน' : 'ด่วนที่สุด'}</span>
                                             {docItem.acknowledgedBy?.includes(currentUser.id) && <span className="bg-green-100 text-green-700 text-[8px] md:text-[9px] px-2 py-0.5 rounded-full font-black border border-green-200">รับทราบแล้ว</span>}
+                                            {/* Badge แจ้งเตือนธุรการ */}
+                                            {isDocOfficer && docItem.status === 'Distributed' && docItem.directorCommand && (
+                                                <span className="bg-purple-100 text-purple-700 text-[8px] md:text-[9px] px-2 py-0.5 rounded-full font-black border border-purple-200 flex items-center gap-1">
+                                                    <CheckCircle size={10}/> ผอ. เกษียณแล้ว
+                                                </span>
+                                            )}
                                         </div>
                                         <h3 className="font-bold text-base md:text-lg text-slate-800 leading-tight group-hover:text-blue-600 transition-colors break-words">{docItem.title}</h3>
                                         <div className="flex flex-wrap items-center gap-x-4 md:gap-x-6 gap-y-1 text-[10px] md:text-[11px] text-slate-400 font-bold uppercase tracking-tight">
@@ -1152,6 +1174,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     {selectedDoc.status === 'PendingDirector' && (
                                         <span className="px-5 py-2 bg-orange-600 text-white rounded-full text-[10px] md:text-xs font-black uppercase shadow-lg animate-pulse border-2 border-white ring-4 ring-orange-50">
                                             รอ ผอ. สั่งการ
+                                        </span>
+                                    )}
+                                    {isDocOfficer && selectedDoc.status === 'Distributed' && (
+                                        <span className="px-5 py-2 bg-purple-600 text-white rounded-full text-[10px] md:text-xs font-black uppercase shadow-lg border-2 border-white">
+                                            ผอ. เกษียณแล้ว
                                         </span>
                                     )}
                                 </div>

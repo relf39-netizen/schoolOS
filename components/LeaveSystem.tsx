@@ -408,7 +408,6 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                 <div className="max-w-3xl mx-auto space-y-6 animate-slide-up">
                     <button onClick={() => setViewMode('LIST')} className="flex items-center gap-2 text-slate-500 font-black hover:text-emerald-600"><ArrowLeft size={18}/> ย้อนกลับ</button>
                     <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100">
-                        {/* Fix: Removed invalid escaped quotes around className value */}
                         <h3 className="text-3xl font-black text-slate-800 mb-8 flex items-center gap-3"><FilePlus className="text-emerald-600" size={36}/> แบบฟอร์มขออนุญาตลา</h3>
                         <form onSubmit={e => { e.preventDefault(); submitRequest(); }} className="space-y-8">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -419,14 +418,12 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
 
                             {leaveType === 'OffCampus' ? (
                                 <div className="space-y-6 animate-fade-in bg-blue-50 p-6 rounded-[2rem] border-2 border-blue-100">
-                                    {/* Fix: Removed invalid escaped quotes around className value */}
                                     <div className="flex items-center gap-2 text-blue-800 font-black mb-2"><Timer size={20}/> ระบุเวลาออกนอกบริเวณ (วันนี้: {getThaiDate(new Date().toISOString())})</div>
                                     <div className="grid grid-cols-2 gap-6">
                                         <div className="space-y-2"><label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest ml-1">เวลาที่ไป</label><input type="time" value={startTime} onChange={e=>setStartTime(e.target.value)} className="w-full px-5 py-4 border-2 border-white rounded-2xl font-bold outline-none focus:border-blue-500" required/></div>
                                         <div className="space-y-2"><label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest ml-1">เวลาที่กลับ</label><input type="time" value={endTime} onChange={e=>setEndTime(e.target.value)} className="w-full px-5 py-4 border-2 border-white rounded-2xl font-bold outline-none focus:border-blue-500" required/></div>
                                     </div>
                                     <div className="space-y-2">
-                                        {/* Fix: Removed invalid escaped quotes around className value */}
                                         <label className="block text-[10px] font-black text-blue-400 uppercase tracking-widest ml-1 flex items-center gap-1"><UserPlus size={12}/> ครูผู้ดูแลนักเรียนแทน (ครูสอนแทน)</label>
                                         <input type="text" placeholder="ระบุชื่อครูที่ฝากห้อง/ฝากสอนแทน..." value={substituteName} onChange={e=>setSubstituteName(e.target.value)} className="w-full px-5 py-4 border-2 border-white rounded-2xl font-bold outline-none focus:border-blue-500" required/>
                                     </div>
@@ -518,7 +515,6 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
 
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 items-center justify-between">
                         <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
-                            {/* Fix: Removed invalid escaped quotes around className value */}
                             <div className="flex items-center gap-2 text-slate-400">
                                 <Filter size={20}/>
                                 <span className="text-sm font-bold text-slate-500 whitespace-nowrap">เลือกช่วงวันลา:</span>
