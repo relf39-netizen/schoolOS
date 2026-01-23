@@ -596,10 +596,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                 triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts);
             }
 
-            // 2. แจ้งเตือนเจ้าหน้าที่ธุรการทราบ (NEW FEATURE)
+            // 2. แจ้งเตือนเจ้าหน้าที่ธุรการทราบ (ผอ. เกษียณแล้ว)
             const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER'));
             if (officers.length > 0) {
-                triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, `ผู้อำนวยการ (เกษียณแล้ว)`, notifyAtts, "✅ ผอ. เกษียณหนังสือแล้ว");
+                triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, `ผู้อำนวยการโรงเรียน`, notifyAtts, "✅ ผอ. เกษียณหนังสือเรียบร้อยแล้ว");
             }
 
             updateTask(taskId, { status: 'done', message: 'สร้างบันทึกข้อความสั่งการเรียบร้อย' }); 
@@ -623,10 +623,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             if (error) throw error;
             if (vice) triggerTelegramNotification([vice], taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments);
             
-            // แจ้งธุรการทราบด้วย
+            // แจ้งธุรการทราบ
             const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER'));
             if (officers.length > 0) {
-                triggerTelegramNotification(officers, taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, "✅ ผอ. มอบหมายรองผู้อำนวยการแล้ว");
+                triggerTelegramNotification(officers, taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, "✅ ผอ. มอบหมายรองผู้อำนวยการดำเนินการแล้ว");
             }
 
             updateTask(taskId, { status: 'done', message: 'มอบหมายสำเร็จ' });
@@ -970,10 +970,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                             <span className="text-[9px] md:text-[10px] font-black font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600">{docItem.bookNumber}</span>
                                             <span className={`px-2 py-0.5 rounded text-[8px] md:text-[9px] font-black uppercase tracking-widest ${docItem.priority === 'Critical' ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border'}`}>{docItem.priority === 'Normal' ? 'ปกติ' : docItem.priority === 'Urgent' ? 'ด่วน' : 'ด่วนที่สุด'}</span>
                                             {docItem.acknowledgedBy?.includes(currentUser.id) && <span className="bg-green-100 text-green-700 text-[8px] md:text-[9px] px-2 py-0.5 rounded-full font-black border border-green-200">รับทราบแล้ว</span>}
-                                            {/* Badge แจ้งเตือนธุรการ */}
-                                            {isDocOfficer && docItem.status === 'Distributed' && docItem.directorCommand && (
-                                                <span className="bg-purple-100 text-purple-700 text-[8px] md:text-[9px] px-2 py-0.5 rounded-full font-black border border-purple-200 flex items-center gap-1">
-                                                    <CheckCircle size={10}/> ผอ. เกษียณแล้ว
+                                            {/* ผอ. เกษียณแล้ว Badge */}
+                                            {isDocOfficer && docItem.directorCommand && docItem.status !== 'PendingDirector' && (
+                                                <span className="bg-purple-100 text-purple-700 text-[8px] md:text-[9px] px-2 py-0.5 rounded-full font-black border border-purple-200 flex items-center gap-1 shadow-sm">
+                                                    <CheckCircle size={10} /> ผอ. เกษียณแล้ว
                                                 </span>
                                             )}
                                         </div>
@@ -1010,6 +1010,53 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <div className="text-center py-20 bg-white rounded-2xl border-2 border-dashed border-slate-100 text-slate-300 font-bold italic">ไม่พบข้อมูลหนังสือราชการ</div>
                         )}
                     </div>
+
+                    {/* Pagination Buttons - RE-ADDED */}
+                    {totalPages > 1 && (
+                        <div className="flex justify-center items-center gap-2 mt-8 py-4 bg-white rounded-2xl shadow-sm border border-slate-100 animate-fade-in">
+                            <button 
+                                onClick={() => setCurrentPage(1)} 
+                                disabled={currentPage === 1}
+                                className="p-2 rounded-xl text-slate-400 hover:bg-slate-50 hover:text-blue-600 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                                title="หน้าแรก"
+                            >
+                                <ChevronsLeft size={20}/>
+                            </button>
+                            <button 
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                                disabled={currentPage === 1}
+                                className="p-2 rounded-xl text-slate-400 hover:bg-slate-50 hover:text-blue-600 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                                title="หน้าก่อนหน้า"
+                            >
+                                <ChevronLeft size={20}/>
+                            </button>
+                            
+                            <div className="flex items-center px-4 gap-2">
+                                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">หน้า</span>
+                                <span className="bg-blue-50 text-blue-700 px-4 py-1 rounded-full text-sm font-black border border-blue-100 shadow-inner">
+                                    {currentPage}
+                                </span>
+                                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">จาก {totalPages}</span>
+                            </div>
+
+                            <button 
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                                disabled={currentPage === totalPages}
+                                className="p-2 rounded-xl text-slate-400 hover:bg-slate-50 hover:text-blue-600 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                                title="หน้าถัดไป"
+                            >
+                                <ChevronRight size={20}/>
+                            </button>
+                            <button 
+                                onClick={() => setCurrentPage(totalPages)} 
+                                disabled={currentPage === totalPages}
+                                className="p-2 rounded-xl text-slate-400 hover:bg-slate-50 hover:text-blue-600 disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                                title="หน้าสุดท้าย"
+                            >
+                                <ChevronsRight size={20}/>
+                            </button>
+                        </div>
+                    )}
                 </>
             )}
 
@@ -1176,8 +1223,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                             รอ ผอ. สั่งการ
                                         </span>
                                     )}
-                                    {isDocOfficer && selectedDoc.status === 'Distributed' && (
-                                        <span className="px-5 py-2 bg-purple-600 text-white rounded-full text-[10px] md:text-xs font-black uppercase shadow-lg border-2 border-white">
+                                    {isDocOfficer && selectedDoc.directorCommand && selectedDoc.status !== 'PendingDirector' && (
+                                        <span className="px-5 py-2 bg-purple-600 text-white rounded-full text-[10px] md:text-xs font-black uppercase shadow-lg border-2 border-white ring-4 ring-purple-50">
                                             ผอ. เกษียณแล้ว
                                         </span>
                                     )}
@@ -1325,6 +1372,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                 .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
                 @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
                 .animate-shimmer { animation: shimmer 2s infinite linear; }
+                .no-scrollbar-container::-webkit-scrollbar { display: none; }
             `}</style>
         </div>
     );
