@@ -193,6 +193,7 @@ export interface Teacher {
   telegramChatId?: string; // Telegram Chat ID for notifications
   // Fix: Added isSuspended to support account suspension logic
   isSuspended?: boolean;
+  isApproved?: boolean;   // สถานะการอนุมัติเข้าใช้งาน
 }
 
 // --- Action Plan Types ---
@@ -245,6 +246,9 @@ export interface SystemConfig {
   driveFolderId: string; // Google Drive Folder ID for uploads
   scriptUrl: string;     // Google Apps Script Web App URL for handling uploads
   schoolName?: string;   // School Name for Headers
+  officerDepartment?: string; // หน่วยงานภายใน (เช่น กลุ่มงานธุรการ)
+  internalDepartments?: string[]; // รายชื่อหน่วยงานภายใน
+  externalAgencies?: string[]; // รายชื่อหน่วยงานต้นเรื่อง (ภายนอก) ที่ธุรการจัดการเอง - NEW
   directorSignatureBase64?: string; // Base64 PNG of Director Signature
   schoolLogoBase64?: string; // Base64 PNG of School Logo / Garuda
   

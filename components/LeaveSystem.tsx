@@ -171,11 +171,12 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                         teacher,
                         schoolName: currentSchool.name,
                         directorName: director.name,
-                        directorSignatureBase64: currentReq.status === 'Approved' ? sysConfig?.directorSignatureBase64 : '',
+                        directorSignatureBase64: currentReq.status !== 'Pending' ? sysConfig?.directorSignatureBase64 : '',
                         teacherSignatureBase64: teacher.signatureBase64,
                         officialGarudaBase64: sysConfig?.officialGarudaBase64,
                         directorSignatureScale: sysConfig?.directorSignatureScale,
-                        directorSignatureYOffset: sysConfig?.directorSignatureYOffset
+                        directorSignatureYOffset: sysConfig?.directorSignatureYOffset,
+                        proxyUrl: sysConfig?.scriptUrl 
                     });
                     setPdfUrl(base64Pdf);
                 } catch (e) { console.error(e); } finally { setIsGeneratingPdf(false); }
@@ -296,7 +297,8 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                 officialGarudaBase64: sysConfig?.officialGarudaBase64,
                 directorSignatureBase64: sysConfig?.directorSignatureBase64,
                 directorSignatureScale: sysConfig?.directorSignatureScale || 1.0,
-                directorSignatureYOffset: sysConfig?.directorSignatureYOffset || 0
+                directorSignatureYOffset: sysConfig?.directorSignatureYOffset || 0,
+                proxyUrl: sysConfig?.scriptUrl 
             });
             
             setSummaryPdfUrl(base64Pdf); setViewMode('SUMMARY_PREVIEW');
@@ -482,7 +484,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                 <div className="flex items-center gap-3 border-b border-emerald-50 pb-4"><UserCheck className="text-emerald-600" size={28}/><div><h4 className="font-black text-slate-800 uppercase tracking-tight">พิจารณาใบลา</h4><p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">Director Signature Control</p></div></div>
                                 <div className="space-y-3">
                                     <button onClick={() => handleDirectorAction(true)} disabled={isProcessingApproval} className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all flex items-center justify-center gap-3 active:scale-95">{isProcessingApproval ? <RefreshCw className="animate-spin" size={24}/> : <CheckCircle size={24}/>} อนุญาต (ประทับตรา)</button>
-                                    <button onClick={() => handleDirectorAction(false)} disabled={isProcessingApproval} className="w-full py-4 bg-rose-50 text-rose-600 rounded-2xl font-black border-2 border-rose-100 hover:bg-rose-100 transition-all active:scale-95">ไม่อนุญาต</button>
+                                    <button onClick={() => handleDirectorAction(false)} disabled={isProcessingApproval} className="w-full py-4 bg-rose-50 text-rose-600 rounded-2xl font-black border-2 border-rose-100 hover:bg-rose-100 transition-all active:scale-95">ไม่อนุมัติ</button>
                                 </div>
                             </div>
                         )}

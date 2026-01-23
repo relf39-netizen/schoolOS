@@ -6,9 +6,10 @@ import {
     Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, 
     MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, 
     Calendar, RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut, 
-    Send, Globe, Copy, Check, Cloud 
+    Send, Globe, Copy, Check, Cloud, Building2 
 } from 'lucide-react';
-import { db, isConfigured, doc, getDoc, setDoc } from '../firebaseConfig';
+// Fix: Import from local firebaseConfig instead of directly from firebase/firestore to ensure proper initialization
+import { db, isConfigured, doc, getDoc, setDoc, collection, getDocs, query } from '../firebaseConfig';
 import { ACADEMIC_POSITIONS } from '../constants';
 
 interface AdminUserManagementProps {
@@ -41,7 +42,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     const [isAdding, setIsAdding] = useState(false);
 
     // System Settings State
-    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '', officialGarudaBase64: '', telegramBotToken: '', telegramBotUsername: '', appBaseUrl: '' });
+    const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', officerDepartment: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '', officialGarudaBase64: '', telegramBotToken: '', telegramBotUsername: '', appBaseUrl: '' });
     const [isLoadingConfig, setIsLoadingConfig] = useState(false);
     
     // School Settings State (Local)

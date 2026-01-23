@@ -1,3 +1,4 @@
+
 import { 
     AlertTriangle, 
     ArrowLeft, 
@@ -36,12 +37,16 @@ import {
     History, 
     Clock, 
     Bookmark, 
-    ChevronDown 
+    ChevronDown,
+    Building,
+    Settings,
+    Layout,
+    Globe
 } from 'lucide-react';
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
 import { Attachment, DocumentItem, School, SystemConfig, Teacher } from '../types';
-import { stampPdfDocument, stampReceiveNumber } from '../utils/pdfStamper';
+import { stampPdfDocument, stampReceiveNumber, generateDirectorCommandMemoPdf } from '../utils/pdfStamper';
 import { sendTelegramMessage } from '../utils/telegram';
 
 /**
@@ -57,7 +62,7 @@ interface BackgroundTask {
 
 interface DocumentsSystemProps {
     currentUser: Teacher;
-    currentSchool: School;
+    currentSchool: School; 
     allTeachers: Teacher[];
     focusDocId?: string | null;
     onClearFocus?: () => void;
@@ -91,6 +96,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     const [viewMode, setViewMode] = useState<'LIST' | 'CREATE' | 'DETAIL'>('LIST');
     const [selectedDoc, setSelectedDoc] = useState<DocumentItem | null>(null);
 
+    // --- Agency Management State (หน่วยงานต้นเรื่อง) ---
+    const [showAgencyManager, setShowAgencyManager] = useState(false);
+    const [newAgencyInput, setNewAgencyInput] = useState('');
+    const [selectedOfficerDept, setSelectedOfficerDept] = useState('');
+
     // --- Form State (Document Creation) ---
     const [docCategory, setDocCategory] = useState<'INCOMING' | 'ORDER'>('INCOMING');
     const [newDoc, setNewDoc] = useState({ 
@@ -98,13 +108,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         title: '', 
         from: '', 
         priority: 'Normal' as any, 
-        description: '' 
+        description: '' // รายละเอียดหนังสือ
     });
     
     // --- Attachment Handling ---
     const [tempAttachments, setTempAttachments] = useState<Attachment[]>([]);
     const [linkInput, setLinkInput] = useState('');
-    const [linkNameInput, setLinkNameInput] = useState('');
     
     // --- Command Action State ---
     const [command, setCommand] = useState('');
@@ -215,9 +224,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
     // --- Core Logic Handlers ---
 
-    /**
-     * Handles teacher clicking 'read' or opening a distributed file
-     */
     async function handleTeacherAcknowledge(docId: string, currentAckList: string[]) {
         const client = supabase;
         if (!isSupabaseConfigured || !client) return;
@@ -238,9 +244,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         }
     }
 
-    /**
-     * Fetch all documents for the school
-     */
     const fetchDocs = async () => {
         const client = supabase;
         if (!isSupabaseConfigured || !client) return;
@@ -266,9 +269,50 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         setIsLoading(false);
     };
 
-    /**
-     * Logic for notifying relevant teachers via Telegram
-     */
+    const handleDeleteDoc = async (docId: string) => {
+        if (!confirm("คุณแน่ใจหรือไม่ว่าต้องการลบหนังสือราชการชิ้นนี้ถาวร?")) return;
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return;
+        try {
+            const { error } = await client.from('documents').delete().eq('id', docId);
+            if (error) throw error;
+            alert("ลบหนังสือเรียบร้อยแล้ว");
+            setViewMode('LIST');
+            fetchDocs();
+        } catch (e: any) {
+            alert("ลบไม่สำเร็จ: " + e.message);
+        }
+    };
+
+    const handleSaveAgencies = async (agencies: string[]) => {
+        const client = supabase;
+        if (!client) return;
+        const { error } = await client.from('school_configs').update({ external_agencies: agencies }).eq('school_id', currentUser.schoolId);
+        if (!error) {
+            setSysConfig(prev => prev ? { ...prev, externalAgencies: agencies } : null);
+        } else {
+            alert("บันทึกล้มเหลว: " + error.message);
+        }
+    };
+
+    const handleAddExternalAgency = () => {
+        if (!newAgencyInput.trim()) return;
+        const currentAgencies = sysConfig?.externalAgencies || [];
+        if (currentAgencies.includes(newAgencyInput.trim())) {
+            alert("มีหน่วยงานนี้อยู่ในรายชื่อแล้ว");
+            return;
+        }
+        const updated = [...currentAgencies, newAgencyInput.trim()];
+        handleSaveAgencies(updated);
+        setNewAgencyInput('');
+    };
+
+    const handleRemoveExternalAgency = (agency: string) => {
+        const currentAgencies = sysConfig?.externalAgencies || [];
+        const updated = currentAgencies.filter(a => a !== agency);
+        handleSaveAgencies(updated);
+    };
+
     async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, bookNumber: string, isOrder: boolean, fromStr: string, attachments: Attachment[] = []) {
         if (!sysConfig?.telegramBotToken || !sysConfig?.scriptUrl) return;
         const baseUrl = sysConfig.appBaseUrl || window.location.origin;
@@ -301,9 +345,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         });
     }
 
-    /**
-     * Logic for fetching remote files (Deep Proxy) and saving them to school Drive
-     */
     const handleFetchAndUploadFromUrl = async (url: string, customName?: string) => {
         const client = supabase;
         if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId || !client) {
@@ -344,7 +385,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
             let fileData = `data:${result.mimeType};base64,${result.fileData}`;
 
-            // Automatic receive stamp for incoming links
             if (result.mimeType === 'application/pdf' && docCategory === 'INCOMING') {
                 updateTask(taskId, { message: 'กำลังประทับตราเลขรับอัตโนมัติ...' });
                 try {
@@ -354,7 +394,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }),
                         time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
                         schoolName: currentSchool.name,
-                        schoolLogoBase64: sysConfig.officialGarudaBase64
+                        schoolLogoBase64: sysConfig.officialGarudaBase64,
+                        proxyUrl: sysConfig.scriptUrl 
                     });
                 } catch (e) {
                     console.warn("Stamping link file failed", e);
@@ -390,9 +431,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         }
     };
 
-    /**
-     * Logic for processing a file from disk
-     */
     const handleFileUploadInBackground = async (file: File) => {
         const client = supabase;
         if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId || !client) {
@@ -426,7 +464,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                 date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }),
                                 time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
                                 schoolName: currentSchool.name,
-                                schoolLogoBase64: sysConfig.officialGarudaBase64
+                                schoolLogoBase64: sysConfig.officialGarudaBase64,
+                                proxyUrl: sysConfig.scriptUrl 
                             });
                         } catch (e) {
                             console.error("Stamping failed", e);
@@ -466,59 +505,64 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     };
 
     /**
-     * Advanced logic for stamping a document and updating DB in background
+     * Logic for creating a formal Memorandum command sheet
      */
-    const processActionInBackground = async (targetDoc: DocumentItem, finalCommand: string, targetTeachers: string[], targetPage: number, nextStatus: any, viceId?: string) => {
+    const processActionWithMemorandum = async (targetDoc: DocumentItem, finalCommand: string, targetTeacherIds: string[], nextStatus: any, viceId?: string) => {
         const taskId = targetDoc.id;
         const client = supabase;
         if (!isSupabaseConfigured || !client) return;
         
+        setBackgroundTasks(prev => [...prev, { 
+            id: taskId, 
+            title: `สร้างบันทึกข้อสั่งการ: ${targetDoc.title}`, 
+            status: 'processing', 
+            message: 'กำลังรวบรวมข้อมูล...', 
+            notified: false 
+        }]);
+
         try {
             const isActorVice = targetDoc.status === 'PendingViceDirector' || (targetDoc.assignedViceDirectorId === currentUser.id);
-            const stampAlignment = isActorVice ? 'left' : 'right';
+            const signatureToUse = currentUser.signatureBase64 || (isDirector ? sysConfig?.directorSignatureBase64 : null);
             
-            const signatureToUse = currentUser.signatureBase64;
-            if (!signatureToUse) throw new Error("กรุณาอัปโหลดลายเซ็นในเมนู 'ข้อมูลส่วนตัว' ก่อนดำเนินการ");
+            if (!signatureToUse) throw new Error("ไม่พบลายเซ็นดิจิทัล! กรุณาอัปโหลดลายเซ็นในเมนู 'ข้อมูลส่วนตัว' หรือติดต่อแอดมินเพื่อตรวจสอบลายเซ็นส่วนกลาง");
 
-            const firstAtt = targetDoc.attachments[0];
-            const baseFile = targetDoc.signedFileUrl || (firstAtt?.fileType === 'application/pdf' ? firstAtt.url : null);
-            let pdfBase64 = null;
+            updateTask(taskId, { message: 'กำลังสร้างบันทึกข้อความ (PDF)...' });
 
-            if (baseFile) {
-                const fileId = getGoogleDriveId(baseFile);
-                if (fileId && sysConfig?.scriptUrl) {
-                    updateTask(taskId, { message: 'กำลังดึงไฟล์ผ่าน Cloud Proxy...' });
-                    const proxyResp = await fetch(sysConfig.scriptUrl.trim(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'read', fileId }), redirect: 'follow' });
-                    const proxyData = await proxyResp.json();
-                    if (proxyData.status === 'success' && proxyData.fileData) {
-                        pdfBase64 = `data:application/pdf;base64,${proxyData.fileData}`;
-                    } else throw new Error("Drive denied access to file");
-                } else if (baseFile.startsWith('data:')) pdfBase64 = baseFile;
-
-                updateTask(taskId, { message: 'กำลังประทับตราดิจิทัลและลงนาม...' });
-                pdfBase64 = await stampPdfDocument({
-                    fileUrl: pdfBase64 || '', fileType: 'application/pdf', notifyToText: '', commandText: finalCommand,
-                    directorName: currentUser.name, directorPosition: currentUser.position, signatureImageBase64: signatureToUse,
-                    schoolName: currentSchool.name, schoolLogoBase64: sysConfig?.officialGarudaBase64, targetPage, 
-                    onStatusChange: (m) => updateTask(taskId, { message: m }),
-                    signatureScale: sysConfig?.directorSignatureScale || 1, signatureYOffset: sysConfig?.directorSignatureYOffset || 0,
-                    alignment: stampAlignment
-                });
-            } else {
-                updateTask(taskId, { message: 'กำลังสร้างใบสั่งการใหม่...' });
-                pdfBase64 = await stampPdfDocument({
-                    fileUrl: '', fileType: 'new', notifyToText: '', commandText: finalCommand,
-                    directorName: currentUser.name, directorPosition: currentUser.position, signatureImageBase64: signatureToUse,
-                    schoolName: currentSchool.name, schoolLogoBase64: sysConfig?.officialGarudaBase64, targetPage: 1,
-                    onStatusChange: (m) => updateTask(taskId, { message: m }), alignment: stampAlignment
-                });
+            let targetTeacherNames: string[] = [];
+            if (targetTeacherIds.length > 0 && targetTeacherIds.length < teachersInSchool.length) {
+                targetTeacherNames = targetTeacherIds.map(id => allTeachers.find(t => t.id === id)?.name || id);
             }
+
+            const deptLabel = selectedOfficerDept ? ` (${selectedOfficerDept})` : (sysConfig?.officerDepartment ? ` (${sysConfig.officerDepartment})` : '');
+            const schoolWithDept = `${currentSchool.name}${deptLabel}`;
+
+            const pdfBase64 = await generateDirectorCommandMemoPdf({
+                schoolName: schoolWithDept,
+                bookNumber: targetDoc.bookNumber,
+                title: targetDoc.title,
+                from: targetDoc.from || '-',
+                details: targetDoc.description || '(ไม่มีข้อมูลรายละเอียด)',
+                command: finalCommand,
+                directorName: currentUser.name,
+                directorPosition: currentUser.position,
+                signatureBase64: signatureToUse,
+                officialGarudaBase64: sysConfig?.officialGarudaBase64,
+                signatureScale: sysConfig?.directorSignatureScale || 1.0,
+                signatureYOffset: sysConfig?.directorSignatureYOffset || 0,
+                proxyUrl: sysConfig?.scriptUrl,
+                targetTeacherNames: targetTeacherNames 
+            });
 
             let signedUrl = null;
             if (pdfBase64 && sysConfig?.scriptUrl) {
                 updateTask(taskId, { status: 'uploading', message: 'กำลังบันทึกไฟล์ลงคลาวด์...' });
                 const safeBookNumber = targetDoc.bookNumber.replace(/[\\\/ :*?"<>|]/g, '-');
-                const payload = { folderId: sysConfig.driveFolderId.trim(), fileName: `${safeBookNumber}_signed.pdf`, mimeType: 'application/pdf', fileData: getCleanBase64(pdfBase64) };
+                const payload = { 
+                    folderId: sysConfig.driveFolderId.trim(), 
+                    fileName: `${safeBookNumber}_memo.pdf`, 
+                    mimeType: 'application/pdf', 
+                    fileData: getCleanBase64(pdfBase64) 
+                };
                 const upResp = await fetch(sysConfig.scriptUrl.trim(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload), redirect: 'follow' });
                 const upRes = await upResp.json();
                 if (upRes.status === 'success') signedUrl = upRes.viewUrl || upRes.url;
@@ -531,32 +575,29 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             if (isActorVice) { 
                 updateData.vice_director_command = finalCommand; 
                 updateData.vice_director_signature_date = nowStr; 
-                updateData.target_teachers = targetTeachers; 
+                updateData.target_teachers = targetTeacherIds; 
             } else { 
                 updateData.director_command = finalCommand; 
                 updateData.director_signature_date = nowStr; 
                 if (nextStatus === 'PendingViceDirector') updateData.assigned_vice_director_id = viceId; 
-                else updateData.target_teachers = targetTeachers; 
+                else updateData.target_teachers = targetTeacherIds; 
             }
 
             const { error } = await client.from('documents').update(updateData).eq('id', taskId);
             if (error) throw error;
 
-            const notifyIds = nextStatus === 'PendingViceDirector' ? [viceId!] : targetTeachers;
+            const notifyIds = nextStatus === 'PendingViceDirector' ? [viceId!] : targetTeacherIds;
             if (notifyIds.length > 0) {
                 const notifyList = allTeachers.filter(t => notifyIds.includes(t.id));
                 const notifyAtts = [...targetDoc.attachments];
-                if (signedUrl) notifyAtts.unshift({ id: 'signed', name: 'บันทึกข้อสั่งการ', type: 'LINK', url: signedUrl });
-                triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, isActorVice ? currentSchool.name : (targetDoc.from || ''), notifyAtts);
+                if (signedUrl) notifyAtts.unshift({ id: 'signed', name: 'บันทึกข้อสั่งการ (ศธ.)', type: 'LINK', url: signedUrl });
+                triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts);
             }
-            updateTask(taskId, { status: 'done', message: 'ดำเนินการสำเร็จ' }); 
+            updateTask(taskId, { status: 'done', message: 'สร้างบันทึกข้อความสั่งการเรียบร้อย' }); 
             fetchDocs();
         } catch (e: any) { updateTask(taskId, { status: 'error', message: `ล้มเหลว: ${e.message}` }); }
     };
 
-    /**
-     * Logic for delegating a task to a vice director without full stamping (Quick mode)
-     */
     const handleQuickDelegateToVice = async () => {
         const client = supabase;
         if (!selectedDoc || !assignedViceDirId || !client) return;
@@ -580,19 +621,16 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     const handleDirectorAction = (isNotifyOnly: boolean) => {
         if (!selectedDoc) return;
         const nextStatus = isNotifyOnly ? 'PendingViceDirector' : 'Distributed';
-        processActionInBackground(selectedDoc, command, selectedTeachers, stampPage, nextStatus, assignedViceDirId);
+        processActionWithMemorandum(selectedDoc, command, selectedTeachers, nextStatus, assignedViceDirId);
         setViewMode('LIST');
     };
 
     const handleViceDirectorAction = () => {
         if (!selectedDoc) return;
-        processActionInBackground(selectedDoc, command, selectedTeachers, stampPage, 'Distributed');
+        processActionWithMemorandum(selectedDoc, command, selectedTeachers, 'Distributed');
         setViewMode('LIST');
     };
 
-    /**
-     * Standard opener for documents with auto-ack
-     */
     const handleOpenAndAck = (docItem: DocumentItem, url: string) => {
         if (!url) return; 
         const viewUrl = getPreviewUrl(url);
@@ -610,17 +648,23 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             if (isSupabaseConfigured && client) {
                 const { data: configData } = await client.from('school_configs').select('*').eq('school_id', currentUser.schoolId).single();
                 if (configData) {
+                    const agencies = configData.external_agencies || [];
+                    const depts = configData.internal_departments || [];
                     setSysConfig({
                         driveFolderId: configData.drive_folder_id || '',
                         scriptUrl: configData.script_url || '',
                         telegramBotToken: configData.telegram_bot_token || '',
                         appBaseUrl: configData.app_base_url || '',
                         officialGarudaBase64: configData.official_garuda_base_64,
+                        officerDepartment: configData.officer_department || '',
+                        internalDepartments: depts,
+                        externalAgencies: agencies,
                         directorSignatureBase64: configData.director_signature_base_64,
                         directorSignatureScale: configData.director_signature_scale || 1.0,
                         directorSignatureYOffset: configData.director_signature_y_offset || 0,
                         schoolName: currentSchool.name 
                     });
+                    if (depts.length > 0) setSelectedOfficerDept(depts[0]);
                 }
             }
         };
@@ -774,7 +818,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
                                 <div className={`h-full transition-all duration-500 ${task.status === 'done' ? 'bg-emerald-500 w-full' : task.status === 'error' ? 'bg-red-500 w-full' : task.status === 'uploading' ? 'bg-orange-500 w-2/3' : 'bg-blue-500 w-1/3'}`}></div>
                             </div>
-                            <p className={`text-[10px] ${task.status === 'error' ? 'text-red-600 font-bold' : (task.status === 'done' ? 'text-emerald-600' : 'text-slate-500')}`}>{task.message}</p>
+                            <p className={`text-[10px] ${task.status === 'error' ? 'text-red-600 font-bold' : (task.status === 'done' ? 'text-emerald-600' : (task.status === 'uploading' ? 'text-orange-600' : 'text-slate-500'))}`}>{task.message}</p>
                         </div>
                     ))}
                 </div>
@@ -787,6 +831,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                     <p className="text-slate-400 text-xs mt-1">ผู้ใช้งาน: <span className="font-bold text-yellow-400">{currentUser.name}</span></p>
                 </div>
                 <div className="flex items-center gap-3 relative z-10">
+                    {isDocOfficer && (
+                        <button 
+                            onClick={() => setShowAgencyManager(true)}
+                            className="bg-slate-700 hover:bg-slate-600 p-2 px-4 rounded-xl text-xs font-bold flex items-center gap-2 border border-slate-600 transition-all"
+                        >
+                            <Globe size={16}/> จัดการรายชื่อหน่วยงานต้นเรื่อง
+                        </button>
+                    )}
                     <button onClick={() => setShowTaskQueue(!showTaskQueue)} className={`p-2 rounded-full transition-all relative ${activeTasks.length > 0 ? 'bg-blue-600' : 'bg-slate-700'}`}>
                         <Bell size={20}/>
                         {(activeTasks.length > 0 || doneTasksCount > 0) && (
@@ -795,6 +847,58 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                     </button>
                 </div>
             </div>
+
+            {/* Agency Manager Modal */}
+            {showAgencyManager && (
+                <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
+                            <div>
+                                <h3 className="text-2xl font-black flex items-center gap-3"><Globe size={24} className="text-blue-400"/> รายชื่อหน่วยงานต้นเรื่อง</h3>
+                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">External Agencies Manager</p>
+                            </div>
+                            <button onClick={() => setShowAgencyManager(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24}/></button>
+                        </div>
+                        <div className="p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
+                            <div className="bg-blue-50 p-4 rounded-2xl border-2 border-blue-100 flex gap-3 items-center">
+                                <Info size={20} className="text-blue-500 shrink-0"/>
+                                <p className="text-xs font-bold text-blue-700 leading-relaxed">บันทึกชื่อหน่วยงานภายนอกที่ส่งหนังสือมาบ่อยๆ เพื่อให้สะดวกต่อการเลือกในหน้าลงทะเบียนหนังสือ</p>
+                            </div>
+
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    placeholder="ระบุชื่อหน่วยงาน... (เช่น สพฐ., สพป.บร.2)" 
+                                    value={newAgencyInput}
+                                    onChange={e => setNewAgencyInput(e.target.value)}
+                                    className="flex-1 px-4 py-3 border-2 border-slate-100 rounded-xl outline-none focus:border-blue-600 font-bold shadow-inner"
+                                    onKeyPress={e => e.key === 'Enter' && handleAddExternalAgency()}
+                                />
+                                <button onClick={handleAddExternalAgency} className="bg-blue-600 text-white px-5 rounded-xl font-black shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all"><Plus size={24}/></button>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">หน่วยงานที่บันทึกไว้</label>
+                                {sysConfig?.externalAgencies && sysConfig.externalAgencies.length > 0 ? (
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {sysConfig.externalAgencies.map((agency, idx) => (
+                                            <div key={idx} className="flex justify-between items-center p-4 bg-slate-50 border rounded-2xl group hover:bg-white hover:border-blue-200 transition-all">
+                                                <span className="font-bold text-slate-700">{agency}</span>
+                                                <button onClick={() => handleRemoveExternalAgency(agency)} className="text-slate-300 hover:text-red-500 transition-colors p-1"><Trash2 size={16}/></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-10 border-2 border-dashed border-slate-100 rounded-2xl text-slate-300 font-bold italic">ยังไม่ได้เพิ่มหน่วยงานต้นเรื่อง</div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="p-8 border-t bg-slate-50 text-right">
+                            <button onClick={() => setShowAgencyManager(false)} className="px-10 py-3 bg-slate-900 text-white rounded-xl font-black shadow-lg transition-all active:scale-95">เสร็จสิ้น</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* LIST VIEW */}
             {viewMode === 'LIST' && (
@@ -859,8 +963,21 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     </div>
                                 </div>
                                 <div className="flex justify-between md:justify-end md:items-end md:flex-col items-center gap-1 pt-2 md:pt-0 border-t md:border-none border-slate-50">
-                                    <div className="flex gap-2">
-                                        {docItem.status === 'PendingDirector' && <span className="text-[8px] md:text-[9px] font-black text-amber-500 uppercase bg-amber-50 px-2 py-0.5 rounded">รอ ผอ. สั่งการ</span>}
+                                    <div className="flex gap-2 items-center">
+                                        {(isDirector || isDocOfficer || isSystemAdmin) && (
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteDoc(docItem.id); }}
+                                                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all mr-1"
+                                                title="ลบหนังสือ"
+                                            >
+                                                <Trash2 size={16}/>
+                                            </button>
+                                        )}
+                                        {docItem.status === 'PendingDirector' && (
+                                            <span className="text-[10px] md:text-sm font-black text-white uppercase bg-orange-600 px-4 py-1.5 rounded-full shadow-md animate-pulse border-2 border-white ring-2 ring-orange-100">
+                                                รอ ผอ. สั่งการ
+                                            </span>
+                                        )}
                                         {docItem.status === 'PendingViceDirector' && <span className="text-[8px] md:text-[9px] font-black text-blue-500 uppercase bg-blue-50 px-2 py-0.5 rounded">รอรองฯ สั่งการ</span>}
                                     </div>
                                     <div className="p-2 bg-slate-50 rounded-lg text-slate-400 group-hover:text-blue-500 group-hover:bg-blue-50 transition-all"><ChevronRight size={16}/></div>
@@ -932,17 +1049,36 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1">
-                                        <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">จาก (หน่วยงาน)</label>
-                                        <input required placeholder="สพฐ./เขตพื้นที่/ฯลฯ" value={newDoc.from} onChange={e => setNewDoc({...newDoc, from: e.target.value})} className="w-full px-4 md:px-5 py-3 border-2 border-slate-200 rounded-xl md:rounded-2xl font-bold text-sm outline-none focus:border-blue-600 transition-all" />
+                                        <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">จาก (หน่วยงานต้นเรื่อง)</label>
+                                        {docCategory === 'INCOMING' ? (
+                                            <select 
+                                                required 
+                                                value={newDoc.from} 
+                                                onChange={e => setNewDoc({...newDoc, from: e.target.value})} 
+                                                className="w-full px-4 md:px-5 py-3 border-2 border-slate-200 rounded-xl md:rounded-2xl font-bold text-sm outline-none focus:border-blue-600 transition-all appearance-none bg-white"
+                                            >
+                                                <option value="">-- เลือกหน่วยงาน --</option>
+                                                {sysConfig?.externalAgencies?.map((agency, i) => (
+                                                    <option key={i} value={agency}>{agency}</option>
+                                                ))}
+                                                <option value="อื่นๆ">อื่นๆ (ระบุในรายละเอียด)</option>
+                                            </select>
+                                        ) : (
+                                            <input disabled value={currentSchool.name} className="w-full px-4 md:px-5 py-3 border-2 border-slate-100 rounded-xl md:rounded-2xl font-bold text-sm bg-slate-50 text-slate-400" />
+                                        )}
                                     </div>
                                     <div className="space-y-1">
                                         <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">ความเร่งด่วน</label>
-                                        <select value={newDoc.priority} onChange={e => setNewDoc({...newDoc, priority: e.target.value as any})} className="w-full px-4 md:px-5 py-3 border-2 border-slate-200 rounded-xl md:rounded-2xl font-bold text-sm outline-none focus:border-blue-600 cursor-pointer">
+                                        <select value={newDoc.priority} onChange={e => setNewDoc({...newDoc, priority: e.target.value as any})} className="w-full px-4 md:px-5 py-3 border-2 border-slate-200 rounded-xl md:rounded-2xl font-bold text-sm outline-none focus:border-blue-600 cursor-pointer appearance-none bg-white">
                                             <option value="Normal">ปกติ</option>
                                             <option value="Urgent">ด่วน</option>
                                             <option value="Critical">ด่วนที่สุด</option>
                                         </select>
                                     </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">รายละเอียดหนังสือ (ย่อสรุปเนื้อความ)</label>
+                                    <textarea placeholder="ระบุสาระสำคัญของหนังสือเพื่อให้ ผอ. พิจารณา..." value={newDoc.description} onChange={e => setNewDoc({...newDoc, description: e.target.value})} className="w-full px-4 md:px-5 py-3 border-2 border-slate-200 rounded-xl md:rounded-2xl font-bold text-sm outline-none focus:border-blue-600 transition-all h-32" />
                                 </div>
                             </div>
                             <div className="space-y-6 md:space-y-8">
@@ -992,7 +1128,18 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         <button type="button" onClick={() => setViewMode('LIST')} className="flex items-center gap-2 text-slate-400 hover:text-slate-800 font-black uppercase text-[10px] md:text-xs transition-colors group">
                             <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform"/> ย้อนกลับ
                         </button>
-                        <h2 className="text-base md:text-xl font-black text-slate-800 tracking-tight">รายละเอียดหนังสือ</h2>
+                        <div className="flex items-center gap-4">
+                            <h2 className="text-base md:text-xl font-black text-slate-800 tracking-tight">รายละเอียดหนังสือ</h2>
+                            {(isDirector || isDocOfficer || isSystemAdmin) && (
+                                <button 
+                                    onClick={() => handleDeleteDoc(selectedDoc.id)}
+                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                                    title="ลบหนังสือราชการ"
+                                >
+                                    <Trash2 size={20}/>
+                                </button>
+                            )}
+                        </div>
                         <div className="w-12"></div>
                     </div>
 
@@ -1002,6 +1149,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                 <div className="flex flex-wrap items-center gap-2 md:gap-3">
                                     <span className={`px-3 md:px-5 py-1 md:py-2 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-widest shadow-sm border-2 ${selectedDoc.category === 'ORDER' ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-blue-600 text-white border-blue-400'}`}>{selectedDoc.category === 'ORDER' ? 'ประกาศ / คำสั่ง' : 'หนังสือภายนอก'}</span>
                                     <span className="px-3 md:px-5 py-1 md:py-2 bg-slate-900 text-white rounded-full text-[8px] md:text-[10px] font-black font-mono">#{selectedDoc.bookNumber}</span>
+                                    {selectedDoc.status === 'PendingDirector' && (
+                                        <span className="px-5 py-2 bg-orange-600 text-white rounded-full text-[10px] md:text-xs font-black uppercase shadow-lg animate-pulse border-2 border-white ring-4 ring-orange-50">
+                                            รอ ผอ. สั่งการ
+                                        </span>
+                                    )}
                                 </div>
                                 <h2 className="text-lg md:text-2xl font-black text-slate-800 leading-tight break-words">{selectedDoc.title}</h2>
                                 <div className="flex flex-wrap gap-4 md:gap-8 text-[9px] md:text-[11px] font-bold text-slate-400 uppercase tracking-[0.1em]">
@@ -1016,6 +1168,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         </div>
 
                         <div className="p-6 md:p-10 lg:p-14 space-y-10 md:space-y-14">
+                            {/* Summary / Description Section */}
+                            <div className="bg-slate-50 p-6 md:p-10 rounded-3xl border border-slate-100 shadow-inner">
+                                <h3 className="text-[10px] md:text-xs font-black text-slate-400 uppercase mb-4 tracking-widest flex items-center gap-2"><Info size={14}/> รายละเอียด / สาระสำคัญ</h3>
+                                <p className="text-slate-800 font-bold leading-relaxed whitespace-pre-wrap">{selectedDoc.description || 'ไม่มีข้อมูลรายละเอียดเพิ่มเติม'}</p>
+                            </div>
+
                             <div>
                                 <h3 className="text-[10px] md:text-xs font-black text-slate-800 uppercase flex items-center gap-3 tracking-[0.2em] mb-6 md:mb-8"><Bookmark size={14} className="text-blue-500"/> ไฟล์เอกสารแนบ</h3>
                                 <div className="flex flex-col gap-3">
@@ -1023,14 +1181,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         <button onClick={() => handleOpenAndAck(selectedDoc, selectedDoc.signedFileUrl!)} className="p-3 md:p-4 bg-emerald-600 text-white rounded-xl shadow-md flex items-center justify-between hover:bg-emerald-700 transition-all border-2 border-emerald-400 group text-left">
                                             <div className="flex items-center gap-3 md:gap-4 relative z-10">
                                                 <FileCheck size={20}/>
-                                                <div><p className="font-black text-sm md:text-lg">บันทึกข้อสั่งการ</p><p className="text-[8px] md:text-[10px] font-bold opacity-80 uppercase tracking-widest">เอกสารที่ลงนามสั่งการแล้ว</p></div>
+                                                <div><p className="font-black text-sm md:text-lg">บันทึกข้อสั่งการ ผอ.</p><p className="text-[8px] md:text-[10px] font-bold opacity-80 uppercase tracking-widest">บันทึกข้อความสั่งการอิเล็กทรอนิกส์</p></div>
                                             </div>
                                             <ExternalLink size={16}/>
                                         </button>
                                     )}
                                     {selectedDoc.attachments.map((att, idx) => (
                                         <button key={idx} onClick={() => handleOpenAndAck(selectedDoc, att.url)} className="p-3 md:p-4 bg-blue-600 text-white rounded-xl shadow-md flex items-center justify-between hover:bg-blue-700 transition-all border-2 border-blue-400 text-left">
-                                            <div className="flex items-center gap-3 md:gap-4"><FileIcon size={20}/><div><p className="font-black text-xs md:text-base truncate max-w-[200px] md:max-w-[400px]">{att.name}</p><p className="text-[8px] md:text-[10px] font-bold opacity-80 uppercase tracking-widest">เปิดอ่านไฟล์เอกสาร PDF</p></div></div>
+                                            <div className="flex items-center gap-3 md:gap-4"><FileIcon size={20}/><div><p className="font-black text-xs md:text-base truncate max-w-[200px] md:max-w-[400px]">{att.name}</p><p className="text-[8px] md:text-[10px] font-bold opacity-80 uppercase tracking-widest">เปิดอ่านไฟล์เอกสารต้นฉบับ</p></div></div>
                                             <ExternalLink size={16}/>
                                         </button>
                                     ))}
@@ -1041,25 +1199,28 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             {isDirector && selectedDoc.status === 'PendingDirector' && (
                                 <div className="bg-blue-50 p-2 md:p-10 rounded-xl md:rounded-[3.5rem] border-2 border-blue-400 shadow-2xl space-y-4 md:space-y-10 animate-slide-up relative overflow-hidden">
                                     <div className="flex flex-col sm:flex-row justify-between items-center gap-4 border-b border-blue-200 pb-4 md:pb-6 relative z-10 px-4 md:px-0 pt-4 md:pt-0">
-                                        <h3 className="text-base md:text-xl font-black text-slate-900 flex items-center gap-3"><PenTool size={18} className="text-blue-700"/> การสั่งการ (ผอ.)</h3>
-                                        <div className="bg-white px-3 md:px-5 py-1.5 md:py-2.5 rounded-xl md:rounded-2xl border-2 border-blue-100 text-[9px] md:text-[11px] font-black text-slate-700 shadow-sm">ตราหน้าที่: <input type="number" min="1" value={stampPage} onChange={e => setStampPage(parseInt(e.target.value))} className="w-8 md:w-12 text-center font-black text-blue-600 outline-none" /></div>
+                                        <h3 className="text-base md:text-xl font-black text-slate-900 flex items-center gap-3"><PenTool size={18} className="text-blue-700"/> การสั่งการ (สร้างบันทึกข้อความ)</h3>
                                     </div>
                                     <div className="bg-white p-3 md:p-8 rounded-lg md:rounded-[2.5rem] border-2 border-blue-200 shadow-inner space-y-4 md:space-y-6 relative z-10 mx-2 md:mx-0">
-                                        <label className="block text-[9px] md:text-[11px] font-black text-blue-600 uppercase tracking-widest ml-1">มอบหมายรองผู้อำนวยการ</label>
-                                        <div className="flex flex-col lg:flex-row gap-3 md:gap-5">
-                                            <select value={assignedViceDirId} onChange={e => setAssignedViceDirId(e.target.value)} className="w-full pl-4 md:pl-6 pr-10 py-3 md:py-4 border-2 border-slate-300 rounded-xl md:rounded-2xl font-black bg-slate-50 outline-none appearance-none cursor-pointer text-slate-900 text-xs md:text-sm">
-                                                <option value="">-- เลือกรายชื่อ --</option>
-                                                {viceDirectors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                                            </select>
-                                            <button onClick={handleQuickDelegateToVice} className={`px-6 md:px-8 py-3 rounded-xl md:rounded-2xl font-black transition-all flex items-center justify-center gap-2 active:scale-95 text-xs md:text-sm ${assignedViceDirId ? 'bg-blue-600 text-white shadow-xl' : 'bg-slate-100 text-slate-300'}`} disabled={!assignedViceDirId}><FastForward size={16}/> มอบหมาย</button>
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                            <div className="space-y-2">
+                                                <label className="block text-[9px] md:text-[11px] font-black text-blue-600 uppercase tracking-widest ml-1">มอบหมายรองผู้อำนวยการ</label>
+                                                <div className="flex gap-2">
+                                                    <select value={assignedViceDirId} onChange={e => setAssignedViceDirId(e.target.value)} className="flex-1 pl-4 md:pl-6 pr-10 py-3 md:py-4 border-2 border-slate-300 rounded-xl md:rounded-2xl font-black bg-slate-50 outline-none appearance-none cursor-pointer text-slate-900 text-xs md:text-sm">
+                                                        <option value="">-- ไม่มอบหมายรองฯ --</option>
+                                                        {viceDirectors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                                                    </select>
+                                                    <button onClick={handleQuickDelegateToVice} className={`px-4 md:px-6 py-3 rounded-xl md:rounded-2xl font-black transition-all flex items-center justify-center gap-2 active:scale-95 text-xs md:text-sm ${assignedViceDirId ? 'bg-blue-600 text-white shadow-xl' : 'bg-slate-100 text-slate-300'}`} disabled={!assignedViceDirId}><FastForward size={16}/></button>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="bg-white p-3 md:p-10 rounded-lg md:rounded-[3rem] border-2 border-blue-400 shadow-inner space-y-4 md:space-y-10 relative z-10 mx-0 md:mx-0 mb-4 md:mb-0">
-                                        <textarea value={command} onChange={e => setCommand(e.target.value)} placeholder="ระบุข้อความสั่งการ..." className="w-full p-4 md:p-8 bg-slate-50 border-2 border-slate-300 rounded-xl md:rounded-[2.5rem] h-32 md:h-40 outline-none focus:bg-white font-black text-slate-900 leading-relaxed placeholder:text-slate-200 text-sm md:text-lg shadow-inner" />
+                                        <textarea value={command} onChange={e => setCommand(e.target.value)} placeholder="ระบุข้อความสั่งการ/เกษียณหนังสือ... (ระบบจะนำไปจัดรูปแบบในบันทึกข้อความศธ. อัตโนมัติ)" className="w-full p-4 md:p-8 bg-slate-50 border-2 border-slate-300 rounded-xl md:rounded-[2.5rem] h-32 md:h-40 outline-none focus:bg-white font-black text-slate-900 leading-relaxed placeholder:text-slate-300 text-sm md:text-lg shadow-inner" />
                                         <TeacherSelectionGrid selectedIds={selectedTeachers} onToggle={setSelectedTeachers} currentSearch={teacherSearchTerm} onSearchChange={setTeacherSearchTerm}/>
                                         <div className="flex flex-col sm:flex-row gap-4 px-0 md:px-0 pb-2 md:pb-0">
-                                            <button onClick={() => handleDirectorAction(true)} className="flex-1 py-3 md:py-4 bg-white border-2 border-emerald-500 text-emerald-700 rounded-xl md:rounded-[2rem] font-black text-xs md:text-sm hover:bg-emerald-50 shadow-xl transition-all">แจ้งเวียน</button>
-                                            <button onClick={() => handleDirectorAction(false)} className="flex-[2] py-3 md:py-4 bg-slate-900 text-white rounded-xl md:rounded-[2rem] font-black text-sm md:text-lg shadow-2xl hover:bg-black transition-all flex items-center justify-center gap-3 active:scale-95"><PenTool size={20}/> ลงนามทันที</button>
+                                            <button onClick={() => handleDirectorAction(true)} className="flex-1 py-3 md:py-4 bg-white border-2 border-emerald-500 text-emerald-700 rounded-xl md:rounded-[2rem] font-black text-xs md:text-sm hover:bg-emerald-50 shadow-xl transition-all">แจ้งเวียนเพื่อทราบ</button>
+                                            <button onClick={() => handleDirectorAction(false)} className="flex-[2] py-3 md:py-4 bg-slate-900 text-white rounded-xl md:rounded-[2rem] font-black text-sm md:text-lg shadow-2xl hover:bg-black transition-all flex items-center justify-center gap-3 active:scale-95"><FilePlus size={20}/> ลงนามและสั่งปฏิบัติ</button>
                                         </div>
                                     </div>
                                 </div>
@@ -1068,12 +1229,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             {/* Vice-Director Action Panel */}
                             {selectedDoc.status === 'PendingViceDirector' && (isViceDirector || selectedDoc.assignedViceDirectorId === currentUser.id) && (
                                 <div className="bg-indigo-50 p-2 md:p-10 rounded-xl md:rounded-[3.5rem] border-2 border-indigo-400 shadow-2xl space-y-4 md:space-y-10 animate-slide-up relative overflow-hidden">
-                                    <h3 className="text-base md:text-xl font-black text-slate-900 flex items-center gap-3 relative z-10 px-4 md:px-0 pt-4 md:pt-0"><PenTool size={18} className="text-indigo-700"/> การพิจารณา (ผู้รับมอบหมาย)</h3>
+                                    <div className="flex justify-between items-center relative z-10 px-4 md:px-0 pt-4 md:pt-0">
+                                        <h3 className="text-base md:text-xl font-black text-slate-900 flex items-center gap-3"><PenTool size={18} className="text-indigo-700"/> การพิจารณา (ผู้รับมอบหมาย)</h3>
+                                    </div>
                                     <div className="p-4 md:p-8 bg-white border-2 border-indigo-400 rounded-lg md:rounded-[2.5rem] text-sm md:text-md text-indigo-900 font-black italic shadow-inner mx-2 md:mx-0">"{selectedDoc.directorCommand || 'มอบพิจารณาดำเนินการ'}"</div>
                                     <div className="bg-white p-3 md:p-10 rounded-lg md:rounded-[3rem] border-2 border-indigo-400 shadow-inner space-y-4 md:space-y-10 relative z-10 mx-0 md:mx-0 mb-4 md:mb-0">
                                         <textarea value={command} onChange={e => setCommand(e.target.value)} placeholder="ระบุข้อความสั่งการ..." className="w-full p-4 md:p-8 bg-slate-50 border-2 border-slate-300 rounded-xl md:rounded-[2.5rem] h-32 md:h-40 outline-none font-black text-slate-900 text-sm md:text-lg shadow-inner" />
                                         <TeacherSelectionGrid selectedIds={selectedTeachers} onToggle={setSelectedTeachers} currentSearch={teacherSearchTerm} onSearchChange={setTeacherSearchTerm}/>
-                                        <button onClick={handleViceDirectorAction} className="w-full py-3 md:py-4 bg-indigo-600 text-white rounded-xl md:rounded-[2rem] font-black text-sm md:text-lg shadow-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 active:scale-95 px-0 md:px-0"><PenTool size={20}/> ลงนามและสั่งการ</button>
+                                        <button onClick={handleViceDirectorAction} className="w-full py-3 md:py-4 bg-indigo-600 text-white rounded-xl md:rounded-[2rem] font-black text-sm md:text-lg shadow-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 active:scale-95 px-0 md:px-0"><FilePlus size={20}/> ลงนามสั่งปฏิบัติ</button>
                                     </div>
                                 </div>
                             )}
@@ -1085,14 +1248,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         {selectedDoc.acknowledgedBy?.includes(currentUser.id) ? (
                                             <div className="text-emerald-600 font-black flex flex-col items-center gap-3 md:gap-4">
                                                 <div className="bg-emerald-100 p-4 md:p-6 rounded-full shadow-inner"><CheckCircle size={40} className="animate-bounce"/></div>
-                                                <span className="text-xl md:text-3xl tracking-tight leading-none">ท่านได้รับทราบหนังสือแล้ว</span>
-                                                <div className="text-[8px] md:text-[10px] text-emerald-400 uppercase tracking-[0.3em] font-black">รับทราบเรียบร้อยแล้ว</div>
+                                                <span className="text-xl md:text-3xl tracking-tight leading-none">ท่านได้รับทราบข้อสั่งการแล้ว</span>
+                                                <div className="text-[8px] md:text-[10px] text-emerald-400 uppercase tracking-[0.3em] font-black">Acknowledgement Successful</div>
                                             </div>
                                         ) : (
                                             <div className="space-y-3 md:space-y-4">
                                                 <div className="bg-blue-100 p-4 md:p-6 rounded-full text-blue-600 w-fit mx-auto shadow-inner"><Info size={32} className="animate-pulse"/></div>
-                                                <p className="text-slate-600 font-black text-lg md:text-2xl tracking-tight">กรุณาคลิกดูไฟล์เพื่อรับทราบ</p>
-                                                <p className="text-slate-400 text-[10px] md:text-sm font-bold uppercase tracking-widest">ระบบจะบันทึกสถานะรับทราบให้อัตโนมัติ</p>
+                                                <p className="text-slate-600 font-black text-lg md:text-2xl tracking-tight">กรุณาเปิดอ่านบันทึกสั่งการเพื่อรับทราบ</p>
+                                                <p className="text-slate-400 text-[10px] md:text-sm font-bold uppercase tracking-widest">ระบบจะบันทึกสถานะการรับทราบให้ท่านโดยอัตโนมัติ</p>
                                             </div>
                                         )}
                                     </div>
