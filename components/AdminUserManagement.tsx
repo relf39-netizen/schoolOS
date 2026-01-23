@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
 import { 
@@ -25,6 +24,7 @@ interface AdminUserManagementProps {
 const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
     { id: 'SYSTEM_ADMIN', label: 'ผู้ดูแลระบบ (Admin)' },
     { id: 'DIRECTOR', label: 'ผู้อำนวยการ (Director)' },
+    { id: 'VICE_DIRECTOR', label: 'รองผู้อำนวยการ (Vice)' },
     { id: 'DOCUMENT_OFFICER', label: 'เจ้าหน้าที่ธุรการ' },
     { id: 'FINANCE_BUDGET', label: 'การเงิน (งบประมาณ)' },
     { id: 'FINANCE_NONBUDGET', label: 'การเงิน (นอกงบประมาณ)' },
@@ -49,55 +49,49 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
     const [isGettingLocation, setIsGettingLocation] = useState(false);
 
-    // Google Apps Script Code v10.0 (Supports Tracking Links & Telegram Auto-Link)
+    // Google Apps Script Code v12.2 (Corrected for Automatic Browser Preview)
     const gasCode = `/**
- * SchoolOS - Cloud Storage & Tracking Bridge v10.0
- * จัดการไฟล์ Drive และระบบรับทราบหนังสืออัตโนมัติจาก Telegram
+ * SchoolOS - Cloud Storage & Direct SQL Tracking Bridge v12.2
+ * ระบบจัดการไฟล์ Drive และบันทึกสถานะรับทราบทันที
  */
 
 var SUPABASE_URL = "ใส่ URL Supabase ของท่านที่นี่";
 var SUPABASE_KEY = "ใส่ Anon Key ของท่านที่นี่";
 
-/**
- * ฟังก์ชันหลักสำหรับ GET Request (ใช้สำหรับ Tracking Link ใน Telegram)
- */
 function doGet(e) {
   var action = e.parameter.action;
   
   if (action === 'ack') {
     var docId = e.parameter.docId;
     var userId = e.parameter.userId;
-    var target = e.parameter.target;
+    var targetUrl = decodeURIComponent(e.parameter.target);
     
-    // 1. บันทึกการรับทราบลง Supabase
-    handleDirectAcknowledge(docId, userId);
+    try {
+      handleDirectAcknowledge(docId, userId);
+    } catch(err) {
+      console.error("Ack SQL Error: " + err.toString());
+    }
     
-    // 2. ส่งหน้า HTML ที่ Redirect ไปยังไฟล์จริง
-    return HtmlService.createHtmlOutput(
-      "<html><head><meta http-equiv='refresh' content='0;url=" + target + "'></head>" +
-      "<body style='font-family:sans-serif; text-align:center; padding-top:50px;'>" +
-      "<h3>SchoolOS: กำลังเปิดเอกสารและบันทึกสถานะรับทราบ...</h3>" +
-      "<p>กรุณารอสักครู่ หากหน้าจอไม่เปลี่ยนไป <a href='" + target + "'>คลิกที่นี่</a></p>" +
-      "</body></html>"
-    );
+    var html = "<html><head><meta charset='UTF-8'><meta http-equiv='refresh' content='0;url=" + targetUrl + "'></head>" +
+               "<body style='font-family:sans-serif; text-align:center; padding-top:100px; background:#f8fafc;'>" +
+               "<div style='background:white; display:inline-block; padding:40px; border-radius:30px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);'>" +
+               "<h2 style='color:#2563eb;'>SchoolOS System</h2>" +
+               "<p style='color:#64748b; font-weight:bold;'>ระบบบันทึกสถานะการรับทราบเรียบร้อยแล้ว</p>" +
+               "<p style='color:#94a3b8;'>กำลังนำคุณไปที่หน้าพรีวิวเอกสาร...</p>" +
+               "<a href='" + targetUrl + "' style='display:inline-block; margin-top:20px; color:#2563eb; font-weight:bold; text-decoration:none;'>คลิกที่นี่หากหน้าจอไม่เปลี่ยนไป</a>" +
+               "</div></body></html>";
+               
+    return HtmlService.createHtmlOutput(html).setTitle("SchoolOS Tracking Link");
   }
   
-  return ContentService.createTextOutput("SchoolOS Cloud Bridge v10.0 is Online").setMimeType(ContentService.MimeType.TEXT);
+  return ContentService.createTextOutput("SchoolOS Cloud Bridge v12.2 is Online").setMimeType(ContentService.MimeType.TEXT);
 }
 
-/**
- * ฟังก์ชันสำหรับ POST Request (ใช้สำหรับอัปโหลดไฟล์และ Telegram Webhook)
- */
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
-    
-    // จัดการ Telegram Webhook
-    if (data.message) {
-      return handleTelegramWebhook(data.message);
-    }
+    if (data.message) return handleTelegramWebhook(data.message);
 
-    // จัดการการอัปโหลดไฟล์ไปที่ Drive
     var folder = DriveApp.getFolderById(data.folderId);
     var bytes = Utilities.base64Decode(data.fileData);
     var blob = Utilities.newBlob(bytes, data.mimeType, data.fileName);
@@ -108,51 +102,32 @@ function doPost(e) {
       'status': 'success',
       'url': file.getUrl(),
       'id': file.getId(),
-      'viewUrl': "https://drive.google.com/uc?export=view&id=" + file.getId()
+      'viewUrl': "https://drive.google.com/file/d/" + file.getId() + "/view"
     });
-
   } catch (f) {
     return createJsonResponse({ 'status': 'error', 'message': f.toString() });
   }
 }
 
-/**
- * อัปเดตสถานะการรับทราบลงใน Supabase โดยตรง
- */
 function handleDirectAcknowledge(docId, userId) {
-  var url = SUPABASE_URL + "/rest/v1/documents?id=eq." + docId;
-  var options = {
-    "method": "get",
-    "headers": {
-      "apikey": SUPABASE_KEY,
-      "Authorization": "Bearer " + SUPABASE_KEY
-    }
-  };
+  var headers = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY };
+  var fetchUrl = SUPABASE_URL + "/rest/v1/documents?id=eq." + docId;
+  var response = UrlFetchApp.fetch(fetchUrl, { "method": "get", "headers": headers });
+  var docs = JSON.parse(response.getContentText());
   
-  try {
-    var response = UrlFetchApp.fetch(url, options);
-    var docs = JSON.parse(response.getContentText());
-    if (docs.length > 0) {
-      var doc = docs[0];
-      var ackList = doc.acknowledged_by || [];
-      // ตรวจสอบว่าเคยรับทราบหรือยัง
-      if (ackList.indexOf(userId) === -1) {
-        ackList.push(userId);
-        
-        var patchOptions = {
-          "method": "patch",
-          "headers": {
-            "apikey": SUPABASE_KEY,
-            "Authorization": "Bearer " + SUPABASE_KEY,
-            "Content-Type": "application/json"
-          },
-          "payload": JSON.stringify({ "acknowledged_by": ackList })
-        };
-        UrlFetchApp.fetch(url, patchOptions);
-      }
+  if (docs.length > 0) {
+    var docItem = docs[0];
+    var ackList = docItem.acknowledged_by || [];
+    if (ackList.indexOf(userId) === -1) {
+      ackList.push(userId);
+      var patchUrl = SUPABASE_URL + "/rest/v1/documents?id=eq." + docId;
+      UrlFetchApp.fetch(patchUrl, {
+        "method": "patch",
+        "contentType": "application/json",
+        "headers": headers,
+        "payload": JSON.stringify({ "acknowledged_by": ackList })
+      });
     }
-  } catch(e) {
-    Logger.log("Ack Error: " + e.toString());
   }
 }
 
@@ -166,18 +141,12 @@ function handleTelegramWebhook(msg) {
     if (parts.length > 1) {
       var citizenId = parts[1].trim();
       var url = SUPABASE_URL + "/rest/v1/profiles?id=eq." + citizenId;
-      var options = {
-        "method": "patch",
-        "headers": {
-          "apikey": SUPABASE_KEY,
-          "Authorization": "Bearer " + SUPABASE_KEY,
-          "Content-Type": "application/json"
-        },
-        "payload": JSON.stringify({ "telegram_chat_id": chatId })
-      };
-      
       try {
-        UrlFetchApp.fetch(url, options);
+        UrlFetchApp.fetch(url, {
+          "method": "patch",
+          "headers": { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" },
+          "payload": JSON.stringify({ "telegram_chat_id": chatId })
+        });
         sendMessage(botToken, chatId, "✅ <b>เชื่อมต่อระบบ SchoolOS สำเร็จ!</b>\\nต่อจากนี้คุณจะได้รับการแจ้งเตือนผ่านช่องทางนี้ครับ");
       } catch(e) {
         sendMessage(botToken, chatId, "❌ เกิดข้อผิดพลาดในการบันทึกข้อมูล");
@@ -189,8 +158,7 @@ function handleTelegramWebhook(msg) {
 
 function sendMessage(token, chatId, text) {
   var url = "https://api.telegram.org/bot" + token + "/sendMessage";
-  var payload = { "chat_id": chatId, "text": text, "parse_mode": "HTML" };
-  UrlFetchApp.fetch(url, { "method": "post", "contentType": "application/json", "payload": JSON.stringify(payload) });
+  UrlFetchApp.fetch(url, { "method": "post", "contentType": "application/json", "payload": JSON.stringify({ "chat_id": chatId, "text": text, "parse_mode": "HTML" }) });
 }
 
 function createJsonResponse(obj) {
@@ -235,54 +203,6 @@ function setTelegramWebhook() {
         };
         fetchConfig();
     }, []);
-
-    // Helper: Resize Image
-    const resizeImage = (file: File, maxWidth: number = 300): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    let width = img.width;
-                    let height = img.height;
-
-                    if (width > maxWidth) {
-                        height = Math.round((height * maxWidth) / width);
-                        width = maxWidth;
-                    }
-
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                        ctx.drawImage(img, 0, 0, width, height);
-                        resolve(canvas.toDataURL('image/png', 0.8)); // Compress
-                    } else {
-                        reject(new Error("Canvas context error"));
-                    }
-                };
-                img.onerror = () => reject(new Error("Image load error"));
-                img.src = event.target?.result as string;
-            };
-            reader.onerror = error => reject(error);
-            reader.readAsDataURL(file);
-        });
-    };
-
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, field: keyof SystemConfig) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            try {
-                // Resize image to prevent large payload issues
-                const base64 = await resizeImage(file, 400); 
-                setConfig(prev => ({ ...prev, [field]: base64 }));
-            } catch (error) {
-                console.error("Error resizing image", error);
-                alert("เกิดข้อผิดพลาดในการประมวลผลรูปภาพ");
-            }
-        }
-    };
 
     const handleSaveConfig = async () => {
         setIsLoadingConfig(true);
@@ -720,7 +640,7 @@ function setTelegramWebhook() {
                     <div className="space-y-6">
                         <div className="flex items-center gap-2 mb-4 border-b pb-4">
                             <Database className="text-purple-600"/>
-                            <h3 className="font-bold text-lg text-slate-800">ตั้งค่าระบบส่วนกลาง (Integration)</h3>
+                            <h3 className="font-bold text-lg text-slate-800">ตั้งค่าระบบส่วนกลาง</h3>
                         </div>
 
                         {/* Telegram Config */}
@@ -731,17 +651,17 @@ function setTelegramWebhook() {
                             <div className="space-y-4">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm font-bold text-slate-700 mb-1">Telegram Bot Token (จาก @BotFather)</label>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">Telegram Bot Token</label>
                                         <input 
                                             type="text" 
                                             value={config.telegramBotToken || ''}
                                             onChange={e => setConfig({...config, telegramBotToken: e.target.value})}
                                             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
-                                            placeholder="123456789:ABCDefGhIJKlmNoPQRstUvwxyz..."
+                                            placeholder="123456789:ABC..."
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-bold text-slate-700 mb-1">Telegram Bot Username (ไม่ใส่ @)</label>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">Telegram Bot Username</label>
                                         <input 
                                             type="text" 
                                             value={config.telegramBotUsername || ''}
@@ -752,7 +672,7 @@ function setTelegramWebhook() {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">App Base URL (สำหรับส่งลิงก์ในแชท)</label>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">App Base URL</label>
                                     <input 
                                         type="text" 
                                         value={config.appBaseUrl || ''}
@@ -760,17 +680,13 @@ function setTelegramWebhook() {
                                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
                                         placeholder="https://your-app.vercel.app"
                                     />
-                                    <p className="text-xs text-blue-500 mt-1">
-                                        ใช้สำหรับส่งการแจ้งเตือนหนังสือราชการ และลิ้งก์สำหรับให้คุณครูสมัครเพื่อรับ Chat ID อัตโนมัติ
-                                    </p>
                                 </div>
                             </div>
                         </div>
 
                         <div className="bg-purple-50 p-6 rounded-xl border border-purple-200 mb-6">
                             <h4 className="font-bold text-purple-800 mb-4 flex items-center gap-2">
-                                <LinkIcon size={20}/> การเชื่อมต่อ Google Drive (สำหรับอัปโหลดไฟล์)
-                            </h4>
+                                <LinkIcon size={20}/> การเชื่อมต่อ Google Drive</h4>
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-sm font-bold text-slate-700 mb-1">Google Apps Script Web App URL</label>
@@ -795,97 +711,6 @@ function setTelegramWebhook() {
                             </div>
                         </div>
 
-                        <div className="bg-white rounded-xl border border-slate-200 p-6">
-                            <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                <ImageIcon size={20}/> ตั้งค่าลายเซ็นและตราสัญลักษณ์ (สำหรับออกเอกสาร PDF)
-                            </h4>
-                            <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg mb-4 text-xs flex items-start gap-2 border border-yellow-200">
-                                <AlertCircle size={16} className="shrink-0 mt-0.5"/>
-                                <span>ระบบจะย่อขนาดรูปภาพอัตโนมัติ (ไม่เกิน 400px) เพื่อประหยัดพื้นที่จัดเก็บและลดข้อผิดพลาดในการบันทึก</span>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                {/* School Logo */}
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">ตราโรงเรียน (Logo)</label>
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-24 h-24 border border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
-                                            {config.schoolLogoBase64 ? (
-                                                <img src={config.schoolLogoBase64} className="w-full h-full object-contain" alt="School Logo"/>
-                                            ) : <ImageIcon className="text-slate-300"/>}
-                                        </div>
-                                        <div className="flex-1">
-                                            <input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'schoolLogoBase64')} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Official Garuda */}
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">ตราครุฑ (สำหรับหนังสือราชการ)</label>
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-24 h-24 border border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
-                                            {config.officialGarudaBase64 ? (
-                                                <img src={config.officialGarudaBase64} className="w-full h-full object-contain" alt="Garuda Logo"/>
-                                            ) : <ImageIcon className="text-slate-300"/>}
-                                        </div>
-                                        <div className="flex-1">
-                                            <input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'officialGarudaBase64')} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <hr className="my-6 border-slate-100"/>
-
-                            {/* Director Signature Config */}
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-2">ลายเซ็นผู้อำนวยการ (ดิจิทัล)</label>
-                                <div className="flex flex-col md:flex-row gap-6">
-                                    <div className="w-full md:w-64 h-24 border border-slate-300 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden shrink-0">
-                                         {config.directorSignatureBase64 ? (
-                                                <img 
-                                                    src={config.directorSignatureBase64} 
-                                                    className="object-contain" 
-                                                    alt="Director Signature"
-                                                    style={{ 
-                                                        transform: `scale(${config.directorSignatureScale}) translateY(${config.directorSignatureYOffset}px)` 
-                                                    }}
-                                                />
-                                            ) : <span className="text-xs text-slate-400">Preview</span>}
-                                    </div>
-                                    <div className="space-y-4 flex-1">
-                                        <input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'directorSignatureBase64')} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                                        
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
-                                                    <Maximize size={12}/> ขนาด (Scale)
-                                                </label>
-                                                <input 
-                                                    type="range" min="0.5" max="2" step="0.1"
-                                                    value={config.directorSignatureScale}
-                                                    onChange={e => setConfig({...config, directorSignatureScale: parseFloat(e.target.value)})}
-                                                    className="w-full"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
-                                                    <MoveVertical size={12}/> ตำแหน่งแนวตั้ง (Y-Offset)
-                                                </label>
-                                                <input 
-                                                    type="range" min="-50" max="50" step="1"
-                                                    value={config.directorSignatureYOffset}
-                                                    onChange={e => setConfig({...config, directorSignatureYOffset: parseInt(e.target.value)})}
-                                                    className="w-full"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                         <div className="flex justify-end pt-4">
                             <button 
                                 onClick={handleSaveConfig}
@@ -903,44 +728,18 @@ function setTelegramWebhook() {
                 {activeTab === 'CLOUD_SETUP' && (
                     <div className="space-y-6 animate-fade-in">
                         <div className="bg-orange-50 border border-orange-200 rounded-xl p-6">
-                            <h3 className="text-xl font-bold text-orange-800 mb-4 flex items-center gap-2">
-                                <Cloud className="text-orange-600"/> คู่มือติดตั้งระบบเก็บไฟล์ & บอท (v10.0)
-                            </h3>
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                <div className="space-y-4">
-                                    <p className="text-slate-700 text-sm leading-relaxed">
-                                        เพื่อให้โรงเรียนสามารถอัปโหลดไฟล์และใช้งานระบบ **"Tracking Link แจ้งรับทราบอัตโนมัติ"** แอดมินต้องติดตั้งสคริปต์สะพานเชื่อมต่อตามขั้นตอนดังนี้:
-                                    </p>
+                            <h3 className="text-xl font-bold text-orange-800 mb-4 flex items-center gap-2"><Cloud className="text-orange-600"/> การติดตั้งระบบ Direct SQL Tracking v12.2</h3>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="space-y-4"><p className="text-slate-700 text-sm leading-relaxed">เพื่อให้ระบบงานสารบรรณสามารถ <b>"บันทึกรับทราบผ่าน Browser และพรีวิวไฟล์ได้ทันที"</b> แอดมินต้องอัปเดตสคริปต์กลางดังนี้:</p>
                                     <ol className="space-y-3 text-sm text-slate-600 list-decimal pl-5">
-                                        <li>เข้าสู่ <a href="https://script.google.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold underline">Google Apps Script</a> และสร้างโปรเจกต์ใหม่</li>
-                                        <li>คัดลอกโค้ดทางด้านขวาไปวางทับโค้ดเดิมทั้งหมด</li>
-                                        <li><b>สำคัญ:</b> แก้ไขตัวแปร <code className="bg-white border rounded px-1">SUPABASE_URL</code> และ <code className="bg-white border rounded px-1">SUPABASE_KEY</code> ให้เป็นข้อมูลของท่าน</li>
-                                        <li>คลิก <b>"Deploy"</b> เลือก <b>"New Deployment"</b> ประเภท <b>"Web App"</b></li>
-                                        <li>ตั้งค่า <b>Execute as: Me</b> และ <b>Who has access: Anyone</b></li>
-                                        <li>Deploy และนำ <b>Web App URL</b> มาวางในหน้า "ตั้งค่าระบบ"</li>
-                                        <li>ในหน้า Apps Script เลือกฟังก์ชัน <code className="bg-white border rounded px-1 text-blue-600">setTelegramWebhook</code> แล้วกดปุ่ม <b>Run</b> (ทำครั้งเดียว)</li>
+                                        <li>เปิดโปรเจกต์เดิมใน <a href="https://script.google.com" target="_blank" className="text-blue-600 font-bold underline">Apps Script</a></li>
+                                        <li>ลบโค้ดเก่าทิ้งทั้งหมด แล้ววางโค้ดใหม่จากทางด้านขวา</li>
+                                        <li><b>แก้ไข</b> <code className="bg-white px-1 font-bold">SUPABASE_URL</code> และ <code className="bg-white px-1 font-bold">SUPABASE_KEY</code> ให้ถูกต้อง</li>
+                                        <li>กด <b>Deploy &gt; New Deployment</b> (Execute as: Me / Who: Anyone)</li>
+                                        <li>นำ URL ที่ได้มาวางในหน้า "ตั้งค่าระบบ" และกด <b>Run</b> ฟังก์ชัน setTelegramWebhook</li>
                                     </ol>
-                                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800">
-                                        <AlertCircle className="inline mr-1" size={14}/> <b>ฟีเจอร์ใหม่:</b> ลิงก์ใน Telegram จะบันทึกการรับทราบเข้าฐานข้อมูล SQL ให้ทันทีที่ครูกดเปิดดูไฟล์
-                                    </div>
+                                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800"><AlertCircle className="inline mr-1" size={14}/> <b>ฟีเจอร์เด่น:</b> ระบบเวอร์ชันนี้จะบังคับให้ Browser เปิดหน้าพรีวิวของ Google Drive แทนการดาวน์โหลด ช่วยให้การดูเอกสารทำได้ทันทีบนมือถือ</div>
                                 </div>
-
-                                <div className="space-y-2">
-                                    <div className="flex justify-between items-center px-1">
-                                        <span className="text-xs font-bold text-slate-500 uppercase">GAS v10.0 Source Code</span>
-                                        <button 
-                                            onClick={handleCopyCode} 
-                                            className="text-xs flex items-center gap-1 font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded transition-colors"
-                                        >
-                                            {copied ? <><Check size={14}/> คัดลอกแล้ว</> : <><Copy size={14}/> คัดลอกโค้ด</>}
-                                        </button>
-                                    </div>
-                                    <div className="bg-slate-900 rounded-xl p-4 overflow-hidden relative">
-                                        <pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-[350px] custom-scrollbar leading-relaxed">
-                                            {gasCode}
-                                        </pre>
-                                    </div>
-                                </div>
+                                <div className="space-y-2"><div className="flex justify-between items-center px-1"><span className="text-xs font-bold text-slate-500 uppercase">GAS v12.2 Source Code</span><button onClick={handleCopyCode} className="text-xs flex items-center gap-1 font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded transition-colors">{copied ? <><Check size={14}/> คัดลอกแล้ว</> : <><Copy size={14}/> คัดลอกโค้ด</>}</button></div><div className="bg-slate-900 rounded-xl p-4 overflow-hidden relative"><pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-[400px] custom-scrollbar leading-relaxed">{gasCode}</pre></div></div>
                             </div>
                         </div>
                     </div>

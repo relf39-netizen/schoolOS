@@ -216,7 +216,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         director_signature_date: d.directorSignatureDate,
         signed_file_url: d.signed_file_url,
         assigned_vice_director_id: d.assigned_vice_director_id,
-        vice_director_command: d.viceDirectorCommand,
+        vice_director_command: d.vice_director_command,
         vice_director_signature_date: d.viceDirectorSignatureDate,
         target_teachers: d.targetTeachers,
         acknowledged_by: d.acknowledgedBy
@@ -313,6 +313,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         handleSaveAgencies(updated);
     };
 
+    /**
+     * ระบบ Tracking Link อัตโนมัติ (NEW v12.2)
+     * สร้างลิงก์ที่จะบันทึกสถานะรับทราบลง SQL ทันทีเมื่อครูกดเปิดจาก Telegram
+     */
     async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, bookNumber: string, isOrder: boolean, fromStr: string, attachments: Attachment[] = [], customTitle?: string) {
         if (!sysConfig?.telegramBotToken || !sysConfig?.scriptUrl) return;
         const baseUrl = sysConfig.appBaseUrl || window.location.origin;
@@ -329,16 +333,17 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             `----------------------------------\n`;
             
             if (attachments && attachments.length > 0) {
-                message += `<b>📎 คลิกเพื่อดูเอกสารและยืนยันรับทราบ:</b>\n`;
+                message += `<b>📎 กดเปิดเพื่อดูเอกสารและยืนยันรับทราบ:</b>\n`;
                 attachments.forEach((att, idx) => {
                     const directFileUrl = getPreviewUrl(att.url);
+                    // สร้าง Tracking Link ที่จะบันทึก SQL ผ่าน GAS Bridge โดยตรง (v12.2)
                     const trackingLink = `${scriptUrl}?action=ack&docId=${docId}&userId=${t.id}&target=${encodeURIComponent(directFileUrl)}`;
                     message += `${idx + 1}. <a href="${trackingLink}">${att.name}</a>\n`;
                 });
                 message += `----------------------------------\n`;
             }
 
-            message += `✅ ระบบจะบันทึกสถานะ "รับทราบ" ให้ท่านทันทีเมื่อกดดูไฟล์เอกสาร`;
+            message += `✅ ระบบจะบันทึกสถานะให้ท่าน "ทันที" เมื่อกดที่ชื่อไฟล์ด้านบนครับ (ไม่ต้องเข้าหน้าแอปเพื่อกดปุ่มอีกต่อไป)`;
             
             const appLink = `${baseUrl}?view=DOCUMENTS&id=${docId}`;
             sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId, message, appLink);
@@ -738,7 +743,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                 const directFileUrl = params.get('file');
                 if (directFileUrl) {
                     const viewUrl = getPreviewUrl(directFileUrl);
-                    setTimeout(() => { window.location.replace(viewUrl); }, 300);
+                    // เปิดในหน้าต่างใหม่เพื่อพรีวิวโดยไม่ทิ้งหน้าแอป
+                    window.open(viewUrl, '_blank');
                 }
                 
                 if (onClearFocus) onClearFocus();
@@ -748,9 +754,19 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
     // --- Rendering Helpers ---
 
+    /**
+     * getGoogleDriveId: ดึง ID ของ Google Drive ไฟล์จาก URL ทุกรูปแบบ
+     */
     const getGoogleDriveId = (url: string) => {
         if (!url) return null;
-        const patterns = [/drive\.google\.com\/file\/d\/([-_w]+)/, /drive\.google\.com\/open\?id=([-_w]+)/, /id=([-_w]+)/];
+        // ปรับปรุง Regex ให้ครอบคลุม URL ทุกรูปแบบของ Google Drive (รวม docs.google.com, drive.google.com, open?id, uc?id)
+        const patterns = [
+            /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/,
+            /drive\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)/,
+            /docs\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)/,
+            /docs\.google\.com\/.*?\/d\/([a-zA-Z0-9_-]+)/,
+            /id=([a-zA-Z0-9_-]+)/
+        ];
         for (const pattern of patterns) {
             const match = url.match(pattern);
             if (match && match[1]) return match[1];
@@ -758,10 +774,19 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         return null;
     };
 
+    /**
+     * getPreviewUrl: บังคับรูปแบบหน้า Viewer ของ Google Drive เพื่อให้เปิดบน Browser ก่อน
+     */
     const getPreviewUrl = (url: string) => {
+        if (!url) return '';
         const id = getGoogleDriveId(url);
-        if (id) return `https://drive.google.com/file/d/${id}/view`;
-        return url.replace('export=download', 'export=view');
+        if (id) {
+            // บังคับให้เป็นหน้า /view เพื่อให้ Browser เปิดพรีวิวแทนการดาวน์โหลดทันที
+            return `https://drive.google.com/file/d/${id}/view?usp=sharing`;
+        }
+        // สำหรับลิงก์ทั่วไป พยายามเปลี่ยนพารามิเตอร์เพื่อเปิดพรีวิวแทนดาวน์โหลด
+        return url.replace(/export=download/gi, 'export=view')
+                  .replace(/dl=1/gi, 'dl=0');
     };
 
     const filteredDocs = docs.filter(doc => {
@@ -962,7 +987,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         {displayedDocs.map(docItem => (
                             <div key={docItem.id} className="group bg-white p-4 md:p-5 rounded-2xl border-2 transition-all cursor-pointer overflow-hidden flex flex-col md:flex-row md:items-center gap-4 md:gap-6 border-slate-50 hover:border-blue-200 hover:shadow-md" onClick={() => { setSelectedDoc(docItem); setViewMode('DETAIL'); }}>
                                 <div className="flex items-center gap-4 md:gap-6 flex-1 min-w-0">
-                                    <div className={`p-4 md:p-5 rounded-2xl shrink-0 transition-all group-hover:scale-125 shadow-lg group-hover:shadow-2xl border-2 border-white ring-4 ${docItem.category === 'ORDER' ? 'bg-gradient-to-br from-emerald-500 to-teal-700 text-white ring-emerald-50' : 'bg-gradient-to-br from-blue-500 to-indigo-700 text-white ring-blue-50'}`}>
+                                    <div className={`p-4 md:p-5 rounded-2xl shrink-0 transition-all group-hover:scale-125 shadow-lg group-hover:shadow-2xl border-2 border-white ring-4 ${docItem.category === 'ORDER' ? 'bg-gradient-to-br from-emerald-50 to-teal-700 text-white ring-emerald-50' : 'bg-gradient-to-br from-blue-50 to-indigo-700 text-white ring-blue-50'}`}>
                                         {docItem.category === 'ORDER' ? <Megaphone size={24}/> : <FileText size={24}/>}
                                     </div>
                                     <div className="flex-1 min-w-0 space-y-1">
@@ -989,7 +1014,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         {(isDirector || isDocOfficer || isSystemAdmin) && (
                                             <button 
                                                 onClick={(e) => { e.stopPropagation(); handleDeleteDoc(docItem.id); }}
-                                                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all mr-1"
+                                                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all mr-1"
                                                 title="ลบหนังสือ"
                                             >
                                                 <Trash2 size={16}/>
@@ -1000,9 +1025,15 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                                 รอ ผอ. สั่งการ
                                             </span>
                                         )}
-                                        {docItem.status === 'PendingViceDirector' && <span className="text-[8px] md:text-[9px] font-black text-blue-500 uppercase bg-blue-50 px-2 py-0.5 rounded">รอรองฯ สั่งการ</span>}
+                                        {docItem.status === 'PendingViceDirector' && (
+                                            <span className="text-[8px] md:text-[9px] font-black text-blue-500 uppercase bg-blue-50 px-2 py-0.5 rounded">
+                                                รอรองฯ สั่งการ
+                                            </span>
+                                        )}
                                     </div>
-                                    <div className="p-2 bg-slate-50 rounded-lg text-slate-400 group-hover:text-blue-500 group-hover:bg-blue-50 transition-all"><ChevronRight size={16}/></div>
+                                    <div className="p-2 bg-slate-50 rounded-lg text-slate-400 group-hover:text-blue-500 group-hover:bg-blue-50 transition-all">
+                                        <ChevronRight size={16}/>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -1011,7 +1042,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         )}
                     </div>
 
-                    {/* Pagination Buttons - RE-ADDED */}
+                    {/* Pagination Buttons */}
                     {totalPages > 1 && (
                         <div className="flex justify-center items-center gap-2 mt-8 py-4 bg-white rounded-2xl shadow-sm border border-slate-100 animate-fade-in">
                             <button 
