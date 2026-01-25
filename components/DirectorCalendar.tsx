@@ -1,10 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Teacher, DirectorEvent, SystemConfig } from '../types';
 import { MOCK_DIRECTOR_EVENTS } from '../constants';
-import { Calendar, Clock, MapPin, Plus, Trash2, Bell, ServerOff, ListFilter, History, CheckCircle } from 'lucide-react';
-import { db, isConfigured } from '../firebaseConfig';
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, getDoc } from 'firebase/firestore';
+import { 
+    Calendar as CalendarIcon, Clock, MapPin, Plus, Trash2, Bell, 
+    ServerOff, ListFilter, History, CheckCircle, ChevronLeft, 
+    ChevronRight, Circle, X, CalendarDays, Layout, AlertCircle
+} from 'lucide-react';
+import { db, isConfigured, collection, addDoc, query, where, onSnapshot, deleteDoc, doc, getDoc, updateDoc } from '../firebaseConfig';
 import { sendTelegramMessage } from '../utils/telegram';
 
 interface DirectorCalendarProps {
@@ -13,404 +16,465 @@ interface DirectorCalendarProps {
 }
 
 const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTeachers }) => {
-    // State
+    // Helper to format Date object to "YYYY-MM-DD" in local time
+    const formatDateLocal = (date: Date) => {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    };
+
     const [events, setEvents] = useState<DirectorEvent[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
-    
-    // Tab State: 'UPCOMING' = งานที่ต้องปฏิบัติ, 'PAST' = ปฏิบัติเรียบร้อย
     const [activeTab, setActiveTab] = useState<'UPCOMING' | 'PAST'>('UPCOMING');
-
-    // Form State
+    const [viewMode, setViewMode] = useState<'CALENDAR' | 'LIST'>('CALENDAR');
     const [showForm, setShowForm] = useState(false);
-    const [newEvent, setNewEvent] = useState<Partial<DirectorEvent>>({
-        date: new Date().toISOString().split('T')[0],
-        startTime: '09:00',
-        title: '',
-        location: '',
-        description: ''
+    
+    const [selectedDay, setSelectedDay] = useState<string>(formatDateLocal(new Date()));
+    const [newEvent, setNewEvent] = useState<Partial<DirectorEvent>>({ 
+        date: formatDateLocal(new Date()), 
+        startTime: '09:00', 
+        title: '', 
+        location: '', 
+        description: '' 
     });
 
-    // Permissions
+    const [currentDate, setCurrentDate] = useState(new Date());
+
     const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
     const isDirector = currentUser.roles.includes('DIRECTOR');
     const isAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
     const canEdit = isDocOfficer || isDirector || isAdmin;
 
-    // --- Helpers: Thai Date Formatting ---
-    
-    const getThaiFullDate = (dateStr: string) => {
-        if (!dateStr) return '';
-        const d = new Date(dateStr);
-        const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
-        const months = [
-            "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
-            "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
-        ];
-        return `วัน${days[d.getDay()]}ที่ ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`;
+    // Helper to parse "YYYY-MM-DD" string correctly in local time
+    const parseDateLocal = (dateStr: string) => {
+        if (!dateStr) return new Date();
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
     };
 
-    const getThaiMonthShort = (dateStr: string) => {
-        const d = new Date(dateStr);
-        const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-        return months[d.getMonth()];
+    const getThaiFullDate = (dateStr: string) => { 
+        if (!dateStr) return ''; 
+        const d = parseDateLocal(dateStr);
+        const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์']; 
+        const months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]; 
+        return `วัน${days[d.getDay()]}ที่ ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`; 
     };
 
-    const getThaiDayShort = (dateStr: string) => {
-        const d = new Date(dateStr);
-        const days = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
-        return days[d.getDay()];
+    const getThaiMonthYear = (date: Date) => {
+        const months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+        return `${months[date.getMonth()]} ${date.getFullYear() + 543}`;
     };
 
-    // --- Data & Config Loading ---
+    const getThaiMonthShort = (dateStr: string) => { 
+        const d = parseDateLocal(dateStr);
+        const months = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]; 
+        return months[d.getMonth()]; 
+    };
+
+    // --- Data Fetching ---
     useEffect(() => {
-        const fetchConfig = async () => {
-            try {
-                const local = localStorage.getItem('schoolos_system_config');
-                if (local) setSysConfig(JSON.parse(local));
-            } catch(e) {}
-
-            if (isConfigured && db) {
-                try {
-                    const docRef = doc(db, "system_config", "settings");
-                    const docSnap = await getDoc(docRef);
-                    if (docSnap.exists()) setSysConfig(docSnap.data() as SystemConfig);
-                } catch (e) { console.error(e); }
-            }
-        };
-        fetchConfig();
-
+        let unsubConfig: (() => void) | undefined;
+        let unsubEvents: (() => void) | undefined;
         if (isConfigured && db) {
+            const configRef = doc(db, "schools", currentUser.schoolId, "settings", "config");
+            unsubConfig = onSnapshot(configRef, (docSnap) => { if (docSnap.exists()) setSysConfig(docSnap.data() as SystemConfig); });
             const q = query(collection(db, "director_events"), where("schoolId", "==", currentUser.schoolId));
-            const unsubscribe = onSnapshot(q, (snapshot) => {
-                const fetchedEvents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DirectorEvent));
-                setEvents(fetchedEvents);
-                setIsLoading(false);
-            });
-            return () => unsubscribe();
-        } else {
-            setEvents(MOCK_DIRECTOR_EVENTS);
-            setIsLoading(false);
-        }
+            unsubEvents = onSnapshot(q, (snapshot) => { setEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DirectorEvent))); setIsLoading(false); });
+        } else { setEvents(MOCK_DIRECTOR_EVENTS); setIsLoading(false); }
+        return () => { if(unsubConfig) unsubConfig(); if(unsubEvents) unsubEvents(); }
     }, [currentUser.schoolId]);
 
-    // --- Filter Logic ---
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // --- Auto-Notification Trigger Logic ---
+    useEffect(() => {
+        if (!isLoading && events.length > 0 && canEdit) {
+            const checkAndNotify = async () => {
+                const todayStr = formatDateLocal(new Date());
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const tomorrowStr = formatDateLocal(tomorrow);
 
-    // Filter Upcoming (Today and Future)
-    const upcomingEvents = events.filter(event => {
-        const evtDate = new Date(event.date);
-        evtDate.setHours(0, 0, 0, 0);
-        return evtDate >= today;
-    }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()); // Ascending
+                for (const event of events) {
+                    let type: 'TODAY' | 'TOMORROW' | null = null;
+                    let updateField = "";
 
-    // Filter Past (Before Today)
-    const pastEvents = events.filter(event => {
-        const evtDate = new Date(event.date);
-        evtDate.setHours(0, 0, 0, 0);
-        return evtDate < today;
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // Descending (Newest past first)
+                    // Check for Today
+                    if (event.date === todayStr && !event.notifiedOnDay) {
+                        type = 'TODAY';
+                        updateField = "notifiedOnDay";
+                    } 
+                    // Check for Tomorrow
+                    else if (event.date === tomorrowStr && !event.notifiedOneDayBefore) {
+                        type = 'TOMORROW';
+                        updateField = "notifiedOneDayBefore";
+                    }
+
+                    if (type && updateField) {
+                        console.log(`Auto-notifying mission: ${event.title} (${type})`);
+                        await notifyDirector(event, type);
+                        // Update DB to prevent repeated notifications
+                        if (isConfigured && db) {
+                            try {
+                                await updateDoc(doc(db, "director_events", event.id), {
+                                    [updateField]: true
+                                });
+                            } catch (e) {
+                                console.error("Failed to update notification flag", e);
+                            }
+                        }
+                    }
+                }
+            };
+            checkAndNotify();
+        }
+    }, [events, isLoading, canEdit]);
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    
+    const upcomingEvents = useMemo(() => 
+        events.filter(e => parseDateLocal(e.date).getTime() >= today.getTime())
+              .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)),
+    [events, today]);
+
+    const pastEvents = useMemo(() => 
+        events.filter(e => parseDateLocal(e.date).getTime() < today.getTime())
+              .sort((a, b) => b.date.localeCompare(a.date) || b.startTime.localeCompare(a.startTime)),
+    [events, today]);
 
     const displayedEvents = activeTab === 'UPCOMING' ? upcomingEvents : pastEvents;
 
-    // --- Handlers ---
+    const hasMissionToday = useMemo(() => {
+        const todayStr = formatDateLocal(new Date());
+        return events.some(e => e.date === todayStr);
+    }, [events]);
+
+    const dayEventsForSelected = useMemo(() => 
+        events.filter(e => e.date === selectedDay)
+              .sort((a, b) => a.startTime.localeCompare(b.startTime)),
+    [events, selectedDay]);
+
+    const calendarDays = useMemo(() => {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        
+        const days = [];
+        for (let i = 0; i < firstDay; i++) days.push(null);
+        for (let i = 1; i <= daysInMonth; i++) days.push(new Date(year, month, i));
+        
+        return days;
+    }, [currentDate]);
 
     const handleSaveEvent = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newEvent.title || !newEvent.date || !newEvent.startTime) return;
-
-        const eventData: any = {
-            ...newEvent,
-            schoolId: currentUser.schoolId,
-            createdBy: currentUser.id,
-            notifiedOneDayBefore: false,
-            notifiedOnDay: false
-        };
-
-        if (isConfigured && db) {
-            try {
-                await addDoc(collection(db, "director_events"), eventData);
-                notifyDirector(eventData, 'NEW');
-            } catch (e) {
-                alert('เกิดข้อผิดพลาดในการบันทึก');
-            }
-        } else {
-            setEvents([...events, { ...eventData, id: `evt_${Date.now()}` } as DirectorEvent]);
-            alert('บันทึกเรียบร้อย (Offline)');
-        }
-
-        setShowForm(false);
-        setNewEvent({ date: new Date().toISOString().split('T')[0], startTime: '09:00', title: '', location: '', description: '' });
-    };
-
-    const handleDeleteEvent = async (id: string) => {
-        if (!confirm("ยืนยันลบรายการนี้?")) return;
-        if (isConfigured && db) {
-            await deleteDoc(doc(db, "director_events", id));
-        } else {
-            setEvents(events.filter(e => e.id !== id));
-        }
-    };
-
-    // --- Notifications Logic ---
-    const notifyDirector = async (event: any, type: 'NEW' | 'TOMORROW' | 'TODAY') => {
-        let currentBotToken = sysConfig?.telegramBotToken;
-        let currentBaseUrl = sysConfig?.appBaseUrl;
-
+        const eventData: any = { ...newEvent, schoolId: currentUser.schoolId, createdBy: currentUser.id, notifiedOneDayBefore: false, notifiedOnDay: false };
         try {
-            const local = localStorage.getItem('schoolos_system_config');
-            if (local) {
-                const parsed = JSON.parse(local);
-                if (parsed.telegramBotToken) currentBotToken = parsed.telegramBotToken;
-                if (parsed.appBaseUrl) currentBaseUrl = parsed.appBaseUrl;
+            if (isConfigured && db) { 
+                const docRef = await addDoc(collection(db, "director_events"), eventData); 
+                notifyDirector({...eventData, id: docRef.id}, 'NEW'); 
+            } else { 
+                setEvents([...events, { ...eventData, id: `evt_${Date.now()}` } as DirectorEvent]); 
             }
-        } catch(e) {}
+            setShowForm(false); 
+            setNewEvent({ date: formatDateLocal(new Date()), startTime: '09:00', title: '', location: '', description: '' });
+        } catch (e) { alert('ล้มเหลว'); }
+    };
 
-        if (isConfigured && db) {
-            try {
-                const configDoc = await getDoc(doc(db, "system_config", "settings"));
-                if (configDoc.exists()) {
-                    const freshConfig = configDoc.data() as SystemConfig;
-                    currentBotToken = freshConfig.telegramBotToken;
-                    currentBaseUrl = freshConfig.appBaseUrl;
-                }
-            } catch (e) { console.error(e); }
-        }
+    const handleDeleteEvent = async (id: string) => { 
+        if (confirm("คุณแน่ใจหรือไม่ว่าต้องการลบรายการปฏิทินนี้?")) { 
+            if (isConfigured && db) await deleteDoc(doc(db, "director_events", id)); 
+            else setEvents(events.filter(e => e.id !== id)); 
+        } 
+    };
 
-        if (!currentBotToken) return;
-        
-        const directors = allTeachers.filter(t => t.roles.includes('DIRECTOR'));
+    const notifyDirector = async (event: any, type: 'NEW' | 'TOMORROW' | 'TODAY') => {
+        if (!sysConfig?.telegramBotToken) return;
+        const directors = allTeachers.filter(t => t.roles.includes('DIRECTOR') && t.schoolId === currentUser.schoolId);
         if (directors.length === 0) return;
-
-        let title = "";
-        let icon = "";
-        const thaiDateStr = getThaiFullDate(event.date);
-
-        switch (type) {
-            case 'NEW': title = "เพิ่มนัดหมายใหม่"; icon = "🆕"; break;
-            case 'TOMORROW': title = "แจ้งเตือนภารกิจวันพรุ่งนี้"; icon = "⏰"; break;
-            case 'TODAY': title = "แจ้งเตือนภารกิจวันนี้"; icon = "🔔"; break;
+        let title = ""; let icon = "";
+        switch (type) { 
+            case 'NEW': title = "เพิ่มนัดหมายใหม่"; icon = "🆕"; break; 
+            case 'TOMORROW': title = "⏰ ภารกิจวันพรุ่งนี้"; icon = "🔔"; break; 
+            case 'TODAY': title = "⚡️ ภารกิจวันนี้"; icon = "📢"; break; 
         }
-
-        const message = `${icon} <b>${title}</b>\n` +
-                        `เรื่อง: ${event.title}\n` +
-                        `วันที่: ${thaiDateStr}\n` +
-                        `เวลา: ${event.startTime}${event.endTime ? ' - ' + event.endTime : ''} น.\n` +
-                        `สถานที่: ${event.location || '-'}\n` +
-                        `${event.description ? `รายละเอียด: ${event.description}\n` : ''}` + 
-                        `(บันทึกโดย: ${currentUser.name})`;
-
-        const baseUrl = currentBaseUrl || window.location.origin;
-        const deepLink = `${baseUrl}?view=DIRECTOR_CALENDAR`;
-
+        const message = `<b>${title}</b>\n--------------------------\n<b>เรื่อง:</b> ${event.title}\n<b>วันที่:</b> ${getThaiFullDate(event.date)}\n<b>เวลา:</b> ${event.startTime} น.\n<b>สถานที่:</b> ${event.location || '-'}\n--------------------------\n${type === 'TODAY' ? '💡 อย่าลืมเตรียมความพร้อมสำหรับการปฏิบัติหน้าที่ในวันนี้นะครับ' : '(บันทึกข้อมูลโดย: ' + currentUser.name + ')'}`;
+        
+        const deepLink = `${sysConfig.appBaseUrl || window.location.origin}?view=DIRECTOR_CALENDAR`;
+        
         directors.forEach(d => {
             if (d.telegramChatId) {
-                sendTelegramMessage(currentBotToken!, d.telegramChatId, message, deepLink);
+                sendTelegramMessage(sysConfig.telegramBotToken!, d.telegramChatId, message, deepLink);
             }
         });
     };
 
     return (
-        <div className="max-w-5xl mx-auto space-y-6 animate-fade-in pb-20">
-            {/* Header */}
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                        <Calendar className="text-purple-600"/> ปฏิทินปฏิบัติงานผู้อำนวยการ
-                    </h2>
-                    <p className="text-slate-500 text-sm">จัดการและแจ้งเตือนภารกิจงาน (สำหรับเจ้าหน้าที่ธุรการและผู้อำนวยการ)</p>
+        <div className="max-w-7xl mx-auto space-y-4 md:space-y-6 animate-fade-in pb-20 font-sarabun">
+            {/* Main Header */}
+            <div className="bg-white p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 md:gap-6">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 md:p-4 bg-purple-600 text-white rounded-2xl md:rounded-3xl shadow-lg shadow-purple-200">
+                        <CalendarIcon size={28} className="md:w-8 md:h-8"/>
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-3">
+                            <h2 className="text-xl md:text-2xl font-black text-slate-800 leading-tight">ปฏิทินปฏิบัติงาน ผอ.</h2>
+                            {hasMissionToday && (
+                                <span className="bg-red-50 text-red-600 px-2 md:px-3 py-1 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-widest animate-pulse flex items-center gap-1 border border-red-100">
+                                    <AlertCircle size={10} className="md:w-3 md:h-3"/> มีภารกิจวันนี้
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-slate-400 font-bold text-[10px] md:text-xs uppercase tracking-widest">{sysConfig?.schoolName || 'Management System'}</p>
+                    </div>
                 </div>
-                {canEdit && activeTab === 'UPCOMING' && (
-                    <button 
-                        onClick={() => setShowForm(true)}
-                        className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-bold flex items-center gap-2 shadow-md transition-transform hover:scale-105"
-                    >
-                        <Plus size={20}/> เพิ่มนัดหมาย
+                
+                <div className="flex bg-slate-100 p-1 rounded-xl md:rounded-2xl border shadow-inner">
+                    <button onClick={() => setViewMode('CALENDAR')} className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs md:sm font-black transition-all flex items-center gap-2 ${viewMode === 'CALENDAR' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}>
+                        <Layout size={16}/> ปฏิทิน
+                    </button>
+                    <button onClick={() => setViewMode('LIST')} className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs md:sm font-black transition-all flex items-center gap-2 ${viewMode === 'LIST' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}>
+                        <ListFilter size={16}/> รายการ
+                    </button>
+                </div>
+
+                {canEdit && (
+                    <button onClick={() => setShowForm(true)} className="bg-purple-600 text-white px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl hover:bg-purple-700 font-black flex items-center gap-2 shadow-xl shadow-purple-200 active:scale-95 transition-all text-sm md:text-base">
+                        <Plus size={18}/> เพิ่มนัดหมาย
                     </button>
                 )}
             </div>
 
-            {/* Tabs Navigation */}
-            <div className="flex bg-slate-100 p-1 rounded-xl w-fit border border-slate-200">
-                <button 
-                    onClick={() => setActiveTab('UPCOMING')}
-                    className={`px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${
-                        activeTab === 'UPCOMING' 
-                            ? 'bg-white text-purple-600 shadow-sm' 
-                            : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                >
-                    <ListFilter size={16}/> งานที่ต้องปฏิบัติ ({upcomingEvents.length})
-                </button>
-                <button 
-                    onClick={() => setActiveTab('PAST')}
-                    className={`px-6 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${
-                        activeTab === 'PAST' 
-                            ? 'bg-white text-slate-700 shadow-sm' 
-                            : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                >
-                    <History size={16}/> ปฏิบัติเรียบร้อย ({pastEvents.length})
-                </button>
-            </div>
+            {viewMode === 'CALENDAR' ? (
+                <div className="flex flex-col lg:flex-row gap-6 md:gap-8 items-start">
+                    {/* Small Calendar Grid (Left Side) */}
+                    <div className="w-full lg:w-[350px] bg-white rounded-[1.5rem] md:rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden shrink-0">
+                        <div className="p-4 md:p-6 flex justify-between items-center bg-slate-50 border-b">
+                            <h3 className="text-base md:text-lg font-black text-slate-800">{getThaiMonthYear(currentDate)}</h3>
+                            <div className="flex gap-1">
+                                <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() - 1)))} className="p-2 hover:bg-slate-200 rounded-xl transition-colors"><ChevronLeft size={16}/></button>
+                                <button onClick={() => setCurrentDate(new Date())} className="px-2 py-1 hover:bg-slate-200 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-400 transition-colors">วันนี้</button>
+                                <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))} className="p-2 hover:bg-slate-200 rounded-xl transition-colors"><ChevronRight size={16}/></button>
+                            </div>
+                        </div>
 
-            {/* Offline Indicator */}
-            {!isConfigured && (
-                <div className="bg-orange-50 border border-orange-200 text-orange-700 p-3 rounded-lg flex items-center gap-2 text-sm">
-                    <ServerOff size={16}/> ระบบทำงานแบบ Offline ข้อมูลจะไม่ถูกบันทึกถาวร
+                        <div className="grid grid-cols-7 bg-slate-50 border-b">
+                            {['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'].map((day, i) => (
+                                <div key={day} className={`py-2 md:py-3 text-center text-[9px] md:text-[10px] font-black uppercase tracking-widest ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-slate-400'}`}>
+                                    {day}
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-7 p-2 md:p-3 gap-1">
+                            {calendarDays.map((day, idx) => {
+                                if (!day) return <div key={`empty-${idx}`} className="h-10 w-10 md:h-12 md:w-12"></div>;
+                                
+                                const dateStr = formatDateLocal(day);
+                                const dayEvents = events.filter(e => e.date === dateStr);
+                                const isToday = day.toDateString() === new Date().toDateString();
+                                const isSelected = dateStr === selectedDay;
+                                const isPastDate = day.getTime() < today.getTime();
+
+                                return (
+                                    <div 
+                                        key={dateStr} 
+                                        onClick={() => setSelectedDay(dateStr)}
+                                        className={`h-10 w-10 md:h-12 md:w-12 flex flex-col items-center justify-center relative cursor-pointer rounded-xl md:rounded-2xl transition-all group ${isSelected ? 'bg-purple-600 text-white shadow-lg shadow-purple-200 ring-2 ring-purple-100' : (isToday ? 'bg-purple-50 text-purple-700' : 'hover:bg-slate-50 text-slate-600')}`}
+                                    >
+                                        <span className={`text-xs md:text-sm font-black ${isSelected ? 'text-white' : (isToday ? 'text-purple-600' : (day.getDay() === 0 ? 'text-red-400' : (day.getDay() === 6 ? 'text-blue-400' : '')))}`}>
+                                            {day.getDate()}
+                                        </span>
+
+                                        {dayEvents.length > 0 && (
+                                            <div className="mt-0.5 flex justify-center">
+                                                <Circle className={`${isSelected ? 'text-white fill-white' : 'text-purple-600 fill-purple-600'}`} size={4} />
+                                            </div>
+                                        )}
+
+                                        {isPastDate && dayEvents.length > 0 && (
+                                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
+                                                <X className={`${isSelected ? 'text-white' : 'text-slate-400'}`} size={24} strokeWidth={3}/>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Event Details (Right Side) */}
+                    <div className="flex-1 w-full space-y-4 md:space-y-6">
+                        <div className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[350px]">
+                            <h3 className="text-lg md:text-xl font-black text-slate-800 mb-6 md:mb-8 flex items-center gap-3">
+                                {/* Fix: Combined duplicate className at line 313 */}
+                                <CalendarDays className="text-purple-600 md:w-7 md:h-7" size={24}/>
+                                ภารกิจ {getThaiFullDate(selectedDay)}
+                            </h3>
+
+                            <div className="space-y-4">
+                                {dayEventsForSelected.length === 0 ? (
+                                    <div className="text-center py-16 md:py-20 bg-slate-50/50 rounded-[1.5rem] md:rounded-[2rem] border-2 border-dashed border-slate-100 flex flex-col items-center gap-4">
+                                        {/* Fix: Unified attributes at line 331 */}
+                                        <CalendarIcon size={40} className="text-slate-200 md:w-12 md:h-12"/>
+                                        <p className="text-slate-400 font-bold italic text-sm md:text-base">ไม่พบนัดหมายในวันที่เลือก</p>
+                                    </div>
+                                ) : (
+                                    dayEventsForSelected.map(event => {
+                                        const isPast = parseDateLocal(event.date).getTime() < today.getTime();
+                                        const isToday = event.date === formatDateLocal(new Date());
+                                        return (
+                                            <div key={event.id} className={`p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-2 transition-all hover:shadow-md relative overflow-hidden ${isPast ? 'bg-slate-50 border-slate-200' : 'bg-white border-purple-100 hover:border-purple-200'}`}>
+                                                {isPast && (
+                                                    <div className="absolute top-0 right-0 p-3 z-10">
+                                                        {/* Fix: Combined duplicate className at line 346 */}
+                                                        <X className="text-slate-300 md:w-10 md:h-10" size={32} strokeWidth={1}/>
+                                                    </div>
+                                                )}
+                                                {isToday && (
+                                                    <div className="absolute top-3 right-3 md:top-4 md:right-4 bg-red-500 text-white text-[8px] md:text-[9px] font-black uppercase px-2 md:px-3 py-1 rounded-full animate-pulse flex items-center gap-1 shadow-lg shadow-red-200">
+                                                        <Bell size={8} className="md:w-2.5 md:h-2.5"/> ภารกิจวันนี้
+                                                    </div>
+                                                )}
+                                                <div className="flex flex-col md:flex-row gap-4 md:gap-6 relative z-10">
+                                                    <div className={`flex flex-col items-center justify-center w-16 h-16 md:w-20 md:h-20 rounded-2xl md:rounded-3xl shrink-0 ${isPast ? 'bg-slate-200 text-slate-400' : 'bg-purple-100 text-purple-700'}`}>
+                                                        {/* Fix: Combined duplicate className */}
+                                                        <Clock size={16} className="mb-1 md:w-5 md:h-5"/>
+                                                        <span className="text-xs md:text-sm font-black">{event.startTime}</span>
+                                                    </div>
+                                                    <div className="flex-1 space-y-1 md:space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            {/* Fix: Combined duplicate className */}
+                                                            {!isPast && <Circle className="text-purple-600 fill-purple-600 md:w-2.5 md:h-2.5" size={8} />}
+                                                            <h3 className={`text-lg md:text-xl font-black ${isPast ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{event.title}</h3>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-3 md:gap-4 text-[10px] md:text-xs font-bold text-slate-400">
+                                                            {/* Fix: Combined duplicate className */}
+                                                            {event.location && (<div className="flex items-center gap-1.5"><MapPin size={14} className="text-red-400 md:w-4 md:h-4"/> {event.location}</div>)}
+                                                        </div>
+                                                        {event.description && <p className="text-xs md:text-sm text-slate-500 font-medium italic mt-1 md:mt-2">"{event.description}"</p>}
+                                                    </div>
+                                                    <div className="flex items-end justify-end">
+                                                        {/* Fix: Combined duplicate className at line 389 */}
+                                                        {canEdit && <button onClick={() => handleDeleteEvent(event.id)} className="p-2 md:p-3 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-xl md:rounded-2xl transition-all active:scale-95"><Trash2 size={18} className="md:w-5 md:h-5"/></button>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="space-y-4 md:space-y-6">
+                    <div className="flex bg-slate-100 p-1 rounded-xl md:rounded-2xl border w-fit shadow-inner">
+                        <button onClick={() => setActiveTab('UPCOMING')} className={`px-4 md:px-6 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex items-center gap-2 transition-all ${activeTab === 'UPCOMING' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}>
+                            <CalendarDays size={16} className="md:w-4.5 md:h-4.5"/> นัดหมายเร็วๆ นี้ ({upcomingEvents.length})
+                        </button>
+                        <button onClick={() => setActiveTab('PAST')} className={`px-4 md:px-6 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs md:text-sm font-black flex items-center gap-2 transition-all ${activeTab === 'PAST' ? 'bg-white text-slate-700 shadow-sm' : 'text-slate-500'}`}>
+                            <History size={16} className="md:w-4.5 md:h-4.5"/> ภารกิจที่ผ่านมา ({pastEvents.length})
+                        </button>
+                    </div>
+
+                    <div className="space-y-3 md:space-y-4">
+                        {displayedEvents.length === 0 ? (
+                            <div className="text-center py-20 bg-white rounded-[1.5rem] md:rounded-[2rem] border-2 border-dashed text-slate-300 font-bold italic text-sm md:text-base">ไม่พบข้อมูลนัดหมาย</div>
+                        ) : (
+                            displayedEvents.map(event => {
+                                const todayStr = formatDateLocal(new Date());
+                                const isToday = event.date === todayStr;
+                                const isPast = parseDateLocal(event.date).getTime() < today.getTime();
+                                return (
+                                    <div key={event.id} className={`bg-white rounded-[1.5rem] md:rounded-[2rem] p-4 md:p-6 shadow-sm border transition-all hover:shadow-md relative overflow-hidden ${isToday ? 'border-purple-500 ring-2 ring-purple-100' : 'border-slate-200'} ${isPast ? 'opacity-70' : ''}`}>
+                                        {isPast && (
+                                            <div className="absolute top-0 right-0 p-3 md:p-4 z-10">
+                                                {/* Fix: Combined duplicate className at line 400 */}
+                                                <X className="text-slate-300 md:w-12 md:h-12" size={36} strokeWidth={1}/>
+                                            </div>
+                                        )}
+                                        <div className="flex flex-col md:flex-row gap-4 md:gap-6">
+                                            <div className={`flex flex-col items-center justify-center w-20 h-20 md:w-24 md:h-24 rounded-2xl md:rounded-3xl shrink-0 transition-transform hover:scale-105 ${isToday ? 'bg-purple-600 text-white shadow-xl shadow-purple-200' : (isPast ? 'bg-slate-100 text-slate-400' : 'bg-purple-50 text-purple-700')}`}>
+                                                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest">{getThaiMonthShort(event.date)}</span>
+                                                <span className="text-2xl md:text-3xl font-black">{parseDateLocal(event.date).getDate()}</span>
+                                            </div>
+                                            <div className="flex-1 space-y-1 md:space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                    {isToday && <span className="bg-red-500 text-white text-[8px] md:text-[9px] px-2 md:px-3 py-1 rounded-full font-black uppercase tracking-widest animate-pulse shadow-lg shadow-red-200">วันนี้</span>}
+                                                    {/* Fix: Combined duplicate className */}
+                                                    {!isPast && <Circle className="text-purple-600 fill-purple-600 md:w-2.5 md:h-2.5" size={8} />}
+                                                    <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight">{event.title}</h3>
+                                                </div>
+                                                <p className="text-xs md:text-sm font-bold text-slate-500">{getThaiFullDate(event.date)}</p>
+                                                <div className="flex flex-wrap gap-3 md:gap-4 text-[10px] md:text-xs font-bold text-slate-400 mt-1 md:mt-2">
+                                                    {/* Fix: Combined duplicate className */}
+                                                    <div className="flex items-center gap-1.5"><Clock size={14} className="text-purple-400 md:w-4 md:h-4"/> {event.startTime} น.</div>
+                                                    {/* Fix: Combined duplicate className */}
+                                                    {event.location && (<div className="flex items-center gap-1.5"><MapPin size={14} className="text-red-400 md:w-4 md:h-4"/> {event.location}</div>)}
+                                                </div>
+                                                {event.description && <p className="text-xs md:text-sm text-slate-600 font-medium bg-slate-50 p-3 md:p-4 rounded-xl md:rounded-2xl mt-3 md:mt-4 border border-slate-100 italic">"{event.description}"</p>}
+                                            </div>
+                                            <div className="flex items-end justify-end">
+                                                {/* Fix: Combined duplicate className at line 427 */}
+                                                {canEdit && <button onClick={() => handleDeleteEvent(event.id)} className="p-2 md:p-3 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-xl md:rounded-2xl transition-all active:scale-95"><Trash2 size={20} className="md:w-5.5 md:h-5.5"/></button>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
                 </div>
             )}
 
-            {/* Add Form Modal */}
+            {/* Event Form Modal */}
             {showForm && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 animate-scale-up">
-                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                            <Plus className="text-purple-600"/> เพิ่มภารกิจงานใหม่
-                        </h3>
-                        <form onSubmit={handleSaveEvent} className="space-y-4">
+                <div className="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+                    <div className="bg-white rounded-[2rem] md:rounded-[3rem] shadow-2xl w-full max-w-lg p-6 md:p-10 animate-scale-up border-4 border-purple-500/10">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl md:text-2xl font-black text-slate-800 flex items-center gap-3"><Plus className="text-purple-600 md:w-7 md:h-7" size={24}/> เพิ่มภารกิจ ผอ.</h3>
+                            <button onClick={() => setShowForm(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"><X size={20} className="md:w-6 md:h-6"/></button>
+                        </div>
+                        <form onSubmit={handleSaveEvent} className="space-y-4 md:space-y-6">
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">หัวข้อภารกิจ</label>
-                                <input type="text" required className="w-full border rounded-lg px-3 py-2" value={newEvent.title} onChange={e => setNewEvent({...newEvent, title: e.target.value})} placeholder="เช่น ประชุมวิชาการ, ต้อนรับคณะดูงาน"/>
+                                <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">หัวข้อนัดหมาย</label>
+                                <input type="text" required placeholder="ระบุชื่อนัดหมาย หรือภารกิจ..." className="w-full px-4 py-3 md:px-6 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all text-sm md:text-base" value={newEvent.title} onChange={e => setNewEvent({...newEvent, title: e.target.value})}/>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-2 gap-4 md:gap-6">
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">วันที่</label>
-                                    <input type="date" required className="w-full border rounded-lg px-3 py-2" value={newEvent.date} onChange={e => setNewEvent({...newEvent, date: e.target.value})}/>
+                                    <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">วันที่</label>
+                                    <input type="date" required className="w-full px-4 py-3 md:px-6 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all text-sm md:text-base" value={newEvent.date} onChange={e => setNewEvent({...newEvent, date: e.target.value})}/>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">เวลาเริ่ม</label>
-                                    <input type="time" required className="w-full border rounded-lg px-3 py-2" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})}/>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">เวลาสิ้นสุด (ถ้ามี)</label>
-                                    <input type="time" className="w-full border rounded-lg px-3 py-2" value={newEvent.endTime || ''} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})}/>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-1">สถานที่</label>
-                                    <input type="text" className="w-full border rounded-lg px-3 py-2" value={newEvent.location} onChange={e => setNewEvent({...newEvent, location: e.target.value})} placeholder="ระบุสถานที่"/>
+                                    <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">เวลา</label>
+                                    <input type="time" required className="w-full px-4 py-3 md:px-6 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all text-sm md:text-base" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})}/>
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-1">รายละเอียดเพิ่มเติม</label>
-                                <textarea rows={2} className="w-full border rounded-lg px-3 py-2" value={newEvent.description} onChange={e => setNewEvent({...newEvent, description: e.target.value})}></textarea>
-                            </div>
-                            
-                            <div className="bg-blue-50 p-3 rounded-lg text-xs text-blue-800 flex items-start gap-2">
-                                <Bell size={14} className="shrink-0 mt-0.5"/>
-                                <div>
-                                    ระบบจะแจ้งเตือน ผอ. ผ่าน Telegram ทันทีที่บันทึก <br/>
-                                    และจะแจ้งเตือนซ้ำ: <strong>1 วันก่อนถึง</strong> และ <strong>เช้าวันปฏิบัติงาน</strong>
+                                <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">สถานที่</label>
+                                <div className="relative">
+                                    {/* Fix: Combined duplicate className at line 448 */}
+                                    <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 md:w-4.5 md:h-4.5" size={16} />
+                                    <input type="text" placeholder="ระบุสถานที่ประชุม/จัดงาน..." className="w-full pl-10 pr-4 md:pl-12 md:pr-6 py-3 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all text-sm md:text-base" value={newEvent.location} onChange={e => setNewEvent({...newEvent, location: e.target.value})}/>
                                 </div>
                             </div>
-
-                            <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold">ยกเลิก</button>
-                                <button type="submit" className="flex-1 py-2 bg-purple-600 text-white rounded-lg font-bold shadow-md">บันทึก</button>
+                            <div>
+                                <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">รายละเอียดเพิ่มเติม (เลือกใส่)</label>
+                                {/* Fix: Removed invalid md:rows attribute at line 454 */}
+                                <textarea rows={2} placeholder="ระบุรายละเอียดเพิ่มเติมของภารกิจ..." className="w-full px-4 py-3 md:px-6 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all leading-relaxed text-sm md:text-base" value={newEvent.description} onChange={e => setNewEvent({...newEvent, description: e.target.value})}/>
+                            </div>
+                            <div className="flex gap-3 md:gap-4 pt-2 md:pt-4">
+                                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-3 md:py-5 bg-slate-100 text-slate-600 rounded-xl md:rounded-2xl font-black hover:bg-slate-200 uppercase tracking-widest text-[10px] md:text-xs transition-all">ยกเลิก</button>
+                                <button type="submit" className="flex-[2] py-3 md:py-5 bg-purple-600 text-white rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-xl shadow-purple-200 hover:bg-purple-700 active:scale-95 transition-all">บันทึกภารกิจ</button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
-
-            {/* Events List */}
-            <div className="space-y-4">
-                {displayedEvents.length === 0 ? (
-                    <div className="text-center py-16 bg-white rounded-xl border border-dashed border-slate-300 text-slate-400 flex flex-col items-center gap-2">
-                        {activeTab === 'UPCOMING' ? (
-                            <>
-                                <Calendar size={48} className="text-slate-200"/>
-                                <p>ไม่มีรายการนัดหมายเร็วๆ นี้</p>
-                            </>
-                        ) : (
-                            <>
-                                <History size={48} className="text-slate-200"/>
-                                <p>ยังไม่มีประวัติการปฏิบัติงานที่ผ่านมา</p>
-                            </>
-                        )}
-                    </div>
-                ) : (
-                    displayedEvents.map((event) => {
-                        const evtDate = new Date(event.date);
-                        const todayRef = new Date();
-                        todayRef.setHours(0,0,0,0);
-                        evtDate.setHours(0,0,0,0);
-                        
-                        const isPast = evtDate < todayRef;
-                        const isToday = evtDate.getTime() === todayRef.getTime();
-
-                        return (
-                            <div key={event.id} className={`bg-white rounded-xl p-6 shadow-sm border transition-all ${isToday ? 'border-purple-500 ring-1 ring-purple-100' : 'border-slate-200'} ${isPast ? 'opacity-80 bg-slate-50' : ''}`}>
-                                <div className="flex flex-col md:flex-row justify-between items-start gap-4">
-                                    <div className="flex gap-4 w-full">
-                                        {/* Date Box (Thai Format) */}
-                                        <div className={`flex flex-col items-center justify-center w-24 h-24 rounded-xl shrink-0 ${isToday ? 'bg-purple-600 text-white' : (isPast ? 'bg-slate-200 text-slate-500' : 'bg-purple-50 text-purple-700')}`}>
-                                            <span className="text-xs font-bold">{getThaiMonthShort(event.date)}</span>
-                                            <span className="text-3xl font-bold">{evtDate.getDate()}</span>
-                                            <span className="text-[10px]">{getThaiDayShort(event.date)}</span>
-                                        </div>
-
-                                        {/* Content */}
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                {isToday && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">วันนี้</span>}
-                                                {isPast && <span className="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><CheckCircle size={10}/> เสร็จสิ้น</span>}
-                                                <h3 className={`text-lg font-bold ${isPast ? 'text-slate-600' : 'text-slate-800'}`}>{event.title}</h3>
-                                            </div>
-                                            
-                                            {/* Full Thai Date Display */}
-                                            <div className="text-sm font-bold text-slate-700 mb-1">
-                                                {getThaiFullDate(event.date)}
-                                            </div>
-
-                                            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600 mt-2">
-                                                <div className="flex items-center gap-1">
-                                                    <Clock size={16} className={isPast ? "text-slate-400" : "text-purple-500"}/> 
-                                                    {event.startTime} {event.endTime ? `- ${event.endTime}` : ''} น.
-                                                </div>
-                                                {event.location && (
-                                                    <div className="flex items-center gap-1">
-                                                        <MapPin size={16} className={isPast ? "text-slate-400" : "text-red-500"}/> {event.location}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            
-                                            {event.description && (
-                                                <p className="text-sm text-slate-500 mt-2 bg-white/50 p-2 rounded border border-slate-100 inline-block">
-                                                    {event.description}
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Actions */}
-                                    <div className="flex flex-col items-end gap-2">
-                                        {canEdit && (
-                                            <button 
-                                                onClick={() => handleDeleteEvent(event.id)}
-                                                className="text-slate-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
-                                                title="ลบรายการ"
-                                            >
-                                                <Trash2 size={18}/>
-                                            </button>
-                                        )}
-                                        {/* Notification Status Badges (Only show on upcoming or today) */}
-                                        {!isPast && (
-                                            <div className="flex gap-1">
-                                                {event.notifiedOneDayBefore && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded border border-green-200">แจ้งล่วงหน้าแล้ว</span>}
-                                                {event.notifiedOnDay && <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">แจ้งวันนี้แล้ว</span>}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })
-                )}
-            </div>
         </div>
     );
 };

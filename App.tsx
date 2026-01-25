@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import DocumentsSystem from './components/DocumentsSystem';
 import LeaveSystem from './components/LeaveSystem';
@@ -14,11 +15,12 @@ import DirectorCalendar from './components/DirectorCalendar';
 import { SystemView, Teacher, School, TeacherRole } from './types';
 import { 
     Activity, Users, Clock, FileText, CalendarRange, 
-    Loader, LogOut, 
+    Loader, LogOut, AlertCircle,
     Settings, ChevronLeft, UserCircle, Calendar, GraduationCap, LayoutGrid, UserCheck
 } from 'lucide-react';
 import { MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
 import { supabase, isConfigured as isSupabaseConfigured } from './supabaseClient';
+import { db, collection, query, where, onSnapshot } from './firebaseConfig';
 
 const SESSION_KEY = 'schoolos_session_v1';
 const APP_LOGO_URL = "https://img2.pic.in.th/pic/9c2e0f8ba684e3441fc58d880fdf143d.png";
@@ -37,6 +39,7 @@ const App: React.FC = () => {
     // --- UI & Deep Link State ---
     const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
     const [pendingDocCount, setPendingDocCount] = useState(0);
+    const [hasDirectorMissionToday, setHasDirectorMissionToday] = useState(false);
     const [focusItem, setFocusItem] = useState<{ view: SystemView, id: string } | null>(null);
     const [currentView, setCurrentView] = useState<SystemView>(SystemView.DASHBOARD);
 
@@ -62,7 +65,7 @@ const App: React.FC = () => {
                     lat: s.lat, 
                     lng: s.lng, 
                     radius: s.radius, 
-                    lateTimeThreshold: s.late_time_threshold, // FIX: CamelCase
+                    lateTimeThreshold: s.late_time_threshold, 
                     logoBase64: s.logo_base_64, 
                     isSuspended: s.is_suspended
                 })));
@@ -74,7 +77,8 @@ const App: React.FC = () => {
                     id: p.id, schoolId: p.school_id, name: p.name, password: p.password,
                     position: p.position, roles: p.roles as TeacherRole[], 
                     signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
-                    isSuspended: p.is_suspended, isFirstLogin: false
+                    isSuspended: p.is_suspended, isApproved: p.is_approved !== false,
+                    isFirstLogin: false
                 }));
                 setAllTeachers(mappedTeachers);
                 
@@ -86,7 +90,7 @@ const App: React.FC = () => {
                             setIsSuperAdminMode(true);
                         } else {
                             const user = mappedTeachers.find(t => t.id === session.userId);
-                            if (user && !user.isSuspended) {
+                            if (user && !user.isSuspended && user.isApproved) {
                                 setCurrentUser(user);
                             }
                         }
@@ -115,7 +119,7 @@ const App: React.FC = () => {
                             id: p.id, schoolId: p.school_id, name: p.name, password: p.password,
                             position: p.position, roles: p.roles as TeacherRole[], 
                             signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
-                            isSuspended: p.is_suspended
+                            isSuspended: p.is_suspended, isApproved: p.is_approved !== false
                         } as any));
                         setAllTeachers(updatedList);
 
@@ -133,10 +137,11 @@ const App: React.FC = () => {
         }
     }, []);
 
-    // --- 2. DYNAMIC COUNTS (Realtime) ---
+    // --- 2. DYNAMIC COUNTS & MISSION CHECK (Realtime) ---
     useEffect(() => {
         const client = supabase;
         if (!currentUser || !isSupabaseConfigured || !client) return;
+        
         const fetchCounts = async () => {
             const { count: leaveCount } = await client.from('leave_requests').select('*', { count: 'exact', head: true }).eq('school_id', currentUser.schoolId).eq('status', 'Pending');
             setPendingLeaveCount(leaveCount || 0);
@@ -154,12 +159,24 @@ const App: React.FC = () => {
         };
         fetchCounts();
 
+        // Director Mission Check (Firestore)
+        let unsubEvents: (() => void) | undefined;
+        if (db) {
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            const q = query(collection(db, "director_events"), where("schoolId", "==", currentUser.schoolId), where("date", "==", todayStr));
+            unsubEvents = onSnapshot(q, (snapshot) => {
+                setHasDirectorMissionToday(!snapshot.empty);
+            });
+        }
+
         const leaveSub = client.channel('counts_leave').on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, () => fetchCounts()).subscribe();
         const docSub = client.channel('counts_docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, () => fetchCounts()).subscribe();
         
         return () => {
             client.removeChannel(leaveSub);
             client.removeChannel(docSub);
+            if (unsubEvents) unsubEvents();
         };
     }, [currentUser?.id]);
 
@@ -199,7 +216,9 @@ const App: React.FC = () => {
         const { error } = await client.from('profiles').update({
             name: t.name, position: t.position, roles: t.roles,
             password: t.password, telegram_chat_id: t.telegramChatId,
-            is_suspended: t.isSuspended || false, signature_base_64: t.signatureBase64
+            is_suspended: t.isSuspended || false, 
+            is_approved: t.isApproved !== false,
+            signature_base_64: t.signatureBase64
         }).eq('id', t.id);
         if (!error) setAllTeachers(prev => prev.map(teacher => teacher.id === t.id ? t : teacher));
     };
@@ -239,7 +258,11 @@ const App: React.FC = () => {
                     </div>
                 )}
                 <h3 className="text-xl md:text-2xl font-black text-slate-800 mb-1 group-hover:text-blue-600 transition-colors">{title}</h3>
-                <p className="text-slate-400 text-xs md:text-sm font-bold leading-relaxed">{slogan}</p>
+                <div className="relative">
+                    <p className={`text-xs md:text-sm font-bold leading-relaxed transition-colors ${typeof slogan !== 'string' ? '' : 'text-slate-400'}`}>
+                        {slogan}
+                    </p>
+                </div>
             </div>
             <div className="relative z-10 w-full">
                 <div className="w-full h-1 bg-slate-50 rounded-full overflow-hidden">
@@ -284,7 +307,16 @@ const App: React.FC = () => {
     if (!currentUser) return <LoginScreen schools={allSchools} teachers={allTeachers} onLogin={handleLogin} onRegister={async (sid, id, n) => {
         const client = supabase;
         if (!client) return;
-        const { error } = await client.from('profiles').insert([{ id, school_id: sid, name: n, password: '123456', position: 'ครู', roles: ['TEACHER'], is_suspended: false }]);
+        const { error } = await client.from('profiles').insert([{ 
+            id, 
+            school_id: sid, 
+            name: n, 
+            password: '123456', 
+            position: 'ครู', 
+            roles: ['TEACHER'], 
+            is_suspended: false,
+            is_approved: false 
+        }]);
         if (!error) { await fetchInitialData(); } else { alert(error.message); }
     }} onSuperAdminLogin={()=>setIsSuperAdminMode(true)} />;
     
@@ -347,7 +379,17 @@ const App: React.FC = () => {
                     {currentView === SystemView.DASHBOARD ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8 animate-fade-in">
                             <DashboardCard view={SystemView.PROFILE} title="ข้อมูลส่วนตัว" slogan="แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล" icon={UserCircle} color="#8b5cf6"/>
-                            <DashboardCard view={SystemView.DIRECTOR_CALENDAR} title="ปฏิทินปฏิบัติงาน ผอ." slogan="แจ้งเตือนนัดหมาย และภารกิจ" icon={Calendar} color="#3b82f6"/>
+                            <DashboardCard 
+                                view={SystemView.DIRECTOR_CALENDAR} 
+                                title="ปฏิทินปฏิบัติงาน ผอ." 
+                                slogan={hasDirectorMissionToday ? (
+                                    <span className="text-red-600 font-black animate-pulse flex items-center gap-1">
+                                        <AlertCircle size={14}/> มีภารกิจวันนี้
+                                    </span>
+                                ) : "แจ้งเตือนนัดหมาย และภารกิจ"} 
+                                icon={Calendar} 
+                                color="#3b82f6"
+                            />
                             <DashboardCard view={SystemView.ACADEMIC} title="งานวิชาการ" slogan="สถิตินักเรียน / ผลสอบ O-NET" icon={GraduationCap} color="#6366f1"/>
                             <DashboardCard view={SystemView.DOCUMENTS} title="งานสารบรรณ" slogan="รับ-ส่ง รวดเร็ว ทันใจ" icon={FileText} color="#06b6d4" badge={getDocBadge()} hasBorder={true}/>
                             <DashboardCard view={SystemView.PLAN} title="แผนปฏิบัติการ" slogan="วางแผนแม่นยำ สู่ความสำเร็จ" icon={CalendarRange} color="#d946ef"/>
