@@ -6,7 +6,7 @@ import {
     Save, ChevronLeft, Award, Database, Loader, Cloud, RefreshCw,
     Calendar, FileText, Plus, Trash2, ExternalLink, FileUp, Info,
     LayoutDashboard, CheckCircle, Clock, BookOpen, Target, ArrowRight,
-    CalendarPlus, AlertCircle, X, UserCheck
+    CalendarPlus, AlertCircle, X, UserCheck, UsersRound
 } from 'lucide-react';
 import { 
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
@@ -100,7 +100,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 setCalendarEvents(mappedCal);
 
                 const { data: sarData } = await supabase.from('academic_sar').select('*').eq('school_id', currentUser.schoolId).order('year', { ascending: false });
-                // Fix: Corrected mapping for SAR data to ensure camelCase properties
                 const mappedSar: AcademicSAR[] = sarData ? sarData.map(d => ({ 
                     id: d.id.toString(), 
                     schoolId: d.school_id, 
@@ -307,7 +306,9 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
             .sort((a, b) => parseInt(a.year) - parseInt(b.year))
             .map(e => {
                 let total = 0;
-                Object.values(e.levels).forEach((val: any) => { total += (parseInt(val.m) || 0) + (parseInt(val.f) || 0); });
+                Object.values(e.levels).forEach((val: any) => { 
+                    total += (val.m || 0) + (val.f || 0); 
+                });
                 return { year: `ปี ${e.year}`, Total: total, raw: e };
             });
 
@@ -329,10 +330,14 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
         const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-        const hasM3Students = enrollments.some(e => (e.levels['Matthayom1']?.m || 0) + (e.levels['Matthayom1']?.f || 0) + (e.levels['Matthayom2']?.m || 0) + (e.levels['Matthayom2']?.f || 0) + (e.levels['Matthayom3']?.m || 0) + (e.levels['Matthayom3']?.f || 0) > 0);
+        const hasM3Students = enrollments.some(e => {
+            const m1 = e.levels['Matthayom1'];
+            const m2 = e.levels['Matthayom2'];
+            const m3 = e.levels['Matthayom3'];
+            return (m1?.m || 0) + (m1?.f || 0) + (m2?.m || 0) + (m2?.f || 0) + (m3?.m || 0) + (m3?.f || 0) > 0;
+        });
         const hasM3OnetData = onetM3Data.length > 0;
 
-        // Fix: Removed massive string escaping from JSX return and corrected syntax
         return (
             <div className="space-y-8 pb-20 animate-fade-in">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -359,7 +364,7 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                                 <BarChart 
                                     data={enrollmentChartData} 
                                     margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                                    onClick={(data) => {
+                                    onClick={(data: any) => {
                                         if (data && data.activePayload) {
                                             setSelectedEnrollDetail(data.activePayload[0].payload.raw);
                                         }
@@ -382,42 +387,65 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                         </div>
                     </div>
 
-                    <div className="bg-white p-6 rounded-3xl border shadow-sm overflow-hidden flex flex-col justify-center">
+                    <div className="bg-white p-6 rounded-3xl border shadow-sm overflow-hidden flex flex-col min-h-[350px]">
                         {selectedEnrollDetail ? (
-                            <div className="animate-fade-in">
-                                <div className="flex justify-between items-center mb-6 border-b pb-4 border-slate-50">
-                                    <div>
-                                        <h4 className="font-black text-slate-800 text-xl">รายละเอียดปีการศึกษา {selectedEnrollDetail.year}</h4>
-                                        <p className="text-xs text-indigo-600 font-bold uppercase tracking-widest">ยอดรวมทั้งโรงเรียน: {Object.values(selectedEnrollDetail.levels).reduce((acc: number, curr: any) => acc + (parseInt(curr.m) || 0) + (parseInt(curr.f) || 0), 0)} คน</p>
+                            <div className="animate-fade-in flex flex-col h-full">
+                                <div className="flex justify-between items-center mb-4 border-b pb-3 border-slate-50">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl shadow-sm">
+                                            <UsersRound size={18}/>
+                                        </div>
+                                        <div>
+                                            <h4 className="font-black text-slate-800 text-base leading-none mb-1">ปีการศึกษา {selectedEnrollDetail.year}</h4>
+                                            <p className="text-[9px] text-indigo-500 font-black uppercase tracking-widest">Detailed Statistics</p>
+                                        </div>
                                     </div>
-                                    <button onClick={() => setSelectedEnrollDetail(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"><X size={20}/></button>
+                                    <button onClick={() => setSelectedEnrollDetail(null)} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"><X size={18}/></button>
                                 </div>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto max-h-[160px] custom-scrollbar pr-2">
+                                
+                                <div className="bg-slate-900 p-3 rounded-xl mb-3 text-center shadow-lg shadow-indigo-100 border-b-2 border-slate-950">
+                                    <p className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.1em]">ยอดรวมนักเรียนทั้งหมด</p>
+                                    <p className="text-2xl font-black text-white">{Object.values(selectedEnrollDetail.levels).reduce((acc: number, curr: any) => acc + (curr.m || 0) + (curr.f || 0), 0)} <span className="text-[10px] text-slate-400">คน</span></p>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 flex-1">
                                     {LEVELS.map(level => {
-                                        const count = (parseInt(selectedEnrollDetail.levels[level.id]?.m) || 0) + (parseInt(selectedEnrollDetail.levels[level.id]?.f) || 0);
-                                        // ตรวจสอบมัธยม
+                                        const lvlData = selectedEnrollDetail.levels[level.id];
+                                        const count = (lvlData?.m || 0) + (lvlData?.f || 0);
+                                        
+                                        // ตรวจสอบข้อมูลระดับมัธยม
                                         const isSecondary = level.id.includes('Matthayom');
-                                        const secondaryTotal = (parseInt(selectedEnrollDetail.levels['Matthayom1']?.m || 0) + parseInt(selectedEnrollDetail.levels['Matthayom1']?.f || 0)) + 
-                                                              (parseInt(selectedEnrollDetail.levels['Matthayom2']?.m || 0) + parseInt(selectedEnrollDetail.levels['Matthayom2']?.f || 0)) + 
-                                                              (parseInt(selectedEnrollDetail.levels['Matthayom3']?.m || 0) + parseInt(selectedEnrollDetail.levels['Matthayom3']?.f || 0));
+                                        const m1 = selectedEnrollDetail.levels['Matthayom1'];
+                                        const m2 = selectedEnrollDetail.levels['Matthayom2'];
+                                        const m3 = selectedEnrollDetail.levels['Matthayom3'];
+                                        const secondaryTotal = (m1?.m || 0) + (m1?.f || 0) + 
+                                                              (m2?.m || 0) + (m2?.f || 0) + 
+                                                              (m3?.m || 0) + (m3?.f || 0);
                                         
                                         if (isSecondary && secondaryTotal === 0) return null;
                                         if (count === 0) return null;
 
                                         return (
-                                            <div key={level.id} className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center shadow-sm">
-                                                <span className="text-[10px] font-black text-slate-400 uppercase mb-1 truncate w-full text-center">{level.label}</span>
-                                                <span className="text-lg font-black text-slate-800">{count}</span>
-                                                <span className="text-[8px] text-slate-400 font-bold uppercase">นักเรียน</span>
+                                            <div key={level.id} className="p-2 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between group hover:bg-white hover:border-indigo-100 transition-all shadow-sm">
+                                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{level.label}</span>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-sm font-black text-slate-800 group-hover:text-indigo-600">{count}</span>
+                                                    <span className="text-[8px] font-bold text-slate-300 uppercase">คน</span>
+                                                </div>
                                             </div>
                                         );
                                     })}
                                 </div>
                             </div>
                         ) : (
-                            <div className="text-center py-10 flex flex-col items-center gap-4 opacity-30">
-                                <BarChartIcon size={64} className="text-slate-300"/>
-                                <p className="font-black text-slate-400 uppercase tracking-[0.2em] text-sm">กรุณากดที่แผนภูมิแท่งเพื่อดูรายละเอียด</p>
+                            <div className="text-center flex flex-col items-center justify-center gap-4 opacity-40 h-full py-10">
+                                <div className="p-6 bg-slate-50 rounded-full border-2 border-dashed border-slate-200">
+                                    <BarChartIcon size={48} className="text-slate-300"/>
+                                </div>
+                                <div className="space-y-1">
+                                    <p className="font-black text-slate-500 uppercase tracking-widest text-xs">Analytics Ready</p>
+                                    <p className="text-[9px] font-bold text-slate-400">กรุณาเลือกแท่งกราฟเพื่อดูสถิติรายระดับชั้น</p>
+                                </div>
                             </div>
                         )}
                     </div>
