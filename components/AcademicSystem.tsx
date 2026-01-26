@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Teacher, EnrollmentData, TestScoreData, TestType, AcademicCalendarEvent, AcademicSAR, SARType, SystemConfig } from '../types';
 import { CURRENT_SCHOOL_YEAR } from '../constants';
-// Fix: Added missing 'X' icon to the lucide-react import list
 import { 
     GraduationCap, Users, LineChart as LineChartIcon, BarChart as BarChartIcon, 
     Save, ChevronLeft, Award, Database, Loader, Cloud, RefreshCw,
@@ -20,7 +19,6 @@ interface AcademicSystemProps {
     currentUser: Teacher;
 }
 
-// Fix: Corrected component structure to ensure it returns JSX correctly and all render helpers work without syntax errors
 const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
     const [viewMode, setViewMode] = useState<'DASHBOARD' | 'ENROLLMENT' | 'TEST_SCORES' | 'CALENDAR' | 'SAR'>('DASHBOARD');
     const [enrollments, setEnrollments] = useState<EnrollmentData[]>([]);
@@ -48,7 +46,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
     const [showSarForm, setShowSarForm] = useState(false);
     const [newSar, setNewSar] = useState({ year: CURRENT_SCHOOL_YEAR, type: 'BASIC' as SARType });
 
-    // กำหนดสิทธิ์: วิชาการ, ธุรการ, ผู้อำนวยการ และ System Admin
     const isAcademicAdmin = currentUser.roles.includes('ACADEMIC_OFFICER') || 
                            currentUser.roles.includes('DOCUMENT_OFFICER') || 
                            currentUser.roles.includes('DIRECTOR') || 
@@ -109,7 +106,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 })) : [];
                 setSars(mappedSar);
 
-                // Collect unique years from all datasets
                 const years = new Set<string>(['2565', '2566', '2567', '2568', '2569']);
                 mappedEnroll.forEach(e => years.add(e.year));
                 mappedScores.forEach(s => years.add(s.year));
@@ -227,10 +223,14 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
     const handleDeleteCalendarEvent = async (id: string) => {
         if (!confirm("คุณแน่ใจหรือไม่ว่าต้องการลบกิจกรรมปฏิบัติงานวิชาการนี้?")) return;
-        const { error } = await supabase?.from('academic_calendar').delete().eq('id', id);
+        const client = supabase;
+        if (!client) return;
+        const { error } = await client.from('academic_calendar').delete().eq('id', id);
         if (!error) {
             alert("ลบข้อมูลสำเร็จ");
             loadData();
+        } else {
+            alert("ลบไม่สำเร็จ: " + error.message);
         }
     };
 
@@ -297,8 +297,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
         return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
     };
 
-    // --- RENDER FUNCTIONS ---
-
     const renderDashboard = () => {
         const enrollmentChartData = enrollments
             .sort((a, b) => parseInt(a.year) - parseInt(b.year))
@@ -331,7 +329,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
         return (
             <div className="space-y-8 pb-20 animate-fade-in">
-                {/* Academic Hub Nav */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <button onClick={() => setViewMode('DASHBOARD')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${viewMode === 'DASHBOARD' ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' : 'bg-white text-slate-500 border-slate-100 hover:border-indigo-200'}`}>
                         <LayoutDashboard size={24}/><span className="text-xs font-black uppercase tracking-widest">สรุปภาพรวม</span>
@@ -348,7 +345,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* สถิตินักเรียน */}
                     <div className="bg-white p-6 rounded-3xl border shadow-sm">
                         <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 underline underline-offset-8 decoration-indigo-500 decoration-4"><Users size={20} className="text-indigo-500"/> สถิตินักเรียนรายปี</h3>
                         <div className="h-[250px] w-full">
@@ -364,7 +360,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                         </div>
                     </div>
 
-                    {/* กราฟ RT */}
                     <div className="bg-white p-6 rounded-3xl border shadow-sm">
                         <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 underline underline-offset-8 decoration-pink-500 decoration-4"><BookOpen size={20} className="text-pink-500"/> คะแนนเฉลี่ย RT (ป.1)</h3>
                         <div className="h-[250px] w-full">
@@ -383,7 +378,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                         </div>
                     </div>
 
-                    {/* กราฟ NT */}
                     <div className="bg-white p-6 rounded-3xl border shadow-sm">
                         <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 underline underline-offset-8 decoration-blue-500 decoration-4"><Target size={20} className="text-blue-500"/> คะแนนเฉลี่ย NT (ป.3)</h3>
                         <div className="h-[250px] w-full">
@@ -402,7 +396,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                         </div>
                     </div>
 
-                    {/* กราฟ O-NET ป.6 */}
                     <div className="bg-white p-6 rounded-3xl border shadow-sm">
                         <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 underline underline-offset-8 decoration-orange-500 decoration-4"><Award size={20} className="text-orange-500"/> คะแนนเฉลี่ย O-NET (ป.6)</h3>
                         <div className="h-[250px] w-full">
@@ -421,7 +414,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                         </div>
                     </div>
 
-                    {/* กราฟ O-NET ม.3 */}
                     {(hasM3Students || hasM3OnetData) && (
                         <div className="bg-white p-6 rounded-3xl border shadow-sm">
                             <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 underline underline-offset-8 decoration-orange-500 decoration-4"><Award size={20} className="text-orange-500"/> คะแนนเฉลี่ย O-NET (ม.3)</h3>
@@ -547,7 +539,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    {/* SAR ปฐมวัย */}
                     <div className="bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
                         <div className="p-6 bg-pink-50 border-b flex justify-between items-center">
                             <h3 className="font-black text-pink-900 flex items-center gap-2"><CheckCircle size={20}/> SAR ปฐมวัย</h3>
@@ -563,14 +554,28 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                                     </div>
                                     <div className="flex gap-2">
                                         <a href={sar.fileUrl} target="_blank" rel="noreferrer" className="p-2 bg-white rounded-xl text-pink-600 hover:bg-pink-600 hover:text-white transition-all shadow-sm"><ExternalLink size={16}/></a>
-                                        {isAcademicAdmin && <button onClick={async () => { if(confirm("ลบรายงานนี้?")) { await supabase?.from('academic_sar').delete().eq('id', sar.id); loadData(); } }} className="p-2 bg-white rounded-xl text-slate-300 hover:text-red-500 transition-all shadow-sm"><Trash2 size={16}/></button>}
+                                        {isAcademicAdmin && (
+                                            <button 
+                                                onClick={async () => { 
+                                                    if(confirm("ลบรายงานนี้?")) { 
+                                                        const client = supabase;
+                                                        if (client) {
+                                                            const { error } = await client.from('academic_sar').delete().eq('id', sar.id);
+                                                            if (!error) loadData(); 
+                                                        }
+                                                    } 
+                                                }} 
+                                                className="p-2 bg-white rounded-xl text-slate-300 hover:text-red-500 transition-all shadow-sm"
+                                            >
+                                                <Trash2 size={16}/>
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
                         </div>
                     </div>
 
-                    {/* SAR ขั้นพื้นฐาน */}
                     <div className="bg-white rounded-[2.5rem] border shadow-sm overflow-hidden">
                         <div className="p-6 bg-blue-50 border-b flex justify-between items-center">
                             <h3 className="font-black text-blue-900 flex items-center gap-2"><CheckCircle size={20}/> SAR ขั้นพื้นฐาน</h3>
@@ -586,7 +591,22 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                                     </div>
                                     <div className="flex gap-2">
                                         <a href={sar.fileUrl} target="_blank" rel="noreferrer" className="p-2 bg-white rounded-xl text-pink-600 hover:bg-pink-600 hover:text-white transition-all shadow-sm"><ExternalLink size={16}/></a>
-                                        {isAcademicAdmin && <button onClick={async () => { if(confirm("ลบรายงานนี้?")) { await supabase?.from('academic_sar').delete().eq('id', sar.id); loadData(); } }} className="p-2 bg-white rounded-xl text-slate-300 hover:text-red-500 transition-all shadow-sm"><Trash2 size={16}/></button>}
+                                        {isAcademicAdmin && (
+                                            <button 
+                                                onClick={async () => { 
+                                                    if(confirm("ลบรายงานนี้?")) { 
+                                                        const client = supabase;
+                                                        if (client) {
+                                                            const { error } = await client.from('academic_sar').delete().eq('id', sar.id);
+                                                            if (!error) loadData(); 
+                                                        }
+                                                    } 
+                                                }} 
+                                                className="p-2 bg-white rounded-xl text-slate-300 hover:text-red-500 transition-all shadow-sm"
+                                            >
+                                                <Trash2 size={16}/>
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -761,7 +781,6 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
             {viewMode === 'CALENDAR' && renderCalendar()}
             {viewMode === 'SAR' && renderSar()}
 
-            {/* Modal for Adding New Academic Year */}
             {showAddYearModal && (
                 <div className="fixed inset-0 bg-slate-900/80 z-[60] flex items-center justify-center p-4 backdrop-blur-md">
                     <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm p-8 animate-scale-up border-4 border-indigo-100">
