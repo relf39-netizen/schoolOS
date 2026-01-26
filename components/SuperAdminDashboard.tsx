@@ -6,7 +6,7 @@ import {
     Loader2, Zap, Info, ShieldCheck, Save, AlertCircle, Shield, 
     AlertTriangle, Search, Users, UserX, UserCheck, Power, PowerOff, 
     ChevronRight, ArrowLeft, Edit, UserCog, Mail, Phone, RefreshCw, HardDrive, Eraser,
-    ShieldAlert, UserPlus, ShieldPlus, UserMinus
+    ShieldAlert, UserPlus, ShieldPlus, UserMinus, Key, User as UserIcon, Eye, EyeOff
 } from 'lucide-react';
 import { collection, getDocs, query } from 'firebase/firestore';
 import { db, isConfigured as isFirebaseConfigured } from '../firebaseConfig';
@@ -27,7 +27,7 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     schools, teachers, onCreateSchool, onUpdateSchool, onDeleteSchool, 
     onUpdateTeacher, onDeleteTeacher, onLogout 
 }) => {
-    const [activeTab, setActiveTab] = useState<'SCHOOLS' | 'IMPORT'>('SCHOOLS');
+    const [activeTab, setActiveTab] = useState<'SCHOOLS' | 'IMPORT' | 'ACCOUNT'>('SCHOOLS');
     const [showForm, setShowForm] = useState(false);
     const [isEditMode, setIsEditMode] = useState(false);
     const [formData, setFormData] = useState<Partial<School>>({ id: '', name: '' });
@@ -35,6 +35,12 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     const [schoolSearch, setSchoolSearch] = useState('');
     const [teacherSearch, setTeacherSearch] = useState('');
     
+    // Account Management State
+    const [superAdminData, setSuperAdminData] = useState({ username: '', password: '' });
+    const [oldUsername, setOldUsername] = useState('');
+    const [showAdminPassword, setShowAdminPassword] = useState(false);
+    const [isSavingAccount, setIsSavingAccount] = useState(false);
+
     // State for viewing staff of a specific school
     const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(null);
     const [isUpdatingTeacher, setIsUpdatingTeacher] = useState<string | null>(null);
@@ -44,6 +50,20 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     const [shouldClearData, setShouldClearData] = useState(true);
     const [importLog, setImportLog] = useState<string[]>([]);
     
+    useEffect(() => {
+        const fetchSuperAdmin = async () => {
+            const client = supabase;
+            if (isSupabaseConfigured && client) {
+                const { data } = await client.from('super_admins').select('*').limit(1).maybeSingle();
+                if (data) {
+                    setSuperAdminData({ username: data.username, password: data.password });
+                    setOldUsername(data.username);
+                }
+            }
+        };
+        fetchSuperAdmin();
+    }, []);
+
     const filteredSchools = schools.filter(s => 
         s.name.toLowerCase().includes(schoolSearch.toLowerCase()) || 
         s.id.includes(schoolSearch)
@@ -70,6 +90,38 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             alert("บันทึกไม่สำเร็จ");
         } finally {
             setIsSavingSchool(false);
+        }
+    };
+
+    const handleAccountUpdate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const client = supabase;
+        if (!isSupabaseConfigured || !client) return;
+
+        if (!confirm("คุณแน่ใจหรือไม่ว่าต้องการเปลี่ยนข้อมูลเข้าสู่ระบบ Super Admin? (กรุณาจดบันทึกข้อมูลใหม่ไว้ด้วย)")) return;
+
+        setIsSavingAccount(true);
+        try {
+            // Remove old record and insert new if username changed, otherwise update
+            if (superAdminData.username !== oldUsername) {
+                await client.from('super_admins').delete().eq('username', oldUsername);
+            }
+            
+            const { error } = await client.from('super_admins').upsert({
+                username: superAdminData.username,
+                password: superAdminData.password
+            });
+
+            if (!error) {
+                alert("อัปเดตข้อมูลบัญชี Super Admin สำเร็จ");
+                setOldUsername(superAdminData.username);
+            } else {
+                alert("ผิดพลาด: " + error.message);
+            }
+        } catch (err) {
+            alert("ขัดข้องในการบันทึก");
+        } finally {
+            setIsSavingAccount(false);
         }
     };
 
@@ -234,9 +286,10 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                             <span className="text-[9px] text-blue-400 font-bold uppercase tracking-widest">Multi-School Management Hub</span>
                         </div>
                     </div>
-                    <div className="hidden md:flex bg-slate-800 p-1 rounded-xl">
-                        <button onClick={() => { setActiveTab('SCHOOLS'); setSelectedSchoolId(null); }} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'SCHOOLS' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>จัดการโรงเรียน</button>
-                        <button onClick={() => { setActiveTab('IMPORT'); setSelectedSchoolId(null); }} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'IMPORT' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>ย้ายฐานข้อมูล</button>
+                    <div className="hidden md:flex bg-slate-800 p-1 rounded-xl overflow-x-auto max-w-full">
+                        <button onClick={() => { setActiveTab('SCHOOLS'); setSelectedSchoolId(null); }} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all shrink-0 ${activeTab === 'SCHOOLS' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>จัดการโรงเรียน</button>
+                        <button onClick={() => { setActiveTab('IMPORT'); setSelectedSchoolId(null); }} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all shrink-0 ${activeTab === 'IMPORT' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>ย้ายฐานข้อมูล</button>
+                        <button onClick={() => { setActiveTab('ACCOUNT'); setSelectedSchoolId(null); }} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all shrink-0 ${activeTab === 'ACCOUNT' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}>ตั้งค่าบัญชี</button>
                     </div>
                     <button onClick={onLogout} className="p-2 text-slate-400 hover:text-red-400 transition-colors flex items-center gap-2 font-bold">
                         <span className="text-xs hidden sm:inline">ออกจากระบบ</span>
@@ -294,6 +347,74 @@ const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Account Settings for Super Admin */}
+                {activeTab === 'ACCOUNT' && (
+                    <div className="animate-fade-in max-w-2xl mx-auto">
+                        <div className="bg-white rounded-[2.5rem] shadow-xl border-2 border-slate-100 overflow-hidden">
+                            <div className="bg-gradient-to-br from-slate-900 to-indigo-900 p-10 text-white text-center">
+                                <div className="w-20 h-20 bg-white/10 rounded-3xl flex items-center justify-center mx-auto mb-6 backdrop-blur-md border border-white/20">
+                                    <Shield size={48} className="text-blue-400"/>
+                                </div>
+                                <h2 className="text-3xl font-black mb-2">บัญชี Super Admin</h2>
+                                <p className="text-slate-400 font-medium">แก้ไขข้อมูลที่ใช้ในการจัดการระบบทั้งหมด</p>
+                            </div>
+                            
+                            <form onSubmit={handleAccountUpdate} className="p-10 space-y-8">
+                                <div className="bg-amber-50 border-2 border-amber-100 p-5 rounded-2xl flex gap-4">
+                                    <AlertTriangle className="text-amber-600 shrink-0" size={24}/>
+                                    <p className="text-sm font-bold text-amber-800 leading-relaxed">ข้อมูลส่วนนี้สำคัญมาก หากเปลี่ยนแล้วไม่สามารถเข้าสู่ระบบได้ จะต้องแก้ไขข้อมูลผ่านทาง Database เท่านั้น กรุณาตรวจสอบให้แน่ใจก่อนบันทึก</p>
+                                </div>
+
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Username (ID)</label>
+                                        <div className="relative">
+                                            <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={20}/>
+                                            <input 
+                                                type="text" 
+                                                required
+                                                value={superAdminData.username}
+                                                onChange={e => setSuperAdminData({...superAdminData, username: e.target.value})}
+                                                className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold transition-all"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Password</label>
+                                        <div className="relative">
+                                            <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={20}/>
+                                            <input 
+                                                type={showAdminPassword ? "text" : "password"} 
+                                                required
+                                                value={superAdminData.password}
+                                                onChange={e => setSuperAdminData({...superAdminData, password: e.target.value})}
+                                                className="w-full pl-12 pr-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-500 font-bold transition-all"
+                                            />
+                                            <button 
+                                                type="button"
+                                                onClick={() => setShowAdminPassword(!showAdminPassword)}
+                                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+                                            >
+                                                {showAdminPassword ? <EyeOff size={20}/> : <Eye size={20}/>}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button 
+                                    type="submit" 
+                                    disabled={isSavingAccount}
+                                    className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
+                                >
+                                    {isSavingAccount ? <Loader2 className="animate-spin" size={24}/> : <Save size={24}/>}
+                                    บันทึกการเปลี่ยนแปลงบัญชี
+                                </button>
+                            </form>
                         </div>
                     </div>
                 )}

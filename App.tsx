@@ -229,13 +229,21 @@ const App: React.FC = () => {
         const client = supabase;
         if (!client) return;
         const { error } = await client.from('profiles').update({
-            name: t.name, position: t.position, roles: t.roles,
-            password: t.password, telegram_chat_id: t.telegramChatId,
+            name: t.name, 
+            position: t.position, 
+            roles: t.roles,
+            password: t.password, 
+            telegram_chat_id: t.telegramChatId,
             is_suspended: t.isSuspended || false, 
             is_approved: t.isApproved !== false,
             signature_base_64: t.signatureBase64
         }).eq('id', t.id);
-        if (!error) setAllTeachers(prev => prev.map(teacher => teacher.id === t.id ? t : teacher));
+        
+        if (error) {
+            console.error("Update Teacher Error:", error.message);
+            throw error;
+        }
+        setAllTeachers(prev => prev.map(teacher => teacher.id === t.id ? t : teacher));
     };
 
     const handleDeleteTeacher = async (id: string) => {
@@ -425,7 +433,30 @@ const App: React.FC = () => {
                                     case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool!} />;
                                     case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} />;
                                     case SystemView.ACADEMIC: return <AcademicSystem currentUser={currentUser} />;
-                                    case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool!} onUpdateSchool={handleUpdateSchool} onAddTeacher={async (t) => { const client = supabase; if(client) await client.from('profiles').insert([t]); setAllTeachers(prev => [...prev, t]); }} onEditTeacher={handleEditTeacher} onDeleteTeacher={handleDeleteTeacher} />;
+                                    case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool!} onUpdateSchool={handleUpdateSchool} 
+                                        onAddTeacher={async (t) => { 
+                                            const client = supabase; 
+                                            if(!client) return;
+                                            const { error } = await client.from('profiles').insert([{ 
+                                                id: t.id,
+                                                school_id: t.schoolId,
+                                                name: t.name,
+                                                password: t.password,
+                                                position: t.position,
+                                                roles: t.roles,
+                                                signature_base_64: t.signatureBase64,
+                                                telegram_chat_id: t.telegramChatId,
+                                                is_suspended: t.isSuspended || false,
+                                                is_approved: t.isApproved !== false
+                                            }]); 
+                                            if (error) {
+                                                console.error("Add Teacher Error:", error.message);
+                                                throw error;
+                                            }
+                                            setAllTeachers(prev => [...prev, t]); 
+                                        }} 
+                                        onEditTeacher={handleEditTeacher} 
+                                        onDeleteTeacher={handleDeleteTeacher} />;
                                     case SystemView.DIRECTOR_CALENDAR: return <DirectorCalendar currentUser={currentUser} allTeachers={schoolTeachers} />;
                                     default: return null;
                                 }

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Teacher, TeacherRole, SystemConfig, School } from '../types';
 import { 
@@ -5,16 +6,15 @@ import {
     Database, Link as LinkIcon, AlertCircle, UploadCloud, ImageIcon, 
     MoveVertical, Maximize, Shield, MapPin, Target, Crosshair, Clock, 
     Calendar, RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut, 
-    Send, Globe, Copy, Check, Cloud, Building2 
+    Send, Globe, Copy, Check, Cloud, Building2, Loader
 } from 'lucide-react';
-// Fix: Import from local firebaseConfig instead of directly from firebase/firestore to ensure proper initialization
 import { db, isConfigured, doc, getDoc, setDoc, collection, getDocs, query } from '../firebaseConfig';
 import { ACADEMIC_POSITIONS } from '../constants';
 
 interface AdminUserManagementProps {
     teachers: Teacher[];
-    onAddTeacher: (teacher: Teacher) => void;
-    onEditTeacher: (teacher: Teacher) => void;
+    onAddTeacher: (teacher: Teacher) => Promise<void>;
+    onEditTeacher: (teacher: Teacher) => Promise<void>;
     onDeleteTeacher: (id: string) => void;
     
     currentSchool: School;
@@ -26,8 +26,10 @@ const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
     { id: 'DIRECTOR', label: 'ผู้อำนวยการ (Director)' },
     { id: 'VICE_DIRECTOR', label: 'รองผู้อำนวยการ (Vice)' },
     { id: 'DOCUMENT_OFFICER', label: 'เจ้าหน้าที่ธุรการ' },
+    { id: 'ACADEMIC_OFFICER', label: 'เจ้าหน้าที่งานวิชาการ' },
     { id: 'FINANCE_BUDGET', label: 'การเงิน (งบประมาณ)' },
     { id: 'FINANCE_NONBUDGET', label: 'การเงิน (นอกงบประมาณ)' },
+    { id: 'FINANCE_COOP', label: 'การเงิน (สหกรณ์)' },
     { id: 'PLAN_OFFICER', label: 'เจ้าหน้าที่งานแผน' },
     { id: 'TEACHER', label: 'ครูผู้สอน' },
 ];
@@ -40,6 +42,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<Partial<Teacher>>({});
     const [isAdding, setIsAdding] = useState(false);
+    const [isSubmittingUser, setIsSubmittingUser] = useState(false);
 
     // System Settings State
     const [config, setConfig] = useState<SystemConfig>({ driveFolderId: '', scriptUrl: '', schoolName: '', officerDepartment: '', directorSignatureBase64: '', directorSignatureScale: 1, directorSignatureYOffset: 0, schoolLogoBase64: '', officialGarudaBase64: '', telegramBotToken: '', telegramBotUsername: '', appBaseUrl: '' });
@@ -49,10 +52,10 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({ teachers, onA
     const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
     const [isGettingLocation, setIsGettingLocation] = useState(false);
 
-    // Google Apps Script Code v12.2 (Corrected for Automatic Browser Preview)
+    // Google Apps Script Code v12.5 (Improved Landing Page Interface)
     const gasCode = `/**
- * SchoolOS - Cloud Storage & Direct SQL Tracking Bridge v12.2
- * ระบบจัดการไฟล์ Drive และบันทึกสถานะรับทราบทันที
+ * SchoolOS - Cloud Storage & Telegram Tracking Bridge v12.5
+ * ระบบจัดการไฟล์ Drive และหน้าเปิดพรีวิวเอกสารที่ชัดเจนสำหรับคุณครู
  */
 
 var SUPABASE_URL = "ใส่ URL Supabase ของท่านที่นี่";
@@ -64,27 +67,28 @@ function doGet(e) {
   if (action === 'ack') {
     var docId = e.parameter.docId;
     var userId = e.parameter.userId;
-    var targetUrl = decodeURIComponent(e.parameter.target);
+    var targetFile = decodeURIComponent(e.parameter.target);
+    var appBaseUrl = decodeURIComponent(e.parameter.appUrl || "");
     
-    try {
-      handleDirectAcknowledge(docId, userId);
-    } catch(err) {
-      console.error("Ack SQL Error: " + err.toString());
-    }
+    // สร้าง Deep Link เข้าสู่แอป SchoolOS เพื่อให้แอปบันทึก SQL ต่อ
+    var finalAppLink = appBaseUrl + "?view=DOCUMENTS&id=" + docId + "&file=" + encodeURIComponent(targetFile);
     
-    var html = "<html><head><meta charset='UTF-8'><meta http-equiv='refresh' content='0;url=" + targetUrl + "'></head>" +
-               "<body style='font-family:sans-serif; text-align:center; padding-top:100px; background:#f8fafc;'>" +
-               "<div style='background:white; display:inline-block; padding:40px; border-radius:30px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);'>" +
-               "<h2 style='color:#2563eb;'>SchoolOS System</h2>" +
-               "<p style='color:#64748b; font-weight:bold;'>ระบบบันทึกสถานะการรับทราบเรียบร้อยแล้ว</p>" +
-               "<p style='color:#94a3b8;'>กำลังนำคุณไปที่หน้าพรีวิวเอกสาร...</p>" +
-               "<a href='" + targetUrl + "' style='display:inline-block; margin-top:20px; color:#2563eb; font-weight:bold; text-decoration:none;'>คลิกที่นี่หากหน้าจอไม่เปลี่ยนไป</a>" +
-               "</div></body></html>";
+    var html = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1'><title>SchoolOS Tracking</title></head>" +
+               "<body style='font-family:\"Sarabun\", sans-serif; text-align:center; padding:0; margin:0; background:#f8fafc; color:#1e293b; display:flex; align-items:center; justify-content:center; min-height:100vh;'>" +
+               "<div style='background:white; padding:50px 20px; border-radius:40px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.1); max-width:450px; width:90%; border-top:12px solid #2563eb;'>" +
+               "<div style='font-size:75px; margin-bottom:20px;'>📄</div>" +
+               "<h2 style='color:#1e293b; margin-bottom:15px; font-weight:800; font-size:24px;'>มีหนังสือราชการถึงท่าน</h2>" +
+               "<p style='color:#64748b; font-size:16px; line-height:1.6; margin-bottom:40px;'>กรุณากดปุ่มด้านล่างเพื่อเปิดอ่านเอกสาร <br>และบันทึกสถานะการรับทราบในระบบ SchoolOS</p>" +
+               "<a href='" + finalAppLink + "' style='display:block; background:#2563eb; color:white; font-weight:bold; text-decoration:none; padding:25px; border-radius:25px; font-size:20px; box-shadow:0 15px 30px -5px rgba(37,99,235,0.4); transform:scale(1); transition:all 0.2s;'>👉 กดเปิดดูเอกสารทันที</a>" +
+               "<p style='margin-top:35px; font-size:11px; color:#94a3b8; font-weight:bold; letter-spacing:1px; text-transform:uppercase;'>SchoolOS Management System</p>" +
+               "</div>" +
+               "<link href='https://fonts.googleapis.com/css2?family=Sarabun:wght@400;800&display=swap' rel='stylesheet'>" +
+               "</body></html>";
                
-    return HtmlService.createHtmlOutput(html).setTitle("SchoolOS Tracking Link");
+    return HtmlService.createHtmlOutput(html).setTitle("SchoolOS - เปิดเอกสารและรับทราบ");
   }
   
-  return ContentService.createTextOutput("SchoolOS Cloud Bridge v12.2 is Online").setMimeType(ContentService.MimeType.TEXT);
+  return ContentService.createTextOutput("SchoolOS Cloud Bridge v12.5 is Online").setMimeType(ContentService.MimeType.TEXT);
 }
 
 function doPost(e) {
@@ -106,28 +110,6 @@ function doPost(e) {
     });
   } catch (f) {
     return createJsonResponse({ 'status': 'error', 'message': f.toString() });
-  }
-}
-
-function handleDirectAcknowledge(docId, userId) {
-  var headers = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY };
-  var fetchUrl = SUPABASE_URL + "/rest/v1/documents?id=eq." + docId;
-  var response = UrlFetchApp.fetch(fetchUrl, { "method": "get", "headers": headers });
-  var docs = JSON.parse(response.getContentText());
-  
-  if (docs.length > 0) {
-    var docItem = docs[0];
-    var ackList = docItem.acknowledged_by || [];
-    if (ackList.indexOf(userId) === -1) {
-      ackList.push(userId);
-      var patchUrl = SUPABASE_URL + "/rest/v1/documents?id=eq." + docId;
-      UrlFetchApp.fetch(patchUrl, {
-        "method": "patch",
-        "contentType": "application/json",
-        "headers": headers,
-        "payload": JSON.stringify({ "acknowledged_by": ackList })
-      });
-    }
   }
 }
 
@@ -238,25 +220,37 @@ function setTelegramWebhook() {
         }
     };
 
-    const handleUserSubmit = (e: React.FormEvent) => {
+    const handleUserSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!editForm.id || !editForm.name) return;
 
-        const teacherData = editForm as Teacher;
+        setIsSubmittingUser(true);
+        const teacherData = {
+            ...editForm,
+            roles: editForm.roles || ['TEACHER'],
+            schoolId: currentSchool.id
+        } as Teacher;
 
-        if (isAdding) {
-            // Check ID
-            if (teachers.find(t => t.id === teacherData.id)) {
-                alert("รหัสประชาชนนี้มีอยู่ในระบบแล้ว");
-                return;
+        try {
+            if (isAdding) {
+                // Check ID
+                if (teachers.find(t => t.id === teacherData.id)) {
+                    alert("รหัสประชาชนนี้มีอยู่ในระบบแล้ว");
+                    setIsSubmittingUser(false);
+                    return;
+                }
+                await onAddTeacher(teacherData);
+            } else {
+                await onEditTeacher(teacherData);
             }
-            onAddTeacher(teacherData);
-        } else {
-            onEditTeacher(teacherData);
+            setIsAdding(false);
+            setEditingId(null);
+            setEditForm({});
+        } catch (err: any) {
+            alert("บันทึกล้มเหลว: " + err.message);
+        } finally {
+            setIsSubmittingUser(false);
         }
-        setIsAdding(false);
-        setEditingId(null);
-        setEditForm({});
     };
 
     const startEdit = (t: Teacher) => {
@@ -319,7 +313,7 @@ function setTelegramWebhook() {
                         <p className="text-slate-500 text-sm">จัดการผู้ใช้งานและตั้งค่าระบบ</p>
                     </div>
                 </div>
-                <div className="flex bg-slate-100 p-1 rounded-lg overflow-x-auto max-w-full">
+                <div className="flex bg-slate-100 p-1 rounded-lg overflow-x-auto max-full">
                     <button 
                         onClick={() => setActiveTab('USERS')}
                         className={`px-4 py-2 rounded-md text-sm font-bold shrink-0 transition-all ${activeTab === 'USERS' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
@@ -435,24 +429,41 @@ function setTelegramWebhook() {
                                         <div>
                                             <label className="block text-sm font-bold text-slate-700 mb-2">สิทธิ์การใช้งาน (Roles)</label>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                                {AVAILABLE_ROLES.map(role => (
-                                                    <label key={role.id} className="flex items-center gap-2 cursor-pointer hover:bg-white p-2 rounded transition-colors">
-                                                        <div onClick={() => toggleRole(role.id)} className={`text-blue-600 ${editForm.roles?.includes(role.id) ? '' : 'text-slate-300'}`}>
-                                                            {editForm.roles?.includes(role.id) ? <CheckSquare size={20}/> : <Square size={20}/>}
+                                                {AVAILABLE_ROLES.map(role => {
+                                                    const isChecked = editForm.roles?.includes(role.id);
+                                                    return (
+                                                        <div 
+                                                            key={role.id} 
+                                                            onClick={() => toggleRole(role.id)}
+                                                            className={`flex items-center gap-2 cursor-pointer p-2 rounded transition-all hover:bg-white border-2 ${isChecked ? 'border-blue-100 bg-white shadow-sm' : 'border-transparent'}`}
+                                                        >
+                                                            <div className={`text-blue-600 ${isChecked ? '' : 'text-slate-300'}`}>
+                                                                {isChecked ? <CheckSquare size={20}/> : <Square size={20}/>}
+                                                            </div>
+                                                            <span className={`text-sm ${isChecked ? 'font-bold text-slate-800' : 'text-slate-500'}`}>
+                                                                {role.label}
+                                                            </span>
                                                         </div>
-                                                        <span className={`text-sm ${editForm.roles?.includes(role.id) ? 'font-bold text-slate-800' : 'text-slate-500'}`}>
-                                                            {role.label}
-                                                        </span>
-                                                    </label>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         </div>
 
                                         <div className="pt-4 flex gap-3">
-                                            <button type="button" onClick={() => { setIsAdding(false); setEditingId(null); }} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-lg hover:bg-slate-200">
+                                            <button 
+                                                type="button" 
+                                                disabled={isSubmittingUser}
+                                                onClick={() => { setIsAdding(false); setEditingId(null); }} 
+                                                className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-lg hover:bg-slate-200 disabled:opacity-50"
+                                            >
                                                 ยกเลิก
                                             </button>
-                                            <button type="submit" className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-lg">
+                                            <button 
+                                                type="submit" 
+                                                disabled={isSubmittingUser}
+                                                className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-lg disabled:opacity-70 flex items-center justify-center gap-2"
+                                            >
+                                                {isSubmittingUser ? <Loader className="animate-spin" size={18}/> : <Save size={18}/>}
                                                 บันทึกข้อมูล
                                             </button>
                                         </div>
@@ -728,8 +739,8 @@ function setTelegramWebhook() {
                 {activeTab === 'CLOUD_SETUP' && (
                     <div className="space-y-6 animate-fade-in">
                         <div className="bg-orange-50 border border-orange-200 rounded-xl p-6">
-                            <h3 className="text-xl font-bold text-orange-800 mb-4 flex items-center gap-2"><Cloud className="text-orange-600"/> การติดตั้งระบบ Direct SQL Tracking v12.2</h3>
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="space-y-4"><p className="text-slate-700 text-sm leading-relaxed">เพื่อให้ระบบงานสารบรรณสามารถ <b>"บันทึกรับทราบผ่าน Browser และพรีวิวไฟล์ได้ทันที"</b> แอดมินต้องอัปเดตสคริปต์กลางดังนี้:</p>
+                            <h3 className="text-xl font-bold text-orange-800 mb-4 flex items-center gap-2"><Cloud className="text-orange-600"/> การติดตั้งระบบ Direct Tracking v12.5</h3>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="space-y-4"><p className="text-slate-700 text-sm leading-relaxed">เพื่อให้ระบบงานสารบรรณสามารถ <b>"บันทึกรับทราบและพรีวิวไฟล์ได้ทันที"</b> แอดมินต้องอัปเดตสคริปต์กลางดังนี้:</p>
                                     <ol className="space-y-3 text-sm text-slate-600 list-decimal pl-5">
                                         <li>เปิดโปรเจกต์เดิมใน <a href="https://script.google.com" target="_blank" className="text-blue-600 font-bold underline">Apps Script</a></li>
                                         <li>ลบโค้ดเก่าทิ้งทั้งหมด แล้ววางโค้ดใหม่จากทางด้านขวา</li>
@@ -737,9 +748,9 @@ function setTelegramWebhook() {
                                         <li>กด <b>Deploy &gt; New Deployment</b> (Execute as: Me / Who: Anyone)</li>
                                         <li>นำ URL ที่ได้มาวางในหน้า "ตั้งค่าระบบ" และกด <b>Run</b> ฟังก์ชัน setTelegramWebhook</li>
                                     </ol>
-                                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800"><AlertCircle className="inline mr-1" size={14}/> <b>ฟีเจอร์เด่น:</b> ระบบเวอร์ชันนี้จะบังคับให้ Browser เปิดหน้าพรีวิวของ Google Drive แทนการดาวน์โหลด ช่วยให้การดูเอกสารทำได้ทันทีบนมือถือ</div>
+                                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800"><AlertCircle className="inline mr-1" size={14}/> <b>ฟีเจอร์เด่น v12.5:</b> เปลี่ยนหน้าจอ Landing Page ให้มีปุ่มกดขนาดใหญ่ เพื่อให้คุณครูใช้งานง่ายขึ้นและลดปัญหาหน้าจอขอสิทธิ์ของ Google</div>
                                 </div>
-                                <div className="space-y-2"><div className="flex justify-between items-center px-1"><span className="text-xs font-bold text-slate-500 uppercase">GAS v12.2 Source Code</span><button onClick={handleCopyCode} className="text-xs flex items-center gap-1 font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded transition-colors">{copied ? <><Check size={14}/> คัดลอกแล้ว</> : <><Copy size={14}/> คัดลอกโค้ด</>}</button></div><div className="bg-slate-900 rounded-xl p-4 overflow-hidden relative"><pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-[400px] custom-scrollbar leading-relaxed">{gasCode}</pre></div></div>
+                                <div className="space-y-2"><div className="flex justify-between items-center px-1"><span className="text-xs font-bold text-slate-500 uppercase">GAS v12.5 Source Code</span><button onClick={handleCopyCode} className="text-xs flex items-center gap-1 font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded transition-colors">{copied ? <><Check size={14}/> คัดลอกแล้ว</> : <><Copy size={14}/> คัดลอกโค้ด</>}</button></div><div className="bg-slate-900 rounded-xl p-4 overflow-hidden relative"><pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-[400px] custom-scrollbar leading-relaxed">{gasCode}</pre></div></div>
                             </div>
                         </div>
                     </div>

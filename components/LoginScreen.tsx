@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
 import { School, Teacher } from '../types';
-import { Lock, User, Building, LogIn, UserPlus, ShieldAlert, Eye, EyeOff, Search, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, GraduationCap } from 'lucide-react';
+import { Lock, User, Building, LogIn, UserPlus, ShieldAlert, Eye, EyeOff, Search, CheckCircle, ArrowRight, ArrowLeft, AlertTriangle, GraduationCap, Loader } from 'lucide-react';
+import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
 
 interface LoginScreenProps {
     schools: School[];
@@ -17,6 +18,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
     // Login State
     const [loginUsername, setLoginUsername] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
+    const [isAuthenticating, setIsAuthenticating] = useState(false);
     
     // Register State
     const [regStep, setRegStep] = useState<1 | 2>(1);
@@ -28,42 +30,81 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
+        setIsAuthenticating(true);
 
-        // 1. Check for Super Admin
-        if (loginUsername === 'admin' && loginPassword === 'schoolos') {
-            onSuperAdminLogin();
-            return;
+        try {
+            // 1. Check for Super Admin from Database (Async)
+            const client = supabase;
+            if (isSupabaseConfigured && client) {
+                const { data: superAdmin, error: superError } = await client
+                    .from('super_admins')
+                    .select('*')
+                    .eq('username', loginUsername)
+                    .eq('password', loginPassword)
+                    .maybeSingle();
+
+                if (superAdmin && !superError) {
+                    onSuperAdminLogin();
+                    return;
+                }
+                
+                // Fallback for legacy local development if needed
+                if (loginUsername === 'admin' && loginPassword === 'schoolos') {
+                     onSuperAdminLogin();
+                     return;
+                }
+            } else {
+                // If Supabase not configured, use hardcoded (Dev mode)
+                if (loginUsername === 'admin' && loginPassword === 'schoolos') {
+                    onSuperAdminLogin();
+                    return;
+                }
+            }
+
+            // 2. Regular Teacher Login (Local logic based on allTeachers state)
+            const user = teachers.find(t => t.id === loginUsername);
+            
+            if (!user) {
+                setError('ไม่พบข้อมูลผู้ใช้งาน (ตรวจสอบเลขบัตรประชาชน)');
+                setIsAuthenticating(false);
+                return;
+            }
+
+            // 3. Check for Suspension and Approval
+            const school = schools.find(s => s.id === user.schoolId);
+            if (school?.isSuspended) {
+                setError('ขออภัย โรงเรียนของท่านถูกระงับการเข้าใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบกลาง');
+                setIsAuthenticating(false);
+                return;
+            }
+
+            if (user.isSuspended) {
+                setError('บัญชีผู้ใช้ของท่านถูกระงับการใช้งาน กรุณาติดต่อผู้บริหารโรงเรียน');
+                setIsAuthenticating(false);
+                return;
+            }
+
+            if (user.isApproved === false) {
+                setError('บัญชีของท่านอยู่ระหว่างรอการอนุมัติจากผู้บริหารโรงเรียน กรุณารอรับการยืนยัน');
+                setIsAuthenticating(false);
+                return;
+            }
+
+            if (user.password !== loginPassword) {
+                setError('รหัสผ่านไม่ถูกต้อง');
+                setIsAuthenticating(false);
+                return;
+            }
+
+            onLogin(user);
+        } catch (err) {
+            setError("เกิดข้อผิดพลาดในการเชื่อมต่อระบบ");
+        } finally {
+            setIsAuthenticating(false);
         }
-
-        // 2. Regular Teacher Login
-        const user = teachers.find(t => t.id === loginUsername);
-        
-        if (!user) {
-            setError('ไม่พบข้อมูลผู้ใช้งาน (ตรวจสอบเลขบัตรประชาชน)');
-            return;
-        }
-
-        // 3. Check for Suspension
-        const school = schools.find(s => s.id === user.schoolId);
-        if (school?.isSuspended) {
-            setError('ขออภัย โรงเรียนของท่านถูกระงับการเข้าใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบกลาง');
-            return;
-        }
-
-        if (user.isSuspended) {
-            setError('บัญชีผู้ใช้ของท่านถูกระงับการใช้งาน กรุณาติดต่อผู้บริหารโรงเรียน');
-            return;
-        }
-
-        if (user.password !== loginPassword) {
-            setError('รหัสผ่านไม่ถูกต้อง');
-            return;
-        }
-
-        onLogin(user);
     };
 
     const handleCheckSchool = (e: React.FormEvent) => {
@@ -105,7 +146,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
 
         if (foundSchool) {
             onRegister(foundSchool.id, regUsername, regFullName);
-            alert('ลงทะเบียนสำเร็จ! เข้าสู่ระบบด้วยรหัสเริ่มต้น: 123456');
+            alert('ลงทะเบียนสำเร็จ! กรุณารอผู้ดูแลระบบของโรงเรียนอนุมัติการเข้าใช้งาน เข้าสู่ระบบด้วยรหัสเริ่มต้น: 123456');
             setMode('LOGIN');
             setLoginUsername(regUsername);
         }
@@ -191,9 +232,10 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
 
                             <button 
                                 type="submit" 
-                                className="w-full py-5 bg-blue-600 text-white rounded-2xl hover:bg-blue-700 font-black text-base shadow-xl shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-3"
+                                disabled={isAuthenticating}
+                                className="w-full py-5 bg-blue-600 text-white rounded-2xl hover:bg-blue-700 font-black text-base shadow-xl shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
                             >
-                                <LogIn size={22}/> เข้าใช้งานระบบ
+                                {isAuthenticating ? <Loader className="animate-spin" size={22}/> : <LogIn size={22}/>} เข้าใช้งานระบบ
                             </button>
                             
                             <p className="text-center text-xs text-slate-400 font-bold mt-4">
@@ -251,13 +293,13 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ schools, teachers, onLogin, o
                             </div>
                             <div className="flex gap-3 pt-4">
                                 <button type="button" onClick={() => setRegStep(1)} className="p-5 bg-slate-100 text-slate-500 rounded-2xl font-black hover:bg-slate-200 transition-colors"><ArrowLeft size={22}/></button>
-                                <button type="submit" className="flex-1 py-5 bg-emerald-600 text-white rounded-2xl font-black shadow-xl shadow-emerald-50 hover:bg-emerald-700 transition-all active:scale-95">ยืนยันลงทะเบียน</button>
+                                <button type="submit" className="flex-1 py-5 bg-emerald-600 text-white rounded-2xl font-black shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95">ยืนยันลงทะเบียน</button>
                             </div>
                         </form>
                     )}
                 </div>
             </div>
-            <style>{`@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } } .animate-shake { animation: shake 0.3s ease-in-out; }`}</style>
+            <style>{`.animate-shake { animation: shake 0.3s ease-in-out; } @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }`}</style>
         </div>
     );
 };
