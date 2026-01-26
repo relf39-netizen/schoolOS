@@ -1,4 +1,3 @@
-
 import { 
     AlertTriangle, 
     ArrowLeft, 
@@ -41,7 +40,9 @@ import {
     Building,
     Settings,
     Layout,
-    Globe
+    Globe,
+    Edit3,
+    RefreshCw
 } from 'lucide-react';
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
@@ -95,6 +96,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
     const [viewMode, setViewMode] = useState<'LIST' | 'CREATE' | 'DETAIL'>('LIST');
     const [selectedDoc, setSelectedDoc] = useState<DocumentItem | null>(null);
+    const [isEditMode, setIsEditMode] = useState(false);
+    const [isSavingForm, setIsSavingForm] = useState(false);
 
     // --- Agency Management State (หน่วยงานต้นเรื่อง) ---
     const [showAgencyManager, setShowAgencyManager] = useState(false);
@@ -104,6 +107,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     // --- Form State (Document Creation) ---
     const [docCategory, setDocCategory] = useState<'INCOMING' | 'ORDER'>('INCOMING');
     const [newDoc, setNewDoc] = useState({ 
+        id: '',
         bookNumber: '', 
         title: '', 
         from: '', 
@@ -127,6 +131,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     const isViceDirector = currentUser.roles.includes('VICE_DIRECTOR'); 
     const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
     const isSystemAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
+    const canManageDoc = isDirector || isDocOfficer || isSystemAdmin;
 
     // --- Data Preparation ---
     const teachersInSchool = useMemo(() => 
@@ -371,6 +376,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         try {
             const trimmedUrl = url.trim();
             const protocolPart = trimmedUrl.indexOf('https://') === 0 ? 'https://' : 'http://';
+            // Fix: Invalid regex syntax /\/+/g replaced with /\/+/g
             const normalizedUrl = protocolPart + trimmedUrl.replace(protocolPart, "").replace(/\/+/g, "/");
 
             updateTask(taskId, { message: 'กำลังดาวน์โหลดไฟล์ผ่าน Deep Proxy Bridge...' });
@@ -390,7 +396,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
             let fileData = `data:${result.mimeType};base64,${result.fileData}`;
 
-            if (result.mimeType === 'application/pdf' && docCategory === 'INCOMING') {
+            if (result.mimeType === 'application/pdf' && docCategory === 'INCOMING' && !isEditMode) {
                 updateTask(taskId, { message: 'กำลังประทับตราเลขรับอัตโนมัติ...' });
                 try {
                     fileData = await stampReceiveNumber({
@@ -460,7 +466,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const base64DataPromise = new Promise<string>((resolve) => {
                 reader.onload = async () => {
                     let data = reader.result as string;
-                    if (file.type === 'application/pdf' && docCategory === 'INCOMING') {
+                    if (file.type === 'application/pdf' && docCategory === 'INCOMING' && !isEditMode) {
                         updateTask(taskId, { message: 'กำลังประทับตราเลขรับ...' });
                         try {
                             data = await stampReceiveNumber({
@@ -595,7 +601,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             if (signedUrl) notifyAtts.unshift({ id: 'signed', name: 'บันทึกข้อสั่งการ (ศธ.)', type: 'LINK', url: signedUrl });
 
             // 1. แจ้งเตือนผู้รับมอบหมาย (ครู หรือ รองฯ) - กรองไม่แจ้งเตือน ผอ.
-            const notifyIds = nextStatus === 'PendingViceDirector' ? [viceId!] : targetTeacherIds;
+            // USER REQUEST: หากเป็นการ "แจ้งเวียนเพื่อทราบ" (PendingViceDirector) ไม่ต้องแจ้งครู/รองฯ
+            const notifyIds = nextStatus === 'PendingViceDirector' ? [] : targetTeacherIds;
             if (notifyIds.length > 0) {
                 // กรองเอาเฉพาะครูที่ไม่ใช่ ผอ. และ รองฯ ที่ถูกมอบหมาย
                 const notifyList = allTeachers.filter(t => notifyIds.includes(t.id) && !t.roles.includes('DIRECTOR'));
@@ -664,6 +671,22 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         const viewUrl = getPreviewUrl(url);
         window.open(viewUrl, '_blank');
         handleTeacherAcknowledge(docItem.id, docItem.acknowledgedBy || []);
+    };
+
+    const startEditDoc = (docItem: DocumentItem) => {
+        setNewDoc({ 
+            id: docItem.id, 
+            bookNumber: docItem.bookNumber, 
+            title: docItem.title, 
+            from: docItem.from, 
+            priority: docItem.priority, 
+            description: docItem.description 
+        });
+        setDocCategory(docItem.category || 'INCOMING');
+        setTempAttachments(docItem.attachments || []);
+        setSelectedTeachers(docItem.targetTeachers || []);
+        setIsEditMode(true);
+        setViewMode('CREATE');
     };
 
     // --- Effects & Lifecycle ---
@@ -964,6 +987,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             </div>
                             {(isDocOfficer || isSystemAdmin) && (
                                 <button onClick={() => { 
+                                    setIsEditMode(false);
                                     const currentThaiYear = String(new Date().getFullYear() + 543);
                                     let maxNum = 0;
                                     docs.forEach(d => {
@@ -974,6 +998,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         }
                                     });
                                     setNewDoc({ 
+                                        id: '',
                                         bookNumber: `${String(maxNum + 1).padStart(3, '0')}/${currentThaiYear}`, 
                                         title: '', 
                                         from: '', 
@@ -1001,7 +1026,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         <div className="flex flex-wrap items-center gap-2">
                                             <span className="text-[9px] md:text-[10px] font-black font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600">{docItem.bookNumber}</span>
                                             <span className={`px-2 py-0.5 rounded text-[8px] md:text-[9px] font-black uppercase tracking-widest ${docItem.priority === 'Critical' ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border'}`}>{docItem.priority === 'Normal' ? 'ปกติ' : docItem.priority === 'Urgent' ? 'ด่วน' : 'ด่วนที่สุด'}</span>
-                                            {docItem.acknowledgedBy?.includes(currentUser.id) && <span className="bg-green-100 text-green-700 text-[8px] md:text-[9px] px-2 py-0.5 rounded-full font-black border border-green-200">รับทราบแล้ว</span>}
+                                            {docItem.targetTeachers && docItem.targetTeachers.length > 0 && (
+                                                <span className={`text-[8px] md:text-[9px] px-2 py-0.5 rounded-full font-black border flex items-center gap-1 shadow-sm transition-all ${docItem.acknowledgedBy?.includes(currentUser.id) ? 'bg-green-100 text-green-700 border-green-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                                                    <Users size={10}/> {docItem.acknowledgedBy?.length || 0} / {docItem.targetTeachers.length} รับทราบ
+                                                </span>
+                                            )}
                                             {/* ผอ. เกษียณแล้ว Badge */}
                                             {isDocOfficer && docItem.directorCommand && docItem.status !== 'PendingDirector' && (
                                                 <span className="bg-purple-100 text-purple-700 text-[8px] md:text-[9px] px-2 py-0.5 rounded-full font-black border border-purple-200 flex items-center gap-1 shadow-sm">
@@ -1018,7 +1047,16 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                 </div>
                                 <div className="flex justify-between md:justify-end md:items-end md:flex-col items-center gap-1 pt-2 md:pt-0 border-t md:border-none border-slate-50">
                                     <div className="flex gap-2 items-center">
-                                        {(isDirector || isDocOfficer || isSystemAdmin) && (
+                                        {canManageDoc && (
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); startEditDoc(docItem); }}
+                                                className="p-1.5 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                                                title="แก้ไขข้อมูล"
+                                            >
+                                                <Edit3 size={16}/>
+                                            </button>
+                                        )}
+                                        {canManageDoc && (
                                             <button 
                                                 onClick={(e) => { e.stopPropagation(); handleDeleteDoc(docItem.id); }}
                                                 className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all mr-1"
@@ -1049,7 +1087,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         )}
                     </div>
 
-                    {/* Pagination Buttons - RE-ADDED & VERIFIED */}
+                    {/* Pagination Buttons */}
                     {totalPages > 1 && (
                         <div className="flex justify-center items-center gap-2 mt-8 py-4 bg-white rounded-2xl shadow-sm border border-slate-100 animate-fade-in">
                             <button 
@@ -1102,47 +1140,79 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                 <div className="bg-white rounded-2xl md:rounded-3xl shadow-2xl border border-slate-100 p-6 md:p-10 max-w-5xl mx-auto relative overflow-hidden animate-slide-up">
                     <div className="mb-6 md:mb-10 border-b pb-6 md:pb-8 flex flex-col md:flex-row justify-between items-center gap-6">
                         <div>
-                            <h3 className="text-lg md:text-xl font-black text-slate-900 flex items-center gap-4"><FilePlus className="text-blue-700" size={24}/> ลงทะเบียนหนังสือ / สร้างคำสั่ง</h3>
+                            <h3 className="text-lg md:text-xl font-black text-slate-900 flex items-center gap-4">{isEditMode ? <Edit3 className="text-blue-700" size={24}/> : <FilePlus className="text-blue-700" size={24}/>} {isEditMode ? 'แก้ไขข้อมูลหนังสือ' : 'ลงทะเบียนหนังสือ / สร้างคำสั่ง'}</h3>
                             <p className="text-slate-400 font-bold text-[10px] mt-1 uppercase tracking-widest">ระบบจดทะเบียนและลงรับหนังสือราชการ</p>
                         </div>
-                        <div className="bg-slate-100 p-1 rounded-xl md:rounded-2xl flex shadow-inner w-full md:w-auto">
-                            <button type="button" onClick={() => setDocCategory('INCOMING')} className={`flex-1 md:px-8 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${docCategory === 'INCOMING' ? 'bg-white text-blue-700 shadow-md' : 'text-slate-600'}`}>หนังสือรับ</button>
-                            <button type="button" onClick={() => setDocCategory('ORDER')} className={`flex-1 md:px-8 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${docCategory === 'ORDER' ? 'bg-emerald-700 text-white shadow-md' : 'text-slate-600'}`}>ประกาศ/คำสั่ง</button>
-                        </div>
+                        {!isEditMode && (
+                            <div className="bg-slate-100 p-1 rounded-xl md:rounded-2xl flex shadow-inner w-full md:w-auto">
+                                <button type="button" onClick={() => setDocCategory('INCOMING')} className={`flex-1 md:px-8 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${docCategory === 'INCOMING' ? 'bg-white text-blue-700 shadow-md' : 'text-slate-600'}`}>หนังสือรับ</button>
+                                <button type="button" onClick={() => setDocCategory('ORDER')} className={`flex-1 md:px-8 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${docCategory === 'ORDER' ? 'bg-emerald-700 text-white shadow-md' : 'text-slate-600'}`}>ประกาศ/คำสั่ง</button>
+                            </div>
+                        )}
+                        {isEditMode && (
+                            <div className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl font-black text-xs border border-blue-100 uppercase tracking-widest">Edit Mode</div>
+                        )}
                     </div>
                     <form onSubmit={async (e) => {
                         e.preventDefault();
                         const client = supabase;
                         if (!client) return;
+                        setIsSavingForm(true);
                         const now = new Date();
-                        const created: any = { 
-                            schoolId: currentUser.schoolId, 
-                            category: docCategory, 
-                            bookNumber: newDoc.bookNumber, 
-                            title: newDoc.title, 
-                            description: newDoc.description, 
-                            from: docCategory === 'ORDER' ? currentSchool.name : newDoc.from, 
-                            date: now.toISOString().split('T')[0], 
-                            timestamp: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), 
-                            priority: newDoc.priority, 
-                            attachments: tempAttachments, 
-                            status: docCategory === 'ORDER' ? 'Distributed' : 'PendingDirector', 
-                            targetTeachers: docCategory === 'ORDER' ? selectedTeachers : [], 
-                            acknowledgedBy: [], 
-                            directorCommand: docCategory === 'ORDER' ? 'สั่งการตามเอกสารแนบ' : '', 
-                            directorSignatureDate: docCategory === 'ORDER' ? now.toLocaleString('th-TH') : '' 
-                        };
-                        const { data, error } = await client.from('documents').insert([mapDocToDb(created)]).select();
-                        if (!error && data) { 
-                            const savedId = data[0].id.toString();
-                            if (docCategory === 'ORDER' && selectedTeachers.length > 0) {
-                                triggerTelegramNotification(allTeachers.filter(t => selectedTeachers.includes(t.id)), savedId, created.title, created.bookNumber, true, currentSchool.name, tempAttachments);
-                            } else if (docCategory === 'INCOMING') {
-                                const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DIRECTOR'));
-                                if (directors.length > 0) triggerTelegramNotification(directors, savedId, created.title, created.bookNumber, false, created.from, tempAttachments);
+                        
+                        try {
+                            if (isEditMode && newDoc.id) {
+                                const payload: any = { 
+                                    book_number: newDoc.bookNumber, 
+                                    title: newDoc.title, 
+                                    description: newDoc.description, 
+                                    from: docCategory === 'ORDER' ? currentSchool.name : newDoc.from, 
+                                    priority: newDoc.priority, 
+                                    attachments: tempAttachments, 
+                                };
+                                if (docCategory === 'ORDER') {
+                                    payload.target_teachers = selectedTeachers;
+                                }
+
+                                const { error } = await client.from('documents').update(payload).eq('id', newDoc.id);
+                                if (error) throw error;
+                                alert("แก้ไขข้อมูลเรียบร้อยแล้ว");
+                            } else {
+                                const created: any = { 
+                                    schoolId: currentUser.schoolId, 
+                                    category: docCategory, 
+                                    bookNumber: newDoc.bookNumber, 
+                                    title: newDoc.title, 
+                                    description: newDoc.description, 
+                                    from: docCategory === 'ORDER' ? currentSchool.name : newDoc.from, 
+                                    date: now.toISOString().split('T')[0], 
+                                    timestamp: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), 
+                                    priority: newDoc.priority, 
+                                    attachments: tempAttachments, 
+                                    status: docCategory === 'ORDER' ? 'Distributed' : 'PendingDirector', 
+                                    targetTeachers: docCategory === 'ORDER' ? selectedTeachers : [], 
+                                    acknowledgedBy: [], 
+                                    directorCommand: docCategory === 'ORDER' ? 'สั่งการตามเอกสารแนบ' : '', 
+                                    directorSignatureDate: docCategory === 'ORDER' ? now.toLocaleString('th-TH') : '' 
+                                };
+                                const { data, error } = await client.from('documents').insert([mapDocToDb(created)]).select();
+                                if (error) throw error;
+                                if (data) { 
+                                    const savedId = data[0].id.toString();
+                                    if (docCategory === 'ORDER' && selectedTeachers.length > 0) {
+                                        triggerTelegramNotification(allTeachers.filter(t => selectedTeachers.includes(t.id)), savedId, created.title, created.bookNumber, true, currentSchool.name, tempAttachments);
+                                    } else if (docCategory === 'INCOMING') {
+                                        const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DIRECTOR'));
+                                        if (directors.length > 0) triggerTelegramNotification(directors, savedId, created.title, created.bookNumber, false, created.from, tempAttachments);
+                                    }
+                                }
                             }
                             setViewMode('LIST'); fetchDocs(); 
-                        } else alert("ล้มเหลว: " + error?.message);
+                        } catch (err: any) {
+                            alert("ล้มเหลว: " + err.message);
+                        } finally {
+                            setIsSavingForm(false);
+                        }
                     }} className="space-y-6 md:space-y-10">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10">
                             <div className="space-y-4 md:space-y-6">
@@ -1176,7 +1246,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     </div>
                                     <div className="space-y-1">
                                         <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">ความเร่งด่วน</label>
-                                        <select value={newDoc.priority} onChange={e => setNewDoc({...newDoc, priority: e.target.value as any})} className="w-full px-4 md:px-5 py-3 border-2 border-slate-200 rounded-xl md:rounded-2xl font-bold text-sm outline-none focus:border-blue-600 cursor-pointer appearance-none bg-white">
+                                        <select value={newDoc.priority} onChange={e => setNewDoc({...newDoc, priority: e.target.value as any})} className="w-full px-4 md:px-5 py-3 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-blue-600 cursor-pointer appearance-none bg-white">
                                             <option value="Normal">ปกติ</option>
                                             <option value="Urgent">ด่วน</option>
                                             <option value="Critical">ด่วนที่สุด</option>
@@ -1197,8 +1267,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                             <Plus size={14} className="inline mr-2"/> เลือกไฟล์ PDF จากเครื่อง
                                         </label>
                                         <div className="flex items-center gap-3 bg-white p-2 rounded-xl border shadow-inner">
-                                            <input type="text" placeholder="ระบุลิงก์คลาวด์..." value={linkInput} onChange={e => setLinkInput(e.target.value)} className="flex-1 px-3 py-1 text-[10px] md:text-xs font-mono border-none outline-none"/>
-                                            <button type="button" onClick={() => { if (linkInput) { handleFetchAndUploadFromUrl(linkInput); setLinkInput(''); } }} className="bg-orange-600 text-white p-2 rounded-lg hover:bg-orange-700 shadow active:scale-95 transition-all"><DownloadCloud size={16} /></button>
+                                            <input type="text" placeholder="ระบุลิงก์คลาวด์..." value={linkInput} onChange={e => setLinkInput(e.target.value)} className="flex-1 px-3 py-1 text-[10px] md:text-xs font-mono border-none outline-none"/><button type="button" onClick={() => { if (linkInput) { handleFetchAndUploadFromUrl(linkInput); setLinkInput(''); } }} className="bg-orange-600 text-white p-2 rounded-lg hover:bg-orange-700 shadow active:scale-95 transition-all"><DownloadCloud size={16} /></button>
                                         </div>
                                     </div>
                                     <div className="mt-4 md:mt-6 space-y-2 max-h-40 overflow-y-auto">
@@ -1221,8 +1290,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             </div>
                         </div>
                         <div className="flex flex-col sm:flex-row gap-4 pt-6 md:pt-10 border-t-2 border-slate-200">
-                            <button type="button" onClick={() => setViewMode('LIST')} className="flex-1 py-4 md:py-5 bg-slate-100 text-slate-500 rounded-2xl md:rounded-[2rem] font-black uppercase tracking-widest transition-all text-xs md:text-sm">ยกเลิก</button>
-                            <button type="submit" className="flex-[2] py-4 md:py-5 bg-blue-700 text-white rounded-2xl md:rounded-[2rem] font-black text-base md:text-xl shadow-2xl hover:bg-blue-800 transition-all flex items-center justify-center gap-3 active:scale-95"><Save size={20}/> บันทึกและเสนอ ผอ.</button>
+                            <button type="button" onClick={() => { setViewMode('LIST'); setIsEditMode(false); }} className="flex-1 py-4 md:py-5 bg-slate-100 text-slate-500 rounded-2xl md:rounded-[2rem] font-black uppercase tracking-widest transition-all text-xs md:text-sm">ยกเลิก</button>
+                            <button type="submit" disabled={isSavingForm} className={`flex-[2] py-4 rounded-2xl font-black text-base md:text-xl shadow-2xl transition-all flex items-center justify-center gap-3 active:scale-95 ${isSavingForm ? 'bg-slate-400' : 'bg-blue-700 hover:bg-blue-800 text-white'}`}>
+                                {isSavingForm ? <RefreshCw className="animate-spin" size={20}/> : <Save size={20}/>} {isEditMode ? 'บันทึกการแก้ไข' : 'บันทึกและเสนอ ผอ.'}
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -1237,7 +1308,16 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         </button>
                         <div className="flex items-center gap-4">
                             <h2 className="text-base md:text-xl font-black text-slate-800 tracking-tight">รายละเอียดหนังสือ</h2>
-                            {(isDirector || isDocOfficer || isSystemAdmin) && (
+                            {canManageDoc && (
+                                <button 
+                                    onClick={() => startEditDoc(selectedDoc)}
+                                    className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-all"
+                                    title="แก้ไขหนังสือ"
+                                >
+                                    <Edit3 size={20}/>
+                                </button>
+                            )}
+                            {canManageDoc && (
                                 <button 
                                     onClick={() => handleDeleteDoc(selectedDoc.id)}
                                     className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
