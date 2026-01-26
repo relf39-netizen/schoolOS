@@ -229,7 +229,7 @@ export interface EnrollmentData {
   };
 }
 
-export type TestType = 'RT' | 'NT' | 'ONET';
+export type TestType = 'RT' | 'NT' | 'ONET' | 'ONET_P6' | 'ONET_M3';
 
 export interface TestScoreData {
   id: string; // e.g., "score_onet_2567"
@@ -239,6 +239,27 @@ export interface TestScoreData {
   results: {
       [subject: string]: number; // e.g., "Thai": 50.5
   };
+}
+
+export interface AcademicCalendarEvent {
+  id: string;
+  schoolId: string;
+  year: string; // ปีการศึกษา เช่น "2567"
+  title: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  description?: string;
+}
+
+export type SARType = 'EARLY_CHILDHOOD' | 'BASIC';
+
+export interface AcademicSAR {
+  id: string;
+  schoolId: string;
+  year: string;
+  type: SARType;
+  fileUrl: string;
+  fileName: string;
 }
 
 // --- System Configuration ---

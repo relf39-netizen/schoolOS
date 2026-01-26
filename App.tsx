@@ -137,6 +137,22 @@ const App: React.FC = () => {
         }
     }, []);
 
+    // --- Deep Link Detection ---
+    useEffect(() => {
+        if (currentUser) {
+            const params = new URLSearchParams(window.location.search);
+            const viewParam = params.get('view');
+            const idParam = params.get('id');
+            
+            if (viewParam && idParam) {
+                if (Object.values(SystemView).includes(viewParam as SystemView)) {
+                    setCurrentView(viewParam as SystemView);
+                    setFocusItem({ view: viewParam as SystemView, id: idParam });
+                }
+            }
+        }
+    }, [currentUser]);
+
     // --- 2. DYNAMIC COUNTS & MISSION CHECK (Realtime) ---
     useEffect(() => {
         const client = supabase;
@@ -159,7 +175,6 @@ const App: React.FC = () => {
         };
         fetchCounts();
 
-        // Director Mission Check (Firestore)
         let unsubEvents: (() => void) | undefined;
         if (db) {
             const today = new Date();
@@ -378,7 +393,8 @@ const App: React.FC = () => {
                 <div className="max-w-7xl mx-auto">
                     {currentView === SystemView.DASHBOARD ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8 animate-fade-in">
-                            <DashboardCard view={SystemView.PROFILE} title="ข้อมูลส่วนตัว" slogan="แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล" icon={UserCircle} color="#8b5cf6"/>
+                            {/* Reordered Dashboard Cards */}
+                            <DashboardCard view={SystemView.DOCUMENTS} title="งานสารบรรณ" slogan="รับ-ส่ง รวดเร็ว ทันใจ" icon={FileText} color="#06b6d4" badge={getDocBadge()} hasBorder={true}/>
                             <DashboardCard 
                                 view={SystemView.DIRECTOR_CALENDAR} 
                                 title="ปฏิทินปฏิบัติงาน ผอ." 
@@ -391,12 +407,12 @@ const App: React.FC = () => {
                                 color="#3b82f6"
                             />
                             <DashboardCard view={SystemView.ACADEMIC} title="งานวิชาการ" slogan="สถิตินักเรียน / ผลสอบ O-NET" icon={GraduationCap} color="#6366f1"/>
-                            <DashboardCard view={SystemView.DOCUMENTS} title="งานสารบรรณ" slogan="รับ-ส่ง รวดเร็ว ทันใจ" icon={FileText} color="#06b6d4" badge={getDocBadge()} hasBorder={true}/>
                             <DashboardCard view={SystemView.PLAN} title="แผนปฏิบัติการ" slogan="วางแผนแม่นยำ สู่ความสำเร็จ" icon={CalendarRange} color="#d946ef"/>
                             <DashboardCard view={SystemView.LEAVE} title="ระบบการลา" slogan="โปร่งใส ตรวจสอบง่าย" icon={UserCheck} color="#10b981" badge={pendingLeaveCount > 0 ? `รออนุมัติ ${pendingLeaveCount}` : null}/>
                             <DashboardCard view={SystemView.ATTENDANCE} title="ลงเวลาทำงาน" slogan="เช็คเวลาแม่นยำ ด้วย GPS" icon={Clock} color="#f43f5e"/>
                             <DashboardCard view={SystemView.FINANCE} title="ระบบการเงิน" slogan="งบประมาณ และรายรับ-จ่าย" icon={Activity} color="#f59e0b"/>
                             <DashboardCard view={SystemView.ADMIN_USERS} title="ผู้ดูแลระบบ" slogan="ตั้งค่าระบบ และผู้ใช้งาน" icon={Settings} color="#64748b"/>
+                            <DashboardCard view={SystemView.PROFILE} title="ข้อมูลส่วนตัว" slogan="แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล" icon={UserCircle} color="#8b5cf6"/>
                         </div>
                     ) : (
                         <div className="animate-fade-in">
