@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Teacher, EnrollmentData, TestScoreData, TestType, AcademicCalendarEvent, AcademicSAR, SARType, SystemConfig } from '../types';
 import { CURRENT_SCHOOL_YEAR } from '../constants';
@@ -7,17 +6,19 @@ import {
     Save, ChevronLeft, Award, Database, Loader, Cloud, RefreshCw,
     Calendar, FileText, Plus, Trash2, ExternalLink, FileUp, Info,
     LayoutDashboard, CheckCircle, Clock, BookOpen, Target, ArrowRight,
-    CalendarPlus, AlertCircle, X
+    CalendarPlus, AlertCircle, X, UserCheck
 } from 'lucide-react';
 import { 
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-    LineChart as RechartsLineChart, Line, LabelList 
+    LineChart as RechartsLineChart, Line, LabelList, Cell
 } from 'recharts';
 import { supabase, isConfigured } from '../supabaseClient';
 
 interface AcademicSystemProps {
     currentUser: Teacher;
 }
+
+const BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#f97316'];
 
 const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
     const [viewMode, setViewMode] = useState<'DASHBOARD' | 'ENROLLMENT' | 'TEST_SCORES' | 'CALENDAR' | 'SAR'>('DASHBOARD');
@@ -39,6 +40,9 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
     const [tempEnrollment, setTempEnrollment] = useState<EnrollmentData | null>(null);
     const [selectedTestType, setSelectedTestType] = useState<TestType>('ONET_P6');
     const [tempScore, setTempScore] = useState<TestScoreData | null>(null);
+
+    // State for enrollment breakdown
+    const [selectedEnrollDetail, setSelectedEnrollDetail] = useState<EnrollmentData | null>(null);
 
     // Forms for new features
     const [showCalendarForm, setShowCalendarForm] = useState(false);
@@ -96,7 +100,8 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 setCalendarEvents(mappedCal);
 
                 const { data: sarData } = await supabase.from('academic_sar').select('*').eq('school_id', currentUser.schoolId).order('year', { ascending: false });
-                const mappedSar = sarData ? sarData.map(d => ({ 
+                // Fix: Corrected mapping for SAR data to ensure camelCase properties
+                const mappedSar: AcademicSAR[] = sarData ? sarData.map(d => ({ 
                     id: d.id.toString(), 
                     schoolId: d.school_id, 
                     year: d.year, 
@@ -303,7 +308,7 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
             .map(e => {
                 let total = 0;
                 Object.values(e.levels).forEach((val: any) => { total += (parseInt(val.m) || 0) + (parseInt(val.f) || 0); });
-                return { year: `ปี ${e.year}`, Total: total };
+                return { year: `ปี ${e.year}`, Total: total, raw: e };
             });
 
         const prepareScoreData = (type: TestType) => {
@@ -324,9 +329,10 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
         const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-        const hasM3Students = enrollments.some(e => (e.levels['Matthayom3']?.m || 0) + (e.levels['Matthayom3']?.f || 0) > 0);
+        const hasM3Students = enrollments.some(e => (e.levels['Matthayom1']?.m || 0) + (e.levels['Matthayom1']?.f || 0) + (e.levels['Matthayom2']?.m || 0) + (e.levels['Matthayom2']?.f || 0) + (e.levels['Matthayom3']?.m || 0) + (e.levels['Matthayom3']?.f || 0) > 0);
         const hasM3OnetData = onetM3Data.length > 0;
 
+        // Fix: Removed massive string escaping from JSX return and corrected syntax
         return (
             <div className="space-y-8 pb-20 animate-fade-in">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -346,18 +352,74 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-white p-6 rounded-3xl border shadow-sm">
-                        <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 underline underline-offset-8 decoration-indigo-500 decoration-4"><Users size={20} className="text-indigo-500"/> สถิตินักเรียนรายปี</h3>
+                        <h3 className="font-black text-slate-800 mb-2 flex items-center gap-2 underline underline-offset-8 decoration-indigo-500 decoration-4"><Users size={20} className="text-indigo-500"/> สถิตินักเรียนรายปี</h3>
+                        <p className="text-[10px] text-slate-400 font-bold mb-4 uppercase tracking-widest">* คลิกที่แท่งกราฟเพื่อดูรายละเอียดจำนวนนักเรียน</p>
                         <div className="h-[250px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={enrollmentChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                <BarChart 
+                                    data={enrollmentChartData} 
+                                    margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                                    onClick={(data) => {
+                                        if (data && data.activePayload) {
+                                            setSelectedEnrollDetail(data.activePayload[0].payload.raw);
+                                        }
+                                    }}
+                                >
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                     <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 'bold'}} />
                                     <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
-                                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                                    <Bar dataKey="Total" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={35} />
+                                    <Tooltip 
+                                        cursor={{fill: '#f8fafc'}}
+                                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} 
+                                    />
+                                    <Bar dataKey="Total" radius={[4, 4, 0, 0]} barSize={35} cursor="pointer">
+                                        {enrollmentChartData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={BAR_COLORS[index % BAR_COLORS.length]} />
+                                        ))}
+                                    </Bar>
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-3xl border shadow-sm overflow-hidden flex flex-col justify-center">
+                        {selectedEnrollDetail ? (
+                            <div className="animate-fade-in">
+                                <div className="flex justify-between items-center mb-6 border-b pb-4 border-slate-50">
+                                    <div>
+                                        <h4 className="font-black text-slate-800 text-xl">รายละเอียดปีการศึกษา {selectedEnrollDetail.year}</h4>
+                                        <p className="text-xs text-indigo-600 font-bold uppercase tracking-widest">ยอดรวมทั้งโรงเรียน: {Object.values(selectedEnrollDetail.levels).reduce((acc: number, curr: any) => acc + (parseInt(curr.m) || 0) + (parseInt(curr.f) || 0), 0)} คน</p>
+                                    </div>
+                                    <button onClick={() => setSelectedEnrollDetail(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"><X size={20}/></button>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto max-h-[160px] custom-scrollbar pr-2">
+                                    {LEVELS.map(level => {
+                                        const count = (parseInt(selectedEnrollDetail.levels[level.id]?.m) || 0) + (parseInt(selectedEnrollDetail.levels[level.id]?.f) || 0);
+                                        // ตรวจสอบมัธยม
+                                        const isSecondary = level.id.includes('Matthayom');
+                                        const secondaryTotal = (parseInt(selectedEnrollDetail.levels['Matthayom1']?.m || 0) + parseInt(selectedEnrollDetail.levels['Matthayom1']?.f || 0)) + 
+                                                              (parseInt(selectedEnrollDetail.levels['Matthayom2']?.m || 0) + parseInt(selectedEnrollDetail.levels['Matthayom2']?.f || 0)) + 
+                                                              (parseInt(selectedEnrollDetail.levels['Matthayom3']?.m || 0) + parseInt(selectedEnrollDetail.levels['Matthayom3']?.f || 0));
+                                        
+                                        if (isSecondary && secondaryTotal === 0) return null;
+                                        if (count === 0) return null;
+
+                                        return (
+                                            <div key={level.id} className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center shadow-sm">
+                                                <span className="text-[10px] font-black text-slate-400 uppercase mb-1 truncate w-full text-center">{level.label}</span>
+                                                <span className="text-lg font-black text-slate-800">{count}</span>
+                                                <span className="text-[8px] text-slate-400 font-bold uppercase">นักเรียน</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-center py-10 flex flex-col items-center gap-4 opacity-30">
+                                <BarChartIcon size={64} className="text-slate-300"/>
+                                <p className="font-black text-slate-400 uppercase tracking-[0.2em] text-sm">กรุณากดที่แผนภูมิแท่งเพื่อดูรายละเอียด</p>
+                            </div>
+                        )}
                     </div>
 
                     <div className="bg-white p-6 rounded-3xl border shadow-sm">
