@@ -194,6 +194,8 @@ export interface Teacher {
   // Fix: Added isSuspended to support account suspension logic
   isSuspended?: boolean;
   isApproved?: boolean;   // สถานะการอนุมัติเข้าใช้งาน
+  // Fix: Added createdAt property to resolve missing property error in SuperAdminDashboard
+  createdAt?: string;
 }
 
 // --- Action Plan Types ---

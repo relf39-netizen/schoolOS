@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { Teacher, SystemConfig } from '../types';
 import { ACADEMIC_POSITIONS } from '../constants';
 import { User, Lock, Save, UploadCloud, FileSignature, Briefcase, Eye, EyeOff, Loader, MessageCircle, Smartphone, CheckCircle, Zap, AlertCircle } from 'lucide-react';
-import { db, isConfigured, doc, setDoc, getDoc } from '../firebaseConfig';
+import { db, isConfigured as isFirebaseConfigured, doc, setDoc } from '../firebaseConfig';
+import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
 
 interface UserProfileProps {
     currentUser: Teacher;
@@ -22,20 +22,32 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
     const [showPassword, setShowPassword] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [botUsername, setBotUsername] = useState<string>('');
+    const [isLoadingConfig, setIsLoadingConfig] = useState(true);
 
     useEffect(() => {
         const loadBotConfig = async () => {
-            if (isConfigured && db) {
-                const docRef = doc(db, "system_config", "settings");
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    const data = docSnap.data() as SystemConfig;
-                    if (data.telegramBotUsername) setBotUsername(data.telegramBotUsername);
+            if (isSupabaseConfigured && supabase) {
+                try {
+                    const { data, error } = await supabase
+                        .from('school_configs')
+                        .select('telegram_bot_username')
+                        .eq('school_id', currentUser.schoolId)
+                        .maybeSingle();
+                    
+                    if (data && data.telegram_bot_username) {
+                        setBotUsername(data.telegram_bot_username);
+                    }
+                } catch (err) {
+                    console.error("Error loading bot config:", err);
+                } finally {
+                    setIsLoadingConfig(false);
                 }
+            } else {
+                setIsLoadingConfig(false);
             }
         };
         loadBotConfig();
-    }, []);
+    }, [currentUser.schoolId]);
 
     // Helper: Resize Image and convert to PNG
     const resizeImage = (file: File, maxWidth: number = 300): Promise<string> => {
@@ -98,9 +110,22 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
         };
 
         try {
-            if (isConfigured && db) {
+            // Update in Supabase profiles table
+            if (isSupabaseConfigured && supabase) {
+                await supabase.from('profiles').update({
+                    name: updated.name,
+                    position: updated.position,
+                    password: updated.password,
+                    signature_base_64: updated.signatureBase64,
+                    telegram_chat_id: updated.telegramChatId
+                }).eq('id', updated.id);
+            }
+            
+            // Legacy Firebase sync if enabled
+            if (isFirebaseConfigured && db) {
                 await setDoc(doc(db, 'teachers', updated.id), updated);
             }
+
             onUpdateUser(updated);
             alert("บันทึกข้อมูลเรียบร้อยแล้ว");
         } catch (error) {
@@ -113,11 +138,12 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
 
     const handleConnectTelegram = () => {
         if (!botUsername) {
-            alert("⚠️ ผู้ดูแลระบบยังไม่ได้ตั้งค่า 'Telegram Bot Username' ในเมนูผู้ดูแลระบบ กรุณาแจ้ง Admin โรงเรียนครับ");
+            alert("⚠️ ยังไม่ได้ตั้งค่า 'Telegram Bot Username' ของโรงเรียนนี้ กรุณาติดต่อผู้ดูแลระบบโรงเรียนของท่านเพื่อตั้งค่าในเมนูแอดมินครับ");
             return;
         }
         // Deep Link: https://t.me/BotName?start=Parameter
-        const telegramUrl = `https://t.me/${botUsername.replace('@', '')}?start=${currentUser.id}`;
+        const cleanBotUser = botUsername.replace('@', '').trim();
+        const telegramUrl = `https://t.me/${cleanBotUser}?start=${currentUser.id}`;
         window.open(telegramUrl, '_blank');
     };
 
@@ -168,16 +194,18 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
                         <button 
                             type="button" 
                             onClick={handleConnectTelegram}
+                            disabled={isLoadingConfig}
                             className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition-all active:scale-95 flex items-center justify-center gap-2 text-sm relative z-10"
                         >
-                            <Zap size={16}/> {currentUser.telegramChatId ? 'อัปเดตการเชื่อมต่อใหม่' : 'เชื่อมต่อ Telegram ทันที'}
+                            {isLoadingConfig ? <Loader className="animate-spin" size={16}/> : <Zap size={16}/>} 
+                            {currentUser.telegramChatId ? 'อัปเดตการเชื่อมต่อใหม่' : 'เชื่อมต่อ Telegram ทันที'}
                         </button>
 
-                        {!botUsername && (
+                        {!isLoadingConfig && !botUsername && (
                             <div className="absolute inset-0 bg-white/90 backdrop-blur-[2px] z-20 flex items-center justify-center p-4 text-center">
                                 <div className="space-y-2">
                                     <AlertCircle className="mx-auto text-amber-500" size={24}/>
-                                    <p className="text-xs font-bold text-slate-600">ผู้ดูแลระบบยังไม่ได้ตั้งค่า Username บอท <br/>ฟังก์ชันนี้จึงยังไม่พร้อมใช้งาน</p>
+                                    <p className="text-xs font-bold text-slate-600">แอดมินยังไม่ได้ตั้งค่า Username บอทให้โรงเรียนนี้ <br/>กรุณาแจ้งแอดมินโรงเรียนที่เมนู "การเชื่อมต่อ"</p>
                                 </div>
                             </div>
                         )}

@@ -112,12 +112,14 @@ CREATE TABLE IF NOT EXISTS plan_projects (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- ปรับปรุงตาราง budget_settings เพื่อรองรับ flag
 CREATE TABLE IF NOT EXISTS budget_settings (
   id TEXT PRIMARY KEY,
   school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
   fiscal_year TEXT,
   subsidy FLOAT DEFAULT 0,
-  learner FLOAT DEFAULT 0
+  learner FLOAT DEFAULT 0,
+  allow_teacher_proposal BOOLEAN DEFAULT FALSE -- เพิ่มฟิลด์นี้
 );
 
 -- ตารางรายการเงิน

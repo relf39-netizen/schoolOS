@@ -1,13 +1,13 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Teacher, DirectorEvent, SystemConfig } from '../types';
 import { MOCK_DIRECTOR_EVENTS } from '../constants';
 import { 
     Calendar as CalendarIcon, Clock, MapPin, Plus, Trash2, Bell, 
     ServerOff, ListFilter, History, CheckCircle, ChevronLeft, 
-    ChevronRight, Circle, X, CalendarDays, Layout, AlertCircle
+    ChevronRight, Circle, X, CalendarDays, Layout, AlertCircle, RefreshCw, Loader
 } from 'lucide-react';
-import { db, isConfigured, collection, addDoc, query, where, onSnapshot, deleteDoc, doc, getDoc, updateDoc } from '../firebaseConfig';
+import { db, isConfigured as isFirebaseConfigured, collection, addDoc, query, where, onSnapshot, deleteDoc, doc, updateDoc } from '../firebaseConfig';
+import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
 import { sendTelegramMessage } from '../utils/telegram';
 
 interface DirectorCalendarProps {
@@ -75,20 +75,37 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
     // --- Data Fetching ---
     useEffect(() => {
-        let unsubConfig: (() => void) | undefined;
+        const loadConfigs = async () => {
+            if (isSupabaseConfigured && supabase) {
+                try {
+                    const { data } = await supabase.from('school_configs').select('*').eq('school_id', currentUser.schoolId).maybeSingle();
+                    if (data) {
+                        setSysConfig({
+                            driveFolderId: data.drive_folder_id || '',
+                            scriptUrl: data.script_url || '',
+                            telegramBotToken: data.telegram_bot_token || '',
+                            appBaseUrl: data.app_base_url || '',
+                            schoolName: data.school_name || ''
+                        } as SystemConfig);
+                    }
+                } catch (e) {
+                    console.error("Error loading school config from Supabase:", e);
+                }
+            }
+        };
+        loadConfigs();
+
         let unsubEvents: (() => void) | undefined;
-        if (isConfigured && db) {
-            const configRef = doc(db, "schools", currentUser.schoolId, "settings", "config");
-            unsubConfig = onSnapshot(configRef, (docSnap) => { if (docSnap.exists()) setSysConfig(docSnap.data() as SystemConfig); });
+        if (isFirebaseConfigured && db) {
             const q = query(collection(db, "director_events"), where("schoolId", "==", currentUser.schoolId));
             unsubEvents = onSnapshot(q, (snapshot) => { setEvents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DirectorEvent))); setIsLoading(false); });
         } else { setEvents(MOCK_DIRECTOR_EVENTS); setIsLoading(false); }
-        return () => { if(unsubConfig) unsubConfig(); if(unsubEvents) unsubEvents(); }
+        return () => { if(unsubEvents) unsubEvents(); }
     }, [currentUser.schoolId]);
 
     // --- Auto-Notification Trigger Logic ---
     useEffect(() => {
-        if (!isLoading && events.length > 0 && canEdit) {
+        if (!isLoading && events.length > 0 && canEdit && sysConfig?.telegramBotToken) {
             const checkAndNotify = async () => {
                 const todayStr = formatDateLocal(new Date());
                 const tomorrow = new Date();
@@ -114,7 +131,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                         console.log(`Auto-notifying mission: ${event.title} (${type})`);
                         await notifyDirector(event, type);
                         // Update DB to prevent repeated notifications
-                        if (isConfigured && db) {
+                        if (isFirebaseConfigured && db) {
                             try {
                                 await updateDoc(doc(db, "director_events", event.id), {
                                     [updateField]: true
@@ -128,7 +145,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
             };
             checkAndNotify();
         }
-    }, [events, isLoading, canEdit]);
+    }, [events, isLoading, canEdit, sysConfig?.telegramBotToken]);
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
     
@@ -172,7 +189,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
         if (!newEvent.title || !newEvent.date || !newEvent.startTime) return;
         const eventData: any = { ...newEvent, schoolId: currentUser.schoolId, createdBy: currentUser.id, notifiedOneDayBefore: false, notifiedOnDay: false };
         try {
-            if (isConfigured && db) { 
+            if (isFirebaseConfigured && db) { 
                 const docRef = await addDoc(collection(db, "director_events"), eventData); 
                 notifyDirector({...eventData, id: docRef.id}, 'NEW'); 
             } else { 
@@ -185,7 +202,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
     const handleDeleteEvent = async (id: string) => { 
         if (confirm("คุณแน่ใจหรือไม่ว่าต้องการลบรายการปฏิทินนี้?")) { 
-            if (isConfigured && db) await deleteDoc(doc(db, "director_events", id)); 
+            if (isFirebaseConfigured && db) await deleteDoc(doc(db, "director_events", id)); 
             else setEvents(events.filter(e => e.id !== id)); 
         } 
     };
@@ -310,7 +327,6 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                     <div className="flex-1 w-full space-y-4 md:space-y-6">
                         <div className="bg-white p-6 md:p-8 rounded-[1.5rem] md:rounded-[2.5rem] shadow-sm border border-slate-100 min-h-[350px]">
                             <h3 className="text-lg md:text-xl font-black text-slate-800 mb-6 md:mb-8 flex items-center gap-3">
-                                {/* Fix: Combined duplicate className at line 313 */}
                                 <CalendarDays className="text-purple-600 md:w-7 md:h-7" size={24}/>
                                 ภารกิจ {getThaiFullDate(selectedDay)}
                             </h3>
@@ -318,7 +334,6 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                             <div className="space-y-4">
                                 {dayEventsForSelected.length === 0 ? (
                                     <div className="text-center py-16 md:py-20 bg-slate-50/50 rounded-[1.5rem] md:rounded-[2rem] border-2 border-dashed border-slate-100 flex flex-col items-center gap-4">
-                                        {/* Fix: Unified attributes at line 331 */}
                                         <CalendarIcon size={40} className="text-slate-200 md:w-12 md:h-12"/>
                                         <p className="text-slate-400 font-bold italic text-sm md:text-base">ไม่พบนัดหมายในวันที่เลือก</p>
                                     </div>
@@ -330,7 +345,6 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                                             <div key={event.id} className={`p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-2 transition-all hover:shadow-md relative overflow-hidden ${isPast ? 'bg-slate-50 border-slate-200' : 'bg-white border-purple-100 hover:border-purple-200'}`}>
                                                 {isPast && (
                                                     <div className="absolute top-0 right-0 p-3 z-10">
-                                                        {/* Fix: Combined duplicate className at line 346 */}
                                                         <X className="text-slate-300 md:w-10 md:h-10" size={32} strokeWidth={1}/>
                                                     </div>
                                                 )}
@@ -341,24 +355,20 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                                                 )}
                                                 <div className="flex flex-col md:flex-row gap-4 md:gap-6 relative z-10">
                                                     <div className={`flex flex-col items-center justify-center w-16 h-16 md:w-20 md:h-20 rounded-2xl md:rounded-3xl shrink-0 ${isPast ? 'bg-slate-200 text-slate-400' : 'bg-purple-100 text-purple-700'}`}>
-                                                        {/* Fix: Combined duplicate className */}
                                                         <Clock size={16} className="mb-1 md:w-5 md:h-5"/>
                                                         <span className="text-xs md:text-sm font-black">{event.startTime}</span>
                                                     </div>
                                                     <div className="flex-1 space-y-1 md:space-y-2">
                                                         <div className="flex items-center gap-2">
-                                                            {/* Fix: Combined duplicate className */}
                                                             {!isPast && <Circle className="text-purple-600 fill-purple-600 md:w-2.5 md:h-2.5" size={8} />}
                                                             <h3 className={`text-lg md:text-xl font-black ${isPast ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{event.title}</h3>
                                                         </div>
                                                         <div className="flex flex-wrap gap-3 md:gap-4 text-[10px] md:text-xs font-bold text-slate-400">
-                                                            {/* Fix: Combined duplicate className */}
                                                             {event.location && (<div className="flex items-center gap-1.5"><MapPin size={14} className="text-red-400 md:w-4 md:h-4"/> {event.location}</div>)}
                                                         </div>
                                                         {event.description && <p className="text-xs md:text-sm text-slate-500 font-medium italic mt-1 md:mt-2">"{event.description}"</p>}
                                                     </div>
                                                     <div className="flex items-end justify-end">
-                                                        {/* Fix: Combined duplicate className at line 389 */}
                                                         {canEdit && <button onClick={() => handleDeleteEvent(event.id)} className="p-2 md:p-3 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-xl md:rounded-2xl transition-all active:scale-95"><Trash2 size={18} className="md:w-5 md:h-5"/></button>}
                                                     </div>
                                                 </div>
@@ -393,7 +403,6 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                                     <div key={event.id} className={`bg-white rounded-[1.5rem] md:rounded-[2rem] p-4 md:p-6 shadow-sm border transition-all hover:shadow-md relative overflow-hidden ${isToday ? 'border-purple-500 ring-2 ring-purple-100' : 'border-slate-200'} ${isPast ? 'opacity-70' : ''}`}>
                                         {isPast && (
                                             <div className="absolute top-0 right-0 p-3 md:p-4 z-10">
-                                                {/* Fix: Combined duplicate className at line 400 */}
                                                 <X className="text-slate-300 md:w-12 md:h-12" size={36} strokeWidth={1}/>
                                             </div>
                                         )}
@@ -405,21 +414,17 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                                             <div className="flex-1 space-y-1 md:space-y-2">
                                                 <div className="flex items-center gap-2">
                                                     {isToday && <span className="bg-red-500 text-white text-[8px] md:text-[9px] px-2 md:px-3 py-1 rounded-full font-black uppercase tracking-widest animate-pulse shadow-lg shadow-red-200">วันนี้</span>}
-                                                    {/* Fix: Combined duplicate className */}
                                                     {!isPast && <Circle className="text-purple-600 fill-purple-600 md:w-2.5 md:h-2.5" size={8} />}
                                                     <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight">{event.title}</h3>
                                                 </div>
                                                 <p className="text-xs md:text-sm font-bold text-slate-500">{getThaiFullDate(event.date)}</p>
                                                 <div className="flex flex-wrap gap-3 md:gap-4 text-[10px] md:text-xs font-bold text-slate-400 mt-1 md:mt-2">
-                                                    {/* Fix: Combined duplicate className */}
                                                     <div className="flex items-center gap-1.5"><Clock size={14} className="text-purple-400 md:w-4 md:h-4"/> {event.startTime} น.</div>
-                                                    {/* Fix: Combined duplicate className */}
                                                     {event.location && (<div className="flex items-center gap-1.5"><MapPin size={14} className="text-red-400 md:w-4 md:h-4"/> {event.location}</div>)}
                                                 </div>
                                                 {event.description && <p className="text-xs md:text-sm text-slate-600 font-medium bg-slate-50 p-3 md:p-4 rounded-xl md:rounded-2xl mt-3 md:mt-4 border border-slate-100 italic">"{event.description}"</p>}
                                             </div>
                                             <div className="flex items-end justify-end">
-                                                {/* Fix: Combined duplicate className at line 427 */}
                                                 {canEdit && <button onClick={() => handleDeleteEvent(event.id)} className="p-2 md:p-3 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-xl md:rounded-2xl transition-all active:scale-95"><Trash2 size={20} className="md:w-5.5 md:h-5.5"/></button>}
                                             </div>
                                         </div>
@@ -457,14 +462,12 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                             <div>
                                 <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">สถานที่</label>
                                 <div className="relative">
-                                    {/* Fix: Combined duplicate className at line 448 */}
                                     <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 md:w-4.5 md:h-4.5" size={16} />
                                     <input type="text" placeholder="ระบุสถานที่ประชุม/จัดงาน..." className="w-full pl-10 pr-4 md:pl-12 md:pr-6 py-3 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all text-sm md:text-base" value={newEvent.location} onChange={e => setNewEvent({...newEvent, location: e.target.value})}/>
                                 </div>
                             </div>
                             <div>
                                 <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">รายละเอียดเพิ่มเติม (เลือกใส่)</label>
-                                {/* Fix: Removed invalid md:rows attribute at line 454 */}
                                 <textarea rows={2} placeholder="ระบุรายละเอียดเพิ่มเติมของภารกิจ..." className="w-full px-4 py-3 md:px-6 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all leading-relaxed text-sm md:text-base" value={newEvent.description} onChange={e => setNewEvent({...newEvent, description: e.target.value})}/>
                             </div>
                             <div className="flex gap-3 md:gap-4 pt-2 md:pt-4">

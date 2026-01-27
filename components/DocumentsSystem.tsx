@@ -292,7 +292,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     const handleSaveAgencies = async (agencies: string[]) => {
         const client = supabase;
         if (!client) return;
-        const { error } = await client.from('school_configs').update({ external_agencies: agencies }).eq('school_id', currentUser.schoolId);
+        // ปรับเป็น upsert เพื่อป้องกันกรณีไม่มีแถวข้อมูลในครั้งแรก
+        const { error } = await client.from('school_configs').upsert({ 
+            school_id: currentUser.schoolId,
+            external_agencies: agencies 
+        }, { onConflict: 'school_id' });
+
         if (!error) {
             setSysConfig(prev => prev ? { ...prev, externalAgencies: agencies } : null);
         } else {
@@ -319,8 +324,9 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     };
 
     /**
-     * ระบบ Tracking Link อัตโนมัติ (NEW v12.2)
-     * สร้างลิงก์ที่จะบันทึกสถานะรับทราบลง SQL ทันทีเมื่อครูกดเปิดจาก Telegram
+     * ระบบ Tracking Link อัตโนมัติ (v12.5)
+     * ส่งคุณครูไปที่ Google Apps Script Bridge เพื่อแสดงหน้าจอที่มีปุ่มกดเปิดเอกสาร
+     * เพื่อให้ระบบรับทราบการกดจาก Telegram ได้อย่างแม่นยำ
      */
     async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, bookNumber: string, isOrder: boolean, fromStr: string, attachments: Attachment[] = [], customTitle?: string) {
         if (!sysConfig?.telegramBotToken || !sysConfig?.scriptUrl) return;
@@ -338,20 +344,20 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             `----------------------------------\n`;
             
             if (attachments && attachments.length > 0) {
-                message += `<b>📎 กดเปิดเพื่อดูเอกสารและยืนยันรับทราบ:</b>\n`;
+                message += `<b>📎 กดเปิดเพื่อดูเอกสารและรับทราบ:</b>\n`;
                 attachments.forEach((att, idx) => {
-                    const directFileUrl = getPreviewUrl(att.url);
-                    // สร้าง Tracking Link ที่จะบันทึก SQL ผ่าน GAS Bridge โดยตรง (v12.2)
-                    const trackingLink = `${scriptUrl}?action=ack&docId=${docId}&userId=${t.id}&target=${encodeURIComponent(directFileUrl)}`;
+                    const directFileUrl = att.url;
+                    // ลิงก์ที่วิ่งไปที่ GAS เพื่อแสดงหน้าจอ Landing Page พร้อมปุ่ม
+                    const trackingLink = `${scriptUrl}?action=ack&docId=${docId}&userId=${t.id}&target=${encodeURIComponent(directFileUrl)}&appUrl=${encodeURIComponent(baseUrl)}`;
                     message += `${idx + 1}. <a href="${trackingLink}">${att.name}</a>\n`;
                 });
                 message += `----------------------------------\n`;
             }
 
-            message += `✅ ระบบจะบันทึกสถานะให้ท่าน "ทันที" เมื่อกดที่ชื่อไฟล์ด้านบนครับ (ไม่ต้องเข้าหน้าแอปเพื่อกดปุ่มอีกต่อไป)`;
+            message += `✅ ระบบจะนำคุณไปที่หน้าเอกสารเพื่อบันทึกการรับทราบทันทีที่กดปุ่มครับ`;
             
-            const appLink = `${baseUrl}?view=DOCUMENTS&id=${docId}`;
-            sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId, message, appLink);
+            const appMainLink = `${baseUrl}?view=DOCUMENTS&id=${docId}`;
+            sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId, message, appMainLink);
         });
     }
 
@@ -376,7 +382,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         try {
             const trimmedUrl = url.trim();
             const protocolPart = trimmedUrl.indexOf('https://') === 0 ? 'https://' : 'http://';
-            // Fix: Invalid regex syntax /\/+/g replaced with /\/+/g
             const normalizedUrl = protocolPart + trimmedUrl.replace(protocolPart, "").replace(/\/+/g, "/");
 
             updateTask(taskId, { message: 'กำลังดาวน์โหลดไฟล์ผ่าน Deep Proxy Bridge...' });
@@ -590,8 +595,13 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             } else { 
                 updateData.director_command = finalCommand; 
                 updateData.director_signature_date = nowStr; 
-                if (nextStatus === 'PendingViceDirector') updateData.assigned_vice_director_id = viceId; 
-                else updateData.target_teachers = targetTeacherIds; 
+                // Fix: Ensure assignedViceDirectorId is cleared if status is Distributed
+                if (nextStatus === 'PendingViceDirector') {
+                    updateData.assigned_vice_director_id = viceId; 
+                } else {
+                    updateData.assigned_vice_director_id = null;
+                    updateData.target_teachers = targetTeacherIds; 
+                }
             }
 
             const { error } = await client.from('documents').update(updateData).eq('id', taskId);
@@ -600,18 +610,16 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const notifyAtts = [...targetDoc.attachments];
             if (signedUrl) notifyAtts.unshift({ id: 'signed', name: 'บันทึกข้อสั่งการ (ศธ.)', type: 'LINK', url: signedUrl });
 
-            // 1. แจ้งเตือนผู้รับมอบหมาย (ครู หรือ รองฯ) - กรองไม่แจ้งเตือน ผอ.
-            // USER REQUEST: หากเป็นการ "แจ้งเวียนเพื่อทราบ" (PendingViceDirector) ไม่ต้องแจ้งครู/รองฯ
+            // แจ้งเตือนผู้รับมอบหมาย
             const notifyIds = nextStatus === 'PendingViceDirector' ? [] : targetTeacherIds;
             if (notifyIds.length > 0) {
-                // กรองเอาเฉพาะครูที่ไม่ใช่ ผอ. และ รองฯ ที่ถูกมอบหมาย
                 const notifyList = allTeachers.filter(t => notifyIds.includes(t.id) && !t.roles.includes('DIRECTOR'));
                 if (notifyList.length > 0) {
                     triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts);
                 }
             }
 
-            // 2. แจ้งเตือนเจ้าหน้าที่ธุรการทราบ (ผอ. เกษียณแล้ว) - กรองไม่แจ้งเตือน ผอ.
+            // แจ้งเตือนเจ้าหน้าที่ธุรการ
             const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
             if (officers.length > 0) {
                 triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, `ผู้อำนวยการโรงเรียน`, notifyAtts, "✅ ผอ. เกษียณหนังสือเรียบร้อยแล้ว");
@@ -637,12 +645,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const { error } = await client.from('documents').update({ status: 'PendingViceDirector', assigned_vice_director_id: assignedViceDirId, director_command: finalCommand, director_signature_date: nowStr }).eq('id', taskId);
             if (error) throw error;
             
-            // แจ้งเตือนรองฯ (ถ้าไม่ใช่ ผอ. - ซึ่งปกติรองฯ ก็ไม่ใช่ ผอ. อยู่แล้วแต่กันไว้ก่อน)
             if (vice && !vice.roles.includes('DIRECTOR')) {
                 triggerTelegramNotification([vice], taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments);
             }
             
-            // แจ้งธุรการทราบ (ไม่แจ้งเตือน ผอ.)
             const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
             if (officers.length > 0) {
                 triggerTelegramNotification(officers, taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, "✅ ผอ. มอบหมายรองผู้อำนวยการดำเนินการแล้ว");
@@ -655,8 +661,9 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
     const handleDirectorAction = (isNotifyOnly: boolean) => {
         if (!selectedDoc) return;
-        const nextStatus = isNotifyOnly ? 'PendingViceDirector' : 'Distributed';
-        processActionWithMemorandum(selectedDoc, command, selectedTeachers, nextStatus, assignedViceDirId);
+        // Fix: logic adjustment - whether notify or sign, set status to Distributed 
+        // to avoid "Pending Vice" badge when director has finished their turn personally.
+        processActionWithMemorandum(selectedDoc, command, selectedTeachers, 'Distributed', assignedViceDirId);
         setViewMode('LIST');
     };
 
@@ -773,7 +780,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                 const directFileUrl = params.get('file');
                 if (directFileUrl) {
                     const viewUrl = getPreviewUrl(directFileUrl);
-                    // เปิดในหน้าต่างใหม่เพื่อพรีวิวโดยไม่ทิ้งหน้าแอป
                     window.open(viewUrl, '_blank');
                 }
                 
@@ -789,7 +795,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
      */
     const getGoogleDriveId = (url: string) => {
         if (!url) return null;
-        // ปรับปรุง Regex ให้ครอบคลุม URL ทุกรูปแบบของ Google Drive (รวม docs.google.com, drive.google.com, open?id, uc?id)
         const patterns = [
             /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/,
             /drive\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)/,
@@ -811,10 +816,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         if (!url) return '';
         const id = getGoogleDriveId(url);
         if (id) {
-            // บังคับให้เป็นหน้า /view เพื่อให้ Browser เปิดพรีวิวแทนการดาวน์โหลดทันที
             return `https://drive.google.com/file/d/${id}/view?usp=sharing`;
         }
-        // สำหรับลิงก์ทั่วไป พยายามเปลี่ยนพารามิเตอร์เพื่อเปิดพรีวิวแทนดาวน์โหลด
         return url.replace(/export=download/gi, 'export=view')
                   .replace(/dl=1/gi, 'dl=0');
     };
@@ -902,7 +905,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                     <p className="text-slate-400 text-xs mt-1">ผู้ใช้งาน: <span className="font-bold text-yellow-400">{currentUser.name}</span></p>
                 </div>
                 <div className="flex items-center gap-3 relative z-10">
-                    {isDocOfficer && (
+                    {(isDocOfficer || isSystemAdmin || isDirector) && (
                         <button 
                             onClick={() => setShowAgencyManager(true)}
                             className="bg-slate-700 hover:bg-slate-600 p-2 px-4 rounded-xl text-xs font-bold flex items-center gap-2 border border-slate-600 transition-all"
@@ -981,6 +984,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <button onClick={() => setActiveTab('ORDER')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'ORDER' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>คำสั่งโรงเรียน</button>
                         </div>
                         <div className="flex flex-col md:flex-row flex-1 justify-end items-center gap-3 w-full">
+                            {/* Fix: Replaced escaped quotes with standard double quotes in className, type, placeholder */}
                             <div className="relative flex-1 w-full md:max-w-md group">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors" size={18} />
                                 <input type="text" placeholder="ค้นหาเรื่อง, เลขที่, หน่วยงาน..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-400 outline-none focus:ring-4 ring-blue-50 transition-all font-bold text-sm" />
@@ -1070,7 +1074,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                                 รอ ผอ. สั่งการ
                                             </span>
                                         )}
-                                        {docItem.status === 'PendingViceDirector' && (
+                                        {/* Fix: Hide "Waiting for Vice" if no actual delegate assigned */}
+                                        {docItem.status === 'PendingViceDirector' && docItem.assignedViceDirectorId && (
                                             <span className="text-[8px] md:text-[9px] font-black text-blue-500 uppercase bg-blue-50 px-2 py-0.5 rounded">
                                                 รอรองฯ สั่งการ
                                             </span>

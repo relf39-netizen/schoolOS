@@ -431,7 +431,7 @@ const App: React.FC = () => {
                                     case SystemView.LEAVE: return <LeaveSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool!} focusRequestId={focusItem?.id} onClearFocus={() => setFocusItem(null)} />;
                                     case SystemView.FINANCE: return <FinanceSystem currentUser={currentUser} allTeachers={schoolTeachers} />;
                                     case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool!} />;
-                                    case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} />;
+                                    case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} currentSchool={currentSchool!} />;
                                     case SystemView.ACADEMIC: return <AcademicSystem currentUser={currentUser} />;
                                     case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool!} onUpdateSchool={handleUpdateSchool} 
                                         onAddTeacher={async (t) => { 

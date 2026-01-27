@@ -637,3 +637,104 @@ export const stampPdfDocument = async (opt: any): Promise<string> => {
     page.drawText(formatDateThai(new Date()), { x: centerX - 40, y: 40, size: 14, font: thaiFont });
     return await pdfDoc.saveAsBase64({ dataUri: true });
 };
+
+export const generateActionPlanPdf = async (opt: any): Promise<string> => {
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.registerFontkit(fontkit as any);
+    const thaiFont = await pdfDoc.embedFont(await fetchThaiFont(opt.proxyUrl, opt.thaiFontBase64));
+    const thaiFontBold = await pdfDoc.embedFont(await fetchThaiFontBold(opt.proxyUrl, opt.thaiFontBoldBase64));
+
+    let page = pdfDoc.addPage([595.28, 841.89]);
+    const { width, height } = page.getSize();
+    const margin = 50;
+    const contentWidth = width - (2 * margin);
+
+    let curY = height - margin;
+
+    // Logo / Garuda
+    if (opt.officialGarudaBase64) {
+        try {
+            const garuda = await pdfDoc.embedPng(dataURItoUint8Array(opt.officialGarudaBase64));
+            const gDim = garuda.scaleToFit(60, 60);
+            page.drawImage(garuda, { x: (width - gDim.width) / 2, y: curY - 60, width: gDim.width, height: gDim.height });
+        } catch (e) {}
+    }
+    curY -= 80;
+
+    const drawCenteredBold = (text: string, y: number, size: number) => {
+        const w = thaiFontBold.widthOfTextAtSize(text, size);
+        page.drawText(text, { x: (width - w) / 2, y, size, font: thaiFontBold });
+    };
+
+    drawCenteredBold("แผนปฏิบัติการประจำปีงบประมาณ พ.ศ. " + opt.fiscalYear, curY, 20);
+    curY -= 25;
+    drawCenteredBold(opt.schoolName, curY, 18);
+    curY -= 40;
+
+    // Summary Box
+    page.drawRectangle({ x: margin, y: curY - 60, width: contentWidth, height: 60, color: rgb(0.95, 0.97, 1), borderColor: rgb(0.2, 0.4, 0.8), borderWidth: 1 });
+    page.drawText("สรุปงบประมาณรวม:", { x: margin + 15, y: curY - 20, size: 14, font: thaiFontBold, color: rgb(0.1, 0.2, 0.4) });
+    page.drawText(`งบประมาณเสนอโครงการรวม: ${opt.stats.totalProposed.toLocaleString()} บาท`, { x: margin + 15, y: curY - 38, size: 12, font: thaiFont });
+    page.drawText(`งบประมาณคงเหลือจริง (หลังจัดสรร): ${opt.stats.remainingAfterProposal.toLocaleString()} บาท`, { x: margin + 15, y: curY - 52, size: 12, font: thaiFont });
+    curY -= 80;
+
+    // x-coordinates for columns to fit within contentWidth (495.28 pts starting from x=50)
+    // colX indices: [ที่, โครงการ, อุดหนุน, กิจกรรม, รวม, จ่ายจริง, สถานะ]
+    const colX = [margin, margin + 25, margin + 170, margin + 235, margin + 300, margin + 365, margin + 430];
+    const tableHeaders = ["ที่", "โครงการ", "อุดหนุน", "กิจกรรม", "รวม", "จ่ายจริง", "สถานะ"];
+
+    const drawTableHeader = (y: number) => {
+        page.drawRectangle({ x: margin, y: y - 5, width: contentWidth, height: 25, color: rgb(0.9, 0.9, 0.9), borderColor: rgb(0,0,0), borderWidth: 1 });
+        tableHeaders.forEach((h, i) => {
+            page.drawText(h, { x: colX[i] + 3, y, size: 10, font: thaiFontBold });
+        });
+    };
+
+    opt.departments.forEach((dept: any) => {
+        if (curY < 120) {
+            page = pdfDoc.addPage([595.28, 841.89]);
+            curY = height - margin;
+        }
+
+        page.drawText(dept.name, { x: margin, y: curY, size: 14, font: thaiFontBold, color: rgb(0.2, 0.2, 0.6) });
+        curY -= 20;
+
+        drawTableHeader(curY);
+        curY -= 25;
+
+        dept.projects.forEach((p: any, idx: number) => {
+            if (curY < 80) {
+                page = pdfDoc.addPage([595.28, 841.89]);
+                curY = height - margin;
+                drawTableHeader(curY);
+                curY -= 25;
+            }
+
+            const rowData = [
+                (idx + 1).toString(),
+                p.name.length > 30 ? p.name.substring(0, 27) + "..." : p.name,
+                p.subsidyBudget.toLocaleString(),
+                p.learnerDevBudget.toLocaleString(),
+                (p.subsidyBudget + p.learnerDevBudget).toLocaleString(),
+                p.actualExpense?.toLocaleString() || "0",
+                p.status === 'Completed' ? 'ปิดยอด' : (p.status === 'Approved' ? 'อนุมัติ' : 'ร่าง')
+            ];
+
+            page.drawRectangle({ x: margin, y: curY - 5, width: contentWidth, height: 25, borderColor: rgb(0.7, 0.7, 0.7), borderWidth: 0.5 });
+            rowData.forEach((d, i) => {
+                // Align numeric values to the right if they are budgets
+                const isNumeric = i >= 2 && i <= 5;
+                const textX = isNumeric 
+                    ? colX[i] + 60 - thaiFont.widthOfTextAtSize(d, 9) // Approximate right-align in 65pt columns
+                    : colX[i] + 3;
+                
+                page.drawText(d, { x: textX, y: curY, size: 9, font: thaiFont });
+            });
+            curY -= 25;
+        });
+
+        curY -= 15;
+    });
+
+    return await pdfDoc.saveAsBase64({ dataUri: true });
+};
