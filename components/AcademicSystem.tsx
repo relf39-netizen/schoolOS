@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { 
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-    LineChart as RechartsLineChart, Line, LabelList, Cell
+    LineChart as RechartsLineChart, Line, Cell
 } from 'recharts';
 import { supabase, isConfigured } from '../supabaseClient';
 
@@ -46,7 +46,7 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
     // Forms for new features
     const [showCalendarForm, setShowCalendarForm] = useState(false);
-    const [newCalEvent, setNewCalEvent] = useState({ title: '', startDate: '', endDate: '', year: CURRENT_SCHOOL_YEAR });
+    const [newCalEvent, setNewCalEvent] = useState({ title: '', startDate: '', endDate: '', year: CURRENT_SCHOOL_YEAR, description: '' });
     const [showSarForm, setShowSarForm] = useState(false);
     const [newSar, setNewSar] = useState({ year: CURRENT_SCHOOL_YEAR, type: 'BASIC' as SARType });
 
@@ -88,13 +88,13 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 setTestScores(mappedScores);
 
                 const { data: calData } = await supabase.from('academic_calendar').select('*').eq('school_id', currentUser.schoolId).order('start_date', { ascending: true });
-                const mappedCal = calData ? calData.map(d => ({ 
+                const mappedCal: AcademicCalendarEvent[] = calData ? calData.map(d => ({ 
                     id: d.id.toString(), 
                     schoolId: d.school_id, 
                     year: d.year, 
                     title: d.title, 
                     startDate: d.start_date, 
-                    endDate: d.end_date, 
+                    endDate: d.end_date || d.start_date, 
                     description: d.description 
                 })) : [];
                 setCalendarEvents(mappedCal);
@@ -207,18 +207,20 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 year: newCalEvent.year, 
                 title: newCalEvent.title, 
                 start_date: newCalEvent.startDate,
-                end_date: newCalEvent.endDate || newCalEvent.startDate
+                end_date: newCalEvent.endDate || newCalEvent.startDate,
+                description: newCalEvent.description
             }]);
             
             if (!error) { 
                 alert("บันทึกกิจกรรมเรียบร้อยแล้ว");
-                setNewCalEvent({ title: '', startDate: '', endDate: '', year: selectedYear }); 
+                setNewCalEvent({ title: '', startDate: '', endDate: '', year: selectedYear, description: '' }); 
                 setShowCalendarForm(false); 
                 await loadData(); 
             } else {
                 throw error;
             }
         } catch (err: any) {
+            console.error("Insert error:", err);
             alert("ล้มเหลว: " + err.message);
         } finally {
             setIsSaving(false);
@@ -605,6 +607,7 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                                     <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">ตั้งแต่วันที่</label><input type="date" required value={newCalEvent.startDate} onChange={e=>setNewCalEvent({...newCalEvent, startDate:e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none focus:ring-2 ring-indigo-500/20"/></div>
                                     <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">ถึงวันที่</label><input type="date" required value={newCalEvent.endDate} onChange={e=>setNewCalEvent({...newCalEvent, endDate:e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none focus:ring-2 ring-indigo-500/20"/></div>
                                 </div>
+                                <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">รายละเอียดเพิ่มเติม</label><textarea placeholder="ระบุรายละเอียดโครงการ/กิจกรรม (ถ้ามี)" value={newCalEvent.description} onChange={e=>setNewCalEvent({...newCalEvent, description:e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold outline-none focus:ring-2 ring-indigo-500/20 h-24"/></div>
                                 <div className="flex gap-3 pt-4"><button type="button" onClick={()=>setShowCalendarForm(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-xs tracking-widest">ยกเลิก</button><button type="submit" disabled={isSaving} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg flex items-center justify-center gap-2">{isSaving?<Loader className="animate-spin" size={18}/>:<Save size={18}/>} บันทึก</button></div>
                             </form>
                         </div>
@@ -706,7 +709,7 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
                 {showSarForm && (
                     <div className="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-md">
-                        <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md p-8 animate-scale-up">
+                        <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md p-8 animate-scale-up border-4 border-emerald-100">
                             <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-3"><FileUp className="text-emerald-600"/> อัปโหลดรายงาน SAR</h3>
                             <div className="space-y-6">
                                 <div className="grid grid-cols-2 gap-4">
