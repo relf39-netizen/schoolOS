@@ -47,7 +47,7 @@ import {
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
 import { Attachment, DocumentItem, School, SystemConfig, Teacher } from '../types';
-import { stampPdfDocument, stampReceiveNumber, generateDirectorCommandMemoPdf } from '../utils/pdfStamper';
+import { stampPdfDocument, stampReceiveNumber, generateDirectorCommandMemoPdf, stampAcknowledgePdf } from '../utils/pdfStamper';
 import { sendTelegramMessage } from '../utils/telegram';
 
 /**
@@ -68,6 +68,36 @@ interface DocumentsSystemProps {
     focusDocId?: string | null;
     onClearFocus?: () => void;
 }
+
+const getCleanBase64 = (base64Str: string): string => {
+    if (!base64Str) return '';
+    const parts = base64Str.split(',');
+    return (parts.length > 1 ? parts[1] : parts[0]).replace(/[\s\n\r]/g, ''); 
+};
+
+/**
+ * getGoogleDriveId: ดึง ID ของ Google Drive ไฟล์จาก URL ทุกรูปแบบ
+ */
+const getGoogleDriveId = (url: string) => {
+    if (!url) return null;
+    // พยายามดึงสตริงที่ดูเหมือน ID (ยาว 25-50 ตัวอักษร) ซึ่งเป็นรูปแบบมาตรฐานของ Google Drive ID
+    const match = url.match(/[-\w]{25,50}/);
+    if (match) return match[0];
+    return null;
+};
+
+/**
+ * getPreviewUrl: บังคับรูปแบบหน้า Viewer ของ Google Drive เพื่อให้เปิดบน Browser ก่อน
+ */
+const getPreviewUrl = (url: string) => {
+    if (!url) return '';
+    const id = getGoogleDriveId(url);
+    if (id) {
+        return `https://drive.google.com/file/d/${id}/view?usp=sharing`;
+    }
+    return url.replace(/export=download/gi, 'export=view')
+              .replace(/dl=1/gi, 'dl=0');
+};
 
 /**
  * DocumentsSystem: A comprehensive school document management system.
@@ -176,12 +206,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         };
     };
 
-    const getCleanBase64 = (base64Str: string): string => {
-        if (!base64Str) return '';
-        const parts = base64Str.split(',');
-        return (parts.length > 1 ? parts[1] : parts[0]).replace(/[\s\n\r]/g, ''); 
-    };
-
     const mapDocFromDb = (d: any): DocumentItem => ({
         id: d.id.toString(),
         schoolId: d.school_id,
@@ -222,7 +246,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         signed_file_url: d.signed_file_url,
         assigned_vice_director_id: d.assigned_vice_director_id,
         vice_director_command: d.vice_director_command,
-        vice_director_signature_date: d.viceDirectorSignatureDate,
+        vice_director_signature_date: d.vice_director_signature_date,
         target_teachers: d.targetTeachers,
         acknowledged_by: d.acknowledgedBy
     });
@@ -595,7 +619,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             } else { 
                 updateData.director_command = finalCommand; 
                 updateData.director_signature_date = nowStr; 
-                // Fix: Ensure assignedViceDirectorId is cleared if status is Distributed
+                // ล้างค่า assigned_vice_director_id เมื่อส่งต่อหรือสั่งปฏิบัติเรียบร้อยแล้ว
                 if (nextStatus === 'PendingViceDirector') {
                     updateData.assigned_vice_director_id = viceId; 
                 } else {
@@ -661,11 +685,19 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
     const handleDirectorAction = (isNotifyOnly: boolean) => {
         if (!selectedDoc) return;
-        // Fix: logic adjustment - whether notify or sign, set status to Distributed 
-        // to avoid "Pending Vice" badge when director has finished their turn personally.
         processActionWithMemorandum(selectedDoc, command, selectedTeachers, 'Distributed', assignedViceDirId);
         setViewMode('LIST');
     };
+
+    const handleDirectorAcknowledge = async () => {
+        if (!selectedDoc) return;
+        
+        // ใช้ processActionWithMemorandum เพื่อสร้างบันทึกข้อความ "รับทราบแล้ว"
+        // โดยไม่ส่งหาครูคนไหน (targetTeacherIds = []) แต่ยังแจ้งเตือนธุรการตามปกติ
+        processActionWithMemorandum(selectedDoc, "รับทราบแล้ว", [], 'Distributed');
+        setViewMode('LIST');
+    };
+
 
     const handleViceDirectorAction = () => {
         if (!selectedDoc) return;
@@ -704,7 +736,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             setIsLoading(true);
             await fetchDocs();
             if (isSupabaseConfigured && client) {
-                const { data: configData } = await client.from('school_configs').select('*').eq('school_id', currentUser.schoolId).single();
+                const { data: configData } = await client.from('school_configs').select('*').eq('school_id', currentUser.schoolId).maybeSingle();
                 if (configData) {
                     const agencies = configData.external_agencies || [];
                     const depts = configData.internal_departments || [];
@@ -789,38 +821,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     }, [focusDocId, docs, currentUser.id]);
 
     // --- Rendering Helpers ---
-
-    /**
-     * getGoogleDriveId: ดึง ID ของ Google Drive ไฟล์จาก URL ทุกรูปแบบ
-     */
-    const getGoogleDriveId = (url: string) => {
-        if (!url) return null;
-        const patterns = [
-            /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/,
-            /drive\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)/,
-            /docs\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)/,
-            /docs\.google\.com\/.*?\/d\/([a-zA-Z0-9_-]+)/,
-            /id=([a-zA-Z0-9_-]+)/
-        ];
-        for (const pattern of patterns) {
-            const match = url.match(pattern);
-            if (match && match[1]) return match[1];
-        }
-        return null;
-    };
-
-    /**
-     * getPreviewUrl: บังคับรูปแบบหน้า Viewer ของ Google Drive เพื่อให้เปิดบน Browser ก่อน
-     */
-    const getPreviewUrl = (url: string) => {
-        if (!url) return '';
-        const id = getGoogleDriveId(url);
-        if (id) {
-            return `https://drive.google.com/file/d/${id}/view?usp=sharing`;
-        }
-        return url.replace(/export=download/gi, 'export=view')
-                  .replace(/dl=1/gi, 'dl=0');
-    };
 
     const filteredDocs = docs.filter(doc => {
         let isVisible = false;
@@ -984,7 +984,6 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <button onClick={() => setActiveTab('ORDER')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'ORDER' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>คำสั่งโรงเรียน</button>
                         </div>
                         <div className="flex flex-col md:flex-row flex-1 justify-end items-center gap-3 w-full">
-                            {/* Fix: Replaced escaped quotes with standard double quotes in className, type, placeholder */}
                             <div className="relative flex-1 w-full md:max-w-md group">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors" size={18} />
                                 <input type="text" placeholder="ค้นหาเรื่อง, เลขที่, หน่วยงาน..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-400 outline-none focus:ring-4 ring-blue-50 transition-all font-bold text-sm" />
@@ -1416,6 +1415,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         <textarea value={command} onChange={e => setCommand(e.target.value)} placeholder="ระบุข้อความสั่งการ/เกษียณหนังสือ... (ระบบจะนำไปจัดรูปแบบในบันทึกข้อความศธ. อัตโนมัติ)" className="w-full p-4 md:p-8 bg-slate-50 border-2 border-slate-300 rounded-xl md:rounded-[2.5rem] h-32 md:h-40 outline-none focus:bg-white font-black text-slate-900 leading-relaxed placeholder:text-slate-300 text-sm md:text-lg shadow-inner" />
                                         <TeacherSelectionGrid selectedIds={selectedTeachers} onToggle={setSelectedTeachers} currentSearch={teacherSearchTerm} onSearchChange={setTeacherSearchTerm}/>
                                         <div className="flex flex-col sm:flex-row gap-4 px-0 md:px-0 pb-2 md:pb-0">
+                                            <button onClick={handleDirectorAcknowledge} className="flex-1 py-3 md:py-4 bg-white border-2 border-blue-500 text-blue-700 rounded-xl md:rounded-[2rem] font-black text-xs md:text-sm hover:bg-blue-50 shadow-xl transition-all flex items-center justify-center gap-2"><CheckSquare size={18}/> รับทราบ</button>
                                             <button onClick={() => handleDirectorAction(true)} className="flex-1 py-3 md:py-4 bg-white border-2 border-emerald-500 text-emerald-700 rounded-xl md:rounded-[2rem] font-black text-xs md:text-sm hover:bg-emerald-50 shadow-xl transition-all">แจ้งเวียนเพื่อทราบ</button>
                                             <button onClick={() => handleDirectorAction(false)} className="flex-[2] py-3 md:py-4 bg-slate-900 text-white rounded-xl md:rounded-[2rem] font-black text-sm md:text-lg shadow-2xl hover:bg-black transition-all flex items-center justify-center gap-3 active:scale-95"><FilePlus size={20}/> ลงนามและสั่งปฏิบัติ</button>
                                         </div>

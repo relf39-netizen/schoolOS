@@ -638,6 +638,60 @@ export const stampPdfDocument = async (opt: any): Promise<string> => {
     return await pdfDoc.saveAsBase64({ dataUri: true });
 };
 
+export const stampAcknowledgePdf = async (opt: any): Promise<string> => {
+    const pdfDoc = await PDFDocument.load(dataURItoUint8Array(opt.fileBase64));
+    pdfDoc.registerFontkit(fontkit as any);
+    const thaiFont = await pdfDoc.embedFont(await fetchThaiFont(opt.proxyUrl, opt.thaiFontBase64));
+    const thaiFontBold = await pdfDoc.embedFont(await fetchThaiFontBold(opt.proxyUrl, opt.thaiFontBoldBase64));
+    
+    const page = pdfDoc.getPages()[0]; // Always first page
+    const { width, height } = page.getSize();
+    
+    const boxW = 200;
+    const boxX = width - boxW - 50;
+    let curY = 150; // Start from bottom right area
+    
+    // Draw "รับทราบ"
+    const ackText = "รับทราบ";
+    const ackW = thaiFontBold.widthOfTextAtSize(ackText, 24);
+    page.drawText(ackText, { 
+        x: boxX + (boxW - ackW) / 2, 
+        y: curY + 60, 
+        size: 24, 
+        font: thaiFontBold,
+        color: rgb(0, 0, 0.5)
+    });
+
+    const centerX = boxX + boxW / 2;
+    
+    // Draw Signature
+    if (opt.signatureImageBase64) {
+        try {
+            const sigBytes = dataURItoUint8Array(opt.signatureImageBase64);
+            let sig;
+            try { sig = await pdfDoc.embedPng(sigBytes); } catch { sig = await pdfDoc.embedJpg(sigBytes); }
+            const sDim = sig.scaleToFit(100 * (opt.signatureScale || 1), 50);
+            page.drawImage(sig, { 
+                x: centerX - sDim.width / 2, 
+                y: curY + (opt.signatureYOffset || 0) + 10, 
+                width: sDim.width, 
+                height: sDim.height 
+            });
+        } catch (e) {}
+    }
+
+    // Draw Name and Date
+    const nameText = `(${opt.directorName})`;
+    const nameW = thaiFont.widthOfTextAtSize(nameText, 16);
+    page.drawText(nameText, { x: centerX - nameW / 2, y: curY - 10, size: 16, font: thaiFont });
+    
+    const dateText = formatDateThai(new Date());
+    const dateW = thaiFont.widthOfTextAtSize(dateText, 14);
+    page.drawText(dateText, { x: centerX - dateW / 2, y: curY - 30, size: 14, font: thaiFont });
+    
+    return await pdfDoc.saveAsBase64({ dataUri: true });
+};
+
 export const generateActionPlanPdf = async (opt: any): Promise<string> => {
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit as any);
