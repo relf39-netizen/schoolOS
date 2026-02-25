@@ -456,7 +456,9 @@ const App: React.FC = () => {
                             <DashboardCard view={SystemView.LEAVE} title="ระบบการลา" slogan="โปร่งใส ตรวจสอบง่าย" icon={UserCheck} color="#10b981" badge={pendingLeaveCount > 0 ? `รออนุมัติ ${pendingLeaveCount}` : null}/>
                             <DashboardCard view={SystemView.ATTENDANCE} title="ลงเวลาทำงาน" slogan="เช็คเวลาแม่นยำ ด้วย GPS" icon={Clock} color="#f43f5e"/>
                             <DashboardCard view={SystemView.FINANCE} title="ระบบการเงิน" slogan="งบประมาณ และรายรับ-จ่าย" icon={Activity} color="#f59e0b"/>
-                            <DashboardCard view={SystemView.ADMIN_USERS} title="ผู้ดูแลระบบ" slogan="ตั้งค่าระบบ และผู้ใช้งาน" icon={Settings} color="#64748b"/>
+                            {currentUser?.roles.includes('SYSTEM_ADMIN') && (
+                                <DashboardCard view={SystemView.ADMIN_USERS} title="ผู้ดูแลระบบ" slogan="ตั้งค่าระบบ และผู้ใช้งาน" icon={Settings} color="#64748b"/>
+                            )}
                             <DashboardCard view={SystemView.PROFILE} title="ข้อมูลส่วนตัว" slogan="แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล" icon={UserCircle} color="#8b5cf6"/>
                         </div>
                     ) : (
@@ -470,8 +472,13 @@ const App: React.FC = () => {
                                     case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool!} />;
                                     case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} currentSchool={currentSchool!} />;
                                     case SystemView.ACADEMIC: return <AcademicSystem currentUser={currentUser} />;
-                                    case SystemView.ADMIN_USERS: return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool!} onUpdateSchool={handleUpdateSchool} 
-                                        onAddTeacher={async (t) => { 
+                                    case SystemView.ADMIN_USERS: 
+                                        if (!currentUser?.roles.includes('SYSTEM_ADMIN')) {
+                                            setCurrentView(SystemView.DASHBOARD);
+                                            return null;
+                                        }
+                                        return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool!} onUpdateSchool={handleUpdateSchool} 
+                                            onAddTeacher={async (t) => { 
                                             const client = supabase; 
                                             if(!client) return;
                                             const finalRoles = t.isActingDirector 
