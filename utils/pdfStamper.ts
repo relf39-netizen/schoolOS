@@ -305,6 +305,197 @@ export const generateDirectorCommandMemoPdf = async (opt: CommandMemoOptions): P
     return await pdfDoc.saveAsBase64({ dataUri: true });
 };
 
+export const generateAcknowledgeMemoPdf = async (opt: any): Promise<string> => {
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.registerFontkit(fontkit as any);
+    const thaiFont = await pdfDoc.embedFont(await fetchThaiFont(opt.proxyUrl, opt.thaiFontBase64));
+    const thaiFontBold = await pdfDoc.embedFont(await fetchThaiFontBold(opt.proxyUrl, opt.thaiFontBoldBase64));
+
+    const page = pdfDoc.addPage([595.28, 841.89]);
+    const { width, height } = page.getSize();
+    const marginX = 50;
+    const labelSize = 18, textSize = 16;
+    const cmToPoints = 28.35;
+    
+    const indentPointsNormal = 2.5 * cmToPoints; 
+
+    let curY = height - 50;
+
+    const titleY = curY - 50;
+    const memoTitle = "บันทึกข้อความ";
+    const memoTitleW = thaiFontBold.widthOfTextAtSize(memoTitle, 28);
+    
+    if (opt.officialGarudaBase64) {
+        try {
+            const garudaBytes = dataURItoUint8Array(opt.officialGarudaBase64);
+            let garuda;
+            try { garuda = await pdfDoc.embedPng(garudaBytes); } 
+            catch { garuda = await pdfDoc.embedJpg(garudaBytes); }
+            
+            const gDim = garuda.scaleToFit(60, 60);
+            page.drawImage(garuda, { x: marginX, y: titleY - 10, width: gDim.width, height: gDim.height });
+        } catch (e) {}
+    }
+
+    page.drawText(memoTitle, { x: (width - memoTitleW) / 2, y: titleY, size: 28, font: thaiFontBold });
+    
+    curY = titleY - 60;
+
+    page.drawText("ส่วนราชการ", { x: marginX, y: curY, size: labelSize, font: thaiFontBold });
+    page.drawText(opt.schoolName, { x: 135, y: curY, size: textSize, font: thaiFont });
+    page.drawLine({
+        start: { x: 135, y: curY - 2 },
+        end: { x: width - marginX, y: curY - 2 },
+        thickness: 0.5,
+        dashArray: [1, 2]
+    });
+    curY -= 30;
+
+    page.drawText("ที่", { x: marginX, y: curY, size: labelSize, font: thaiFontBold });
+    page.drawText(opt.bookNumber, { x: 75, y: curY, size: textSize, font: thaiFont });
+    page.drawLine({
+        start: { x: 75, y: curY - 2 },
+        end: { x: 280, y: curY - 2 },
+        thickness: 0.5,
+        dashArray: [1, 2]
+    });
+
+    const dateStr = `วันที่  ${formatDateThai(new Date())}`;
+    page.drawText(dateStr, { x: 300, y: curY, size: textSize, font: thaiFont });
+    page.drawLine({
+        start: { x: 340, y: curY - 2 },
+        end: { x: width - marginX, y: curY - 2 },
+        thickness: 0.5,
+        dashArray: [1, 2]
+    });
+    curY -= 30;
+
+    page.drawText("เรื่อง", { x: marginX, y: curY, size: labelSize, font: thaiFontBold });
+    page.drawText(opt.title, { x: 95, y: curY, size: textSize, font: thaiFont });
+    page.drawLine({
+        start: { x: 95, y: curY - 2 },
+        end: { x: width - marginX, y: curY - 2 },
+        thickness: 0.5,
+        dashArray: [1, 2]
+    });
+    curY -= 45;
+
+    page.drawText(`เรียน  ผู้อำนวยการโรงเรียน${opt.schoolNameOnly}`, { x: marginX, y: curY, size: textSize, font: thaiFont });
+    curY -= 40;
+
+    const contentWidth = width - (2 * marginX);
+    
+    const p1 = `ตามที่หนังสือราชการจาก ${opt.from} ได้แจ้งเรื่อง ${opt.title} เพื่อพิจารณาดำเนินการนั้น ${opt.details || ''}`;
+    const p2 = "จึงเรียนมาเพื่อโปรดพิจารณา";
+
+    const paragraphs = [
+        { text: p1, indent: indentPointsNormal },
+        { text: p2, indent: indentPointsNormal }
+    ];
+    
+    paragraphs.forEach((pObj) => {
+        if (!pObj.text) return;
+        const words = pObj.text.split('');
+        let line = "";
+        let isFirstLine = true;
+
+        for (let i = 0; i < words.length; i++) {
+            const char = words[i];
+            const currentIndent = isFirstLine ? pObj.indent : 0;
+            const maxWidth = contentWidth - currentIndent;
+            const currentWidth = thaiFont.widthOfTextAtSize(line + char, textSize);
+
+            if (currentWidth < maxWidth) {
+                line += char;
+            } else {
+                page.drawText(line, { x: marginX + currentIndent, y: curY, size: textSize, font: thaiFont });
+                curY -= 22;
+                line = char;
+                isFirstLine = false;
+            }
+        }
+        if (line) {
+            const lastLineIndent = isFirstLine ? pObj.indent : 0;
+            page.drawText(line, { x: marginX + lastLineIndent, y: curY, size: textSize, font: thaiFont });
+            curY -= 22;
+        }
+        curY -= 10;
+    });
+
+    curY -= 30;
+    const sigX = 320;
+    
+    const linePrefix = "(ลงชื่อ)";
+    const lineDots = ".................................................";
+    const prefixW = thaiFont.widthOfTextAtSize(linePrefix, textSize);
+    const dotsW = thaiFont.widthOfTextAtSize(lineDots, textSize);
+
+    // Officer Signature
+    if (opt.officerSignatureBase64 && opt.officerSignatureBase64.length > 50) {
+        try {
+            const sigBytes = dataURItoUint8Array(opt.officerSignatureBase64);
+            let sig;
+            try { sig = await pdfDoc.embedPng(sigBytes); } 
+            catch { sig = await pdfDoc.embedJpg(sigBytes); }
+            
+            const sDim = sig.scaleToFit(110, 50);
+            page.drawImage(sig, { 
+                x: sigX + prefixW + (dotsW - sDim.width) / 2, 
+                y: curY + 15, 
+                width: sDim.width, 
+                height: sDim.height 
+            });
+        } catch (e) {}
+    }
+    
+    page.drawText(`${linePrefix}${lineDots}`, { x: sigX, y: curY, size: textSize, font: thaiFont });
+    curY -= 25;
+    page.drawText(`(${opt.officerName})`, { x: sigX + prefixW + (dotsW - thaiFont.widthOfTextAtSize(`(${opt.officerName})`, textSize)) / 2, y: curY, size: textSize, font: thaiFont });
+    curY -= 25;
+    page.drawText(`ตำแหน่ง เจ้าหน้าที่ธุรการ`, { x: sigX + prefixW + (dotsW - thaiFont.widthOfTextAtSize(`ตำแหน่ง เจ้าหน้าที่ธุรการ`, textSize)) / 2, y: curY, size: textSize, font: thaiFont });
+
+    // Director Acknowledge Section (Right side, below officer)
+    curY -= 105; // Increased from 80 to 105 for an extra line gap
+    const ackText = "รับทราบ";
+    const ackW = thaiFontBold.widthOfTextAtSize(ackText, 20);
+    const fullLineW = prefixW + dotsW;
+    
+    // Center "รับทราบ" relative to the entire signature line (prefix + dots)
+    page.drawText(ackText, { 
+        x: sigX + (fullLineW - ackW) / 2, 
+        y: curY + 60, 
+        size: 20, 
+        font: thaiFontBold 
+    });
+    
+    if (opt.directorSignatureBase64 && opt.directorSignatureBase64.length > 50) {
+        try {
+            const sigBytes = dataURItoUint8Array(opt.directorSignatureBase64);
+            let sig;
+            try { sig = await pdfDoc.embedPng(sigBytes); } 
+            catch { sig = await pdfDoc.embedJpg(sigBytes); }
+            
+            const sDim = sig.scaleToFit(110 * (opt.signatureScale || 1), 50);
+            page.drawImage(sig, { 
+                x: sigX + prefixW + (dotsW - sDim.width) / 2, 
+                y: curY + (opt.signatureYOffset || 0) + 10, 
+                width: sDim.width, 
+                height: sDim.height 
+            });
+        } catch (e) {}
+    }
+
+    page.drawText(`${linePrefix}${lineDots}`, { x: sigX, y: curY, size: textSize, font: thaiFont });
+    curY -= 25;
+    const dirNameText = `(${opt.directorName})`;
+    page.drawText(dirNameText, { x: sigX + prefixW + (dotsW - thaiFont.widthOfTextAtSize(dirNameText, textSize)) / 2, y: curY, size: textSize, font: thaiFont });
+    curY -= 25;
+    const dirPosText = `ตำแหน่ง ${opt.directorPosition}`;
+    page.drawText(dirPosText, { x: sigX + prefixW + (dotsW - thaiFont.widthOfTextAtSize(dirPosText, textSize)) / 2, y: curY, size: textSize, font: thaiFont });
+
+    return await pdfDoc.saveAsBase64({ dataUri: true });
+};
+
 interface LeavePdfOptions {
     req: any;
     stats: any;

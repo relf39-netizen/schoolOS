@@ -47,7 +47,7 @@ import {
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
 import { Attachment, DocumentItem, School, SystemConfig, Teacher } from '../types';
-import { stampPdfDocument, stampReceiveNumber, generateDirectorCommandMemoPdf, stampAcknowledgePdf } from '../utils/pdfStamper';
+import { stampPdfDocument, stampReceiveNumber, generateDirectorCommandMemoPdf, stampAcknowledgePdf, generateAcknowledgeMemoPdf } from '../utils/pdfStamper';
 import { sendTelegramMessage } from '../utils/telegram';
 
 /**
@@ -119,7 +119,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     // --- Pagination & Filter State ---
     const [currentPage, setCurrentPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
-    const [activeTab, setActiveTab] = useState<'ALL' | 'INCOMING' | 'ORDER'>('ALL');
+    const [activeTab, setActiveTab] = useState<'ALL' | 'INCOMING' | 'ORDER' | 'PENDING'>('ALL');
     const ITEMS_PER_PAGE = 10;
     
     // --- Configuration & Navigation ---
@@ -177,6 +177,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             t.position.includes('รองผู้อำนวยการ') || t.roles.includes('VICE_DIRECTOR')
         ),
     [teachersInSchool]);
+
+    const pendingDirectorCount = useMemo(() => docs.filter(d => d.status === 'PendingDirector').length, [docs]);
 
     // --- Task Queue Helpers ---
     const activeTasks = backgroundTasks.filter(t => t.status === 'processing' || t.status === 'uploading');
@@ -576,22 +578,47 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const deptLabel = selectedOfficerDept ? ` (${selectedOfficerDept})` : (sysConfig?.officerDepartment ? ` (${sysConfig.officerDepartment})` : '');
             const schoolWithDept = `${currentSchool.name}${deptLabel}`;
 
-            const pdfBase64 = await generateDirectorCommandMemoPdf({
-                schoolName: schoolWithDept,
-                bookNumber: targetDoc.bookNumber,
-                title: targetDoc.title,
-                from: targetDoc.from || '-',
-                details: targetDoc.description || '(ไม่มีข้อมูลรายละเอียด)',
-                command: finalCommand,
-                directorName: currentUser.name,
-                directorPosition: currentUser.position,
-                signatureBase64: signatureToUse,
-                officialGarudaBase64: sysConfig?.officialGarudaBase64,
-                signatureScale: sysConfig?.directorSignatureScale || 1.0,
-                signatureYOffset: sysConfig?.directorSignatureYOffset || 0,
-                proxyUrl: sysConfig?.scriptUrl,
-                targetTeacherNames: targetTeacherNames 
-            });
+            let pdfBase64 = '';
+            
+            if (finalCommand === "รับทราบแล้ว") {
+                const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
+                const officer = officers[0] || { name: 'เจ้าหน้าที่ธุรการ', signatureBase64: null };
+                
+                pdfBase64 = await generateAcknowledgeMemoPdf({
+                    schoolName: schoolWithDept,
+                    schoolNameOnly: currentSchool.name,
+                    bookNumber: targetDoc.bookNumber,
+                    title: targetDoc.title,
+                    from: targetDoc.from || '-',
+                    details: targetDoc.description || '(ไม่มีข้อมูลรายละเอียด)',
+                    officerName: officer.name,
+                    officerSignatureBase64: officer.signatureBase64,
+                    directorName: currentUser.name,
+                    directorPosition: currentUser.position,
+                    directorSignatureBase64: signatureToUse,
+                    officialGarudaBase64: sysConfig?.officialGarudaBase64,
+                    signatureScale: sysConfig?.directorSignatureScale || 1.0,
+                    signatureYOffset: sysConfig?.directorSignatureYOffset || 0,
+                    proxyUrl: sysConfig?.scriptUrl
+                });
+            } else {
+                pdfBase64 = await generateDirectorCommandMemoPdf({
+                    schoolName: schoolWithDept,
+                    bookNumber: targetDoc.bookNumber,
+                    title: targetDoc.title,
+                    from: targetDoc.from || '-',
+                    details: targetDoc.description || '(ไม่มีข้อมูลรายละเอียด)',
+                    command: finalCommand,
+                    directorName: currentUser.name,
+                    directorPosition: currentUser.position,
+                    signatureBase64: signatureToUse,
+                    officialGarudaBase64: sysConfig?.officialGarudaBase64,
+                    signatureScale: sysConfig?.directorSignatureScale || 1.0,
+                    signatureYOffset: sysConfig?.directorSignatureYOffset || 0,
+                    proxyUrl: sysConfig?.scriptUrl,
+                    targetTeacherNames: targetTeacherNames 
+                });
+            }
 
             let signedUrl = null;
             if (pdfBase64 && sysConfig?.scriptUrl) {
@@ -685,7 +712,17 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
     const handleDirectorAction = (isNotifyOnly: boolean) => {
         if (!selectedDoc) return;
-        processActionWithMemorandum(selectedDoc, command, selectedTeachers, 'Distributed', assignedViceDirId);
+        
+        let finalCommand = command;
+        let finalTeachers = selectedTeachers;
+        
+        if (isNotifyOnly) {
+            // กรณีแจ้งเวียนเพื่อทราบ: ให้ส่งหาทุกคนและใช้ข้อความมาตรฐานตามที่ผู้ใช้กำหนด
+            finalCommand = "เพื่อแจ้งให้คณะครูและบุคลากรทางการศึกษาทุกท่านทราบ ตามรายละเอียดที่แจ้งมาพร้อมนี้";
+            finalTeachers = teachersInSchool.map(t => t.id);
+        }
+        
+        processActionWithMemorandum(selectedDoc, finalCommand, finalTeachers, 'Distributed', assignedViceDirId);
         setViewMode('LIST');
     };
 
@@ -831,6 +868,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         if (!isVisible) return false;
         if (activeTab === 'INCOMING' && doc.category !== 'INCOMING') return false;
         if (activeTab === 'ORDER' && doc.category !== 'ORDER') return false;
+        if (activeTab === 'PENDING' && doc.status !== 'PendingDirector') return false;
 
         if (!searchTerm) return true;
         const s = searchTerm.toLowerCase();
@@ -905,6 +943,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                     <p className="text-slate-400 text-xs mt-1">ผู้ใช้งาน: <span className="font-bold text-yellow-400">{currentUser.name}</span></p>
                 </div>
                 <div className="flex items-center gap-3 relative z-10">
+                    {(isDirector || isDocOfficer || isSystemAdmin) && pendingDirectorCount > 0 && (
+                        <button 
+                            onClick={() => { setActiveTab('PENDING'); setViewMode('LIST'); }}
+                            className="bg-orange-600 hover:bg-orange-500 p-2 px-4 rounded-xl text-xs font-black flex items-center gap-2 border border-orange-400 shadow-lg animate-pulse transition-all"
+                        >
+                            <Zap size={16}/> {isDirector ? 'มีหนังสือรอเกษียณ' : 'หนังสือรอ ผอ. เกษียณ'} ({pendingDirectorCount})
+                        </button>
+                    )}
                     {(isDocOfficer || isSystemAdmin || isDirector) && (
                         <button 
                             onClick={() => setShowAgencyManager(true)}
@@ -982,6 +1028,16 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <button onClick={() => setActiveTab('ALL')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'ALL' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>ทั้งหมด</button>
                             <button onClick={() => setActiveTab('INCOMING')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'INCOMING' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>หนังสือรับ</button>
                             <button onClick={() => setActiveTab('ORDER')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'ORDER' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>คำสั่งโรงเรียน</button>
+                            {(isDirector || isDocOfficer || isSystemAdmin) && (
+                                <button onClick={() => setActiveTab('PENDING')} className={`relative px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'PENDING' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>
+                                    รอเกษียณ
+                                    {pendingDirectorCount > 0 && (
+                                        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white ring-2 ring-white animate-bounce">
+                                            {pendingDirectorCount}
+                                        </span>
+                                    )}
+                                </button>
+                            )}
                         </div>
                         <div className="flex flex-col md:flex-row flex-1 justify-end items-center gap-3 w-full">
                             <div className="relative flex-1 w-full md:max-w-md group">
