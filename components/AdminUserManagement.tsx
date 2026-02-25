@@ -206,7 +206,25 @@ function setTelegramWebhook() {
                              directorSignatureYOffset: data.director_signature_y_offset || 0,
                              schoolName: currentSchool.name
                          });
+                     } else {
+                         // Reset config if no data found for this specific school
+                         setConfig({ 
+                            driveFolderId: '', 
+                            scriptUrl: '', 
+                            schoolName: currentSchool.name, 
+                            officerDepartment: '', 
+                            directorSignatureBase64: '', 
+                            directorSignatureScale: 1, 
+                            directorSignatureYOffset: 0, 
+                            schoolLogoBase64: '', 
+                            officialGarudaBase64: '', 
+                            telegramBotToken: '', 
+                            telegramBotUsername: '', 
+                            appBaseUrl: '' 
+                         });
                      }
+                 } catch (err) {
+                     console.error("Config fetch error:", err);
                  } finally {
                      setIsLoadingConfig(false);
                  }
@@ -221,7 +239,6 @@ function setTelegramWebhook() {
         if (!isSupabaseConfigured || !client) return;
         setIsSavingConfig(true);
         try {
-            // Re-enabled telegram_bot_username for per-school configuration
             const { error } = await client.from('school_configs').upsert({
                 school_id: currentSchool.id,
                 drive_folder_id: config.driveFolderId,
@@ -492,8 +509,26 @@ function setTelegramWebhook() {
                                 <div className="space-y-1.5"><label className="block text-[10px] font-black text-slate-400 uppercase ml-1">ID (เลขบัตรประชาชน)</label><input type="text" required maxLength={13} disabled={!isAdding} value={editForm.id || ''} onChange={e => setEditForm({...editForm, id: e.target.value})} className={`w-full px-4 py-2 border rounded-xl font-bold outline-none transition-all shadow-sm ${!isAdding ? 'bg-slate-100 text-slate-300' : 'bg-slate-50 focus:border-blue-500'}`}/></div>
                                 <div className="space-y-1.5"><label className="block text-[10px] font-black text-slate-400 uppercase ml-1">ชื่อ - นามสกุล</label><input type="text" required value={editForm.name || ''} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full px-4 py-2 bg-slate-50 border rounded-xl font-bold outline-none focus:border-blue-500 transition-all shadow-inner"/></div>
                                 <div className="space-y-1.5"><label className="block text-[10px] font-black text-slate-400 uppercase ml-1">ตำแหน่ง</label><div className="relative"><select value={editForm.position || ''} onChange={e => setEditForm({...editForm, position: e.target.value})} className="w-full px-4 py-2 bg-slate-50 border rounded-xl font-bold appearance-none outline-none focus:border-blue-500 transition-all shadow-inner">{ACADEMIC_POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}</select><ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none" size={16}/></div></div>
-                                <div className="space-y-1.5"><label className="block text-[10px] font-black text-slate-400 uppercase ml-1">รหัสผ่าน</label><div className="relative group"><Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors" size={18}/><input type={showPasswordInModal ? "text" : "password"} value={editForm.password || ''} onChange={e => setEditForm({...editForm, password: e.target.value})} className="w-full pl-10 pr-10 py-2 bg-slate-50 border rounded-xl font-mono font-bold text-blue-600 outline-none focus:border-blue-500 transition-all shadow-inner text-lg\"/><button type="button" onClick={() => setShowPasswordInModal(!showPasswordInModal)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-blue-500 transition-colors">{showPasswordInModal ? <EyeOff size={18}/> : <Eye size={18}/>}</button></div></div>
+                                <div className="space-y-1.5"><label className="block text-[10px] font-black text-slate-400 uppercase ml-1">รหัสผ่าน</label><div className="relative group"><Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-500 transition-colors" size={18}/><input type={showPasswordInModal ? "text" : "password"} value={editForm.password || ''} onChange={e => setEditForm({...editForm, password: e.target.value})} className="w-full pl-10 pr-10 py-2 bg-slate-50 border rounded-xl font-mono font-bold text-blue-600 outline-none focus:border-blue-500 transition-all shadow-inner text-lg"/><button type="button" onClick={() => setShowPasswordInModal(!showPasswordInModal)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-blue-500 transition-colors">{showPasswordInModal ? <EyeOff size={18}/> : <Eye size={18}/>}</button></div></div>
                             </div>
+                            <div className="space-y-4">
+                                <label className="block text-[10px] font-black text-slate-400 uppercase ml-1">การมอบหมายพิเศษ</label>
+                                <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 shadow-inner">
+                                    <div 
+                                        onClick={() => setEditForm({ ...editForm, isActingDirector: !editForm.isActingDirector })}
+                                        className={`flex items-center gap-3 cursor-pointer p-3 rounded-xl transition-all border group ${editForm.isActingDirector ? 'border-orange-500 bg-white shadow-md' : 'border-transparent opacity-60 hover:opacity-100 hover:bg-white/80'}`}
+                                    >
+                                        <div className={`transition-all ${editForm.isActingDirector ? 'text-orange-600' : 'text-slate-300'}`}>
+                                            {editForm.isActingDirector ? <CheckSquare size={20}/> : <Square size={20}/>}
+                                        </div>
+                                        <div>
+                                            <span className={`text-[11px] font-black block transition-colors ${editForm.isActingDirector ? 'text-orange-900' : 'text-slate-500'}`}>รักษาการในตำแหน่งผู้อำนวยการโรงเรียน</span>
+                                            <p className="text-[9px] text-orange-600/70 font-bold mt-0.5">* สามารถมองเห็นและเกษียณหนังสือแทน ผอ. ได้</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div className="space-y-4"><label className="block text-[10px] font-black text-slate-400 uppercase ml-1">สิทธิ์และบทบาท</label><div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-inner">{AVAILABLE_ROLES.map(role => { const isChecked = editForm.roles?.includes(role.id); return (<div key={role.id} onClick={() => toggleRole(role.id)} className={`flex items-center gap-3 cursor-pointer p-3 rounded-xl transition-all border group ${isChecked ? 'border-blue-500 bg-white shadow-md' : 'border-transparent opacity-60 hover:opacity-100 hover:bg-white/80'}`}><div className={`transition-all ${isChecked ? 'text-blue-600' : 'text-slate-300'}`}>{isChecked ? <CheckSquare size={20}/> : <Square size={20}/>}</div><span className={`text-[11px] font-black transition-colors ${isChecked ? 'text-blue-900' : 'text-slate-500'}`}>{role.label}</span></div>); })}</div></div>
                             <div className="pt-6 flex gap-4"><button type="button" onClick={() => { setIsAdding(false); setEditingId(null); }} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-[10px] hover:bg-slate-200 transition-all">ยกเลิก</button><button type="submit" disabled={isSubmittingUser} className="flex-[2] py-3 bg-blue-600 text-white rounded-xl font-black text-base shadow-xl hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-3 border-b-4 border-blue-950 uppercase text-xs">{isSubmittingUser ? <Loader className="animate-spin" size={20}/> : <Save size={20}/>} ยืนยันบันทึกข้อมูล SQL</button></div>
                         </form>

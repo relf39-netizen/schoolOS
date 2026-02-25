@@ -78,6 +78,7 @@ const App: React.FC = () => {
                     position: p.position, roles: p.roles as TeacherRole[], 
                     signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
                     isSuspended: p.is_suspended, isApproved: p.is_approved !== false,
+                    isActingDirector: (p.roles as string[])?.includes('ACTING_DIRECTOR') || false,
                     isFirstLogin: false
                 }));
                 setAllTeachers(mappedTeachers);
@@ -119,7 +120,8 @@ const App: React.FC = () => {
                             id: p.id, schoolId: p.school_id, name: p.name, password: p.password,
                             position: p.position, roles: p.roles as TeacherRole[], 
                             signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
-                            isSuspended: p.is_suspended, isApproved: p.is_approved !== false
+                            isSuspended: p.is_suspended, isApproved: p.is_approved !== false,
+                            isActingDirector: (p.roles as string[])?.includes('ACTING_DIRECTOR') || false
                         } as any));
                         setAllTeachers(updatedList);
 
@@ -228,10 +230,14 @@ const App: React.FC = () => {
     const handleEditTeacher = async (t: Teacher) => {
         const client = supabase;
         if (!client) return;
+        const finalRoles = t.isActingDirector 
+            ? [...(t.roles || []).filter(r => r !== 'ACTING_DIRECTOR'), 'ACTING_DIRECTOR']
+            : (t.roles || []).filter(r => r !== 'ACTING_DIRECTOR');
+
         const { error } = await client.from('profiles').update({
             name: t.name, 
             position: t.position, 
-            roles: t.roles,
+            roles: finalRoles,
             password: t.password, 
             telegram_chat_id: t.telegramChatId,
             is_suspended: t.isSuspended || false, 
@@ -243,7 +249,38 @@ const App: React.FC = () => {
             console.error("Update Teacher Error:", error.message);
             throw error;
         }
-        setAllTeachers(prev => prev.map(teacher => teacher.id === t.id ? t : teacher));
+
+        // If this teacher is now Acting Director, unset others in the same school
+        if (t.isActingDirector) {
+            // We need to fetch all profiles in the school and remove the role from others
+            const { data: others } = await client.from('profiles')
+                .select('id, roles')
+                .eq('school_id', t.schoolId)
+                .neq('id', t.id);
+            
+            if (others) {
+                for (const other of others) {
+                    const otherRoles = (other.roles as string[]) || [];
+                    if (otherRoles.includes('ACTING_DIRECTOR')) {
+                        await client.from('profiles')
+                            .update({ roles: otherRoles.filter(r => r !== 'ACTING_DIRECTOR') })
+                            .eq('id', other.id);
+                    }
+                }
+            }
+        }
+
+        setAllTeachers(prev => {
+            let newList = prev.map(teacher => teacher.id === t.id ? t : teacher);
+            if (t.isActingDirector) {
+                newList = newList.map(teacher => 
+                    (teacher.id !== t.id && teacher.schoolId === t.schoolId) 
+                    ? { ...teacher, isActingDirector: false } 
+                    : teacher
+                );
+            }
+            return newList;
+        });
     };
 
     const handleDeleteTeacher = async (id: string) => {
@@ -437,13 +474,17 @@ const App: React.FC = () => {
                                         onAddTeacher={async (t) => { 
                                             const client = supabase; 
                                             if(!client) return;
+                                            const finalRoles = t.isActingDirector 
+                                                ? [...(t.roles || []).filter(r => r !== 'ACTING_DIRECTOR'), 'ACTING_DIRECTOR']
+                                                : (t.roles || []).filter(r => r !== 'ACTING_DIRECTOR');
+
                                             const { error } = await client.from('profiles').insert([{ 
                                                 id: t.id,
                                                 school_id: t.schoolId,
                                                 name: t.name,
                                                 password: t.password,
                                                 position: t.position,
-                                                roles: t.roles,
+                                                roles: finalRoles,
                                                 signature_base_64: t.signatureBase64,
                                                 telegram_chat_id: t.telegramChatId,
                                                 is_suspended: t.isSuspended || false,
@@ -453,7 +494,37 @@ const App: React.FC = () => {
                                                 console.error("Add Teacher Error:", error.message);
                                                 throw error;
                                             }
-                                            setAllTeachers(prev => [...prev, t]); 
+
+                                            // If this teacher is now Acting Director, unset others in the same school
+                                            if (t.isActingDirector) {
+                                                const { data: others } = await client.from('profiles')
+                                                    .select('id, roles')
+                                                    .eq('school_id', t.schoolId)
+                                                    .neq('id', t.id);
+                                                
+                                                if (others) {
+                                                    for (const other of others) {
+                                                        const otherRoles = (other.roles as string[]) || [];
+                                                        if (otherRoles.includes('ACTING_DIRECTOR')) {
+                                                            await client.from('profiles')
+                                                                .update({ roles: otherRoles.filter(r => r !== 'ACTING_DIRECTOR') })
+                                                                .eq('id', other.id);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            setAllTeachers(prev => {
+                                                let newList = [...prev, t];
+                                                if (t.isActingDirector) {
+                                                    newList = newList.map(teacher => 
+                                                        (teacher.id !== t.id && teacher.schoolId === t.schoolId) 
+                                                        ? { ...teacher, isActingDirector: false } 
+                                                        : teacher
+                                                    );
+                                                }
+                                                return newList;
+                                            });
                                         }} 
                                         onEditTeacher={handleEditTeacher} 
                                         onDeleteTeacher={handleDeleteTeacher} />;

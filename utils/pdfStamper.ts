@@ -502,6 +502,7 @@ interface LeavePdfOptions {
     teacher: any;
     schoolName: string;
     directorName: string;
+    directorPosition?: string;
     directorSignatureBase64?: string;
     teacherSignatureBase64?: string;
     officialGarudaBase64?: string; 
@@ -669,6 +670,10 @@ export const generateOfficialLeavePdf = async (options: LeavePdfOptions): Promis
 
     page.drawText(`(ลงชื่อ)...........................................................`, { x: dirX + 15, y: dirY + 35, size: 14, font: thaiFont });
     page.drawText(`(${directorName})`, { x: dirX + 60, y: dirY + 15, size: 14, font: thaiFont });
+    
+    const dPos = options.directorPosition || `ผู้อำนวยการ${schoolName}`;
+    const dPosW = thaiFont.widthOfTextAtSize(dPos, 12);
+    page.drawText(dPos, { x: dirX + (230 - dPosW) / 2, y: dirY - 2, size: 12, font: thaiFont });
 
     return await pdfDoc.saveAsBase64({ dataUri: true });
 };
@@ -798,7 +803,8 @@ export const generateLeaveSummaryPdf = async (opt: any): Promise<string> => {
     curY -= 25;
     page.drawText(`(${opt.directorName})`, { x: sigX + 25, y: curY, size: 14, font: thaiFont });
     curY -= 25;
-    page.drawText(`ตำแหน่ง ผู้อำนวยการ${opt.schoolName}`, { x: sigX + 15, y: curY, size: 14, font: thaiFont });
+    const dPos = opt.directorPosition || `ผู้อำนวยการ${opt.schoolName}`;
+    page.drawText(`ตำแหน่ง ${dPos}`, { x: sigX + 15, y: curY, size: 14, font: thaiFont });
 
     return await pdfDoc.saveAsBase64({ dataUri: true });
 };

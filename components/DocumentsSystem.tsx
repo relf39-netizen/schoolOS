@@ -119,7 +119,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     // --- Pagination & Filter State ---
     const [currentPage, setCurrentPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
-    const [activeTab, setActiveTab] = useState<'ALL' | 'INCOMING' | 'ORDER' | 'PENDING'>('ALL');
+    const [activeTab, setActiveTab] = useState<'ALL' | 'INCOMING' | 'ORDER' | 'PENDING' | 'UNREAD'>('ALL');
     const ITEMS_PER_PAGE = 10;
     
     // --- Configuration & Navigation ---
@@ -157,7 +157,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     const [teacherSearchTerm, setTeacherSearchTerm] = useState('');
 
     // --- Permissions / Role Detection ---
-    const isDirector = currentUser.roles.includes('DIRECTOR');
+    const isDirector = currentUser.roles.includes('DIRECTOR') || currentUser.isActingDirector;
     const isViceDirector = currentUser.roles.includes('VICE_DIRECTOR'); 
     const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
     const isSystemAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
@@ -179,6 +179,13 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     [teachersInSchool]);
 
     const pendingDirectorCount = useMemo(() => docs.filter(d => d.status === 'PendingDirector').length, [docs]);
+    const unreadDocCount = useMemo(() => 
+        docs.filter(d => 
+            d.status === 'Distributed' && 
+            (d.targetTeachers || []).includes(currentUser.id) && 
+            !(d.acknowledgedBy || []).includes(currentUser.id)
+        ).length, 
+    [docs, currentUser.id]);
 
     // --- Task Queue Helpers ---
     const activeTasks = backgroundTasks.filter(t => t.status === 'processing' || t.status === 'uploading');
@@ -564,7 +571,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
         try {
             const isActorVice = targetDoc.status === 'PendingViceDirector' || (targetDoc.assignedViceDirectorId === currentUser.id);
-            const signatureToUse = currentUser.signatureBase64 || (isDirector ? sysConfig?.directorSignatureBase64 : null);
+            const isRealDirector = currentUser.roles.includes('DIRECTOR');
+            const signatureToUse = currentUser.signatureBase64 || (isRealDirector ? sysConfig?.directorSignatureBase64 : null);
             
             if (!signatureToUse) throw new Error("ไม่พบลายเซ็นดิจิทัล! กรุณาอัปโหลดลายเซ็นในเมนู 'ข้อมูลส่วนตัว' หรือติดต่อแอดมินเพื่อตรวจสอบลายเซ็นส่วนกลาง");
 
@@ -577,6 +585,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
             const deptLabel = selectedOfficerDept ? ` (${selectedOfficerDept})` : (sysConfig?.officerDepartment ? ` (${sysConfig.officerDepartment})` : '');
             const schoolWithDept = `${currentSchool.name}${deptLabel}`;
+
+            const directorPosition = currentUser.isActingDirector 
+                ? 'รักษาการในตำแหน่งผู้อำนวยการโรงเรียน' 
+                : (currentUser.roles.includes('DIRECTOR') ? 'ผู้อำนวยการโรงเรียน' : currentUser.position);
 
             let pdfBase64 = '';
             
@@ -594,7 +606,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                     officerName: officer.name,
                     officerSignatureBase64: officer.signatureBase64,
                     directorName: currentUser.name,
-                    directorPosition: currentUser.position,
+                    directorPosition: directorPosition,
                     directorSignatureBase64: signatureToUse,
                     officialGarudaBase64: sysConfig?.officialGarudaBase64,
                     signatureScale: sysConfig?.directorSignatureScale || 1.0,
@@ -610,7 +622,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                     details: targetDoc.description || '(ไม่มีข้อมูลรายละเอียด)',
                     command: finalCommand,
                     directorName: currentUser.name,
-                    directorPosition: currentUser.position,
+                    directorPosition: directorPosition,
                     signatureBase64: signatureToUse,
                     officialGarudaBase64: sysConfig?.officialGarudaBase64,
                     signatureScale: sysConfig?.directorSignatureScale || 1.0,
@@ -673,7 +685,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             // แจ้งเตือนเจ้าหน้าที่ธุรการ
             const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
             if (officers.length > 0) {
-                triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, `ผู้อำนวยการโรงเรียน`, notifyAtts, "✅ ผอ. เกษียณหนังสือเรียบร้อยแล้ว");
+                triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, directorPosition, notifyAtts, `✅ ${directorPosition} เกษียณหนังสือเรียบร้อยแล้ว`);
             }
 
             updateTask(taskId, { status: 'done', message: 'สร้างบันทึกข้อความสั่งการเรียบร้อย' }); 
@@ -869,6 +881,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         if (activeTab === 'INCOMING' && doc.category !== 'INCOMING') return false;
         if (activeTab === 'ORDER' && doc.category !== 'ORDER') return false;
         if (activeTab === 'PENDING' && doc.status !== 'PendingDirector') return false;
+        if (activeTab === 'UNREAD') {
+            const isDistributed = doc.status === 'Distributed';
+            const isTarget = (doc.targetTeachers || []).includes(currentUser.id);
+            const isNotAcknowledged = !(doc.acknowledgedBy || []).includes(currentUser.id);
+            if (!isDistributed || !isTarget || !isNotAcknowledged) return false;
+        }
 
         if (!searchTerm) return true;
         const s = searchTerm.toLowerCase();
@@ -946,9 +964,21 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                     {(isDirector || isDocOfficer || isSystemAdmin) && pendingDirectorCount > 0 && (
                         <button 
                             onClick={() => { setActiveTab('PENDING'); setViewMode('LIST'); }}
-                            className="bg-orange-600 hover:bg-orange-500 p-2 px-4 rounded-xl text-xs font-black flex items-center gap-2 border border-orange-400 shadow-lg animate-pulse transition-all"
+                            className="bg-orange-600 hover:bg-orange-500 p-2 px-4 rounded-xl text-xs font-black flex items-center gap-2 border border-orange-400 shadow-lg animate-pulse transition-all relative overflow-hidden"
                         >
-                            <Zap size={16}/> {isDirector ? 'มีหนังสือรอเกษียณ' : 'หนังสือรอ ผอ. เกษียณ'} ({pendingDirectorCount})
+                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 animate-shimmer pointer-events-none"></div>
+                            <Zap size={16} className="relative z-10"/> 
+                            <span className="relative z-10">{isDirector ? 'มีหนังสือรอเกษียณ' : 'หนังสือรอ ผอ. เกษียณ'} ({pendingDirectorCount})</span>
+                        </button>
+                    )}
+                    {!isDirector && unreadDocCount > 0 && (
+                        <button 
+                            onClick={() => { setActiveTab('UNREAD'); setViewMode('LIST'); }}
+                            className="bg-orange-600 hover:bg-orange-500 p-2 px-4 rounded-xl text-xs font-black flex items-center gap-2 border border-orange-400 shadow-lg animate-pulse transition-all relative overflow-hidden"
+                        >
+                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 animate-shimmer pointer-events-none"></div>
+                            <Zap size={16} className="relative z-10"/> 
+                            <span className="relative z-10">หนังสือยังไม่อ่าน ({unreadDocCount})</span>
                         </button>
                     )}
                     {(isDocOfficer || isSystemAdmin || isDirector) && (
@@ -1028,12 +1058,21 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <button onClick={() => setActiveTab('ALL')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'ALL' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>ทั้งหมด</button>
                             <button onClick={() => setActiveTab('INCOMING')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'INCOMING' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>หนังสือรับ</button>
                             <button onClick={() => setActiveTab('ORDER')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'ORDER' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>คำสั่งโรงเรียน</button>
-                            {(isDirector || isDocOfficer || isSystemAdmin) && (
+                            {isDirector || isDocOfficer || isSystemAdmin ? (
                                 <button onClick={() => setActiveTab('PENDING')} className={`relative px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'PENDING' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>
                                     รอเกษียณ
                                     {pendingDirectorCount > 0 && (
                                         <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white ring-2 ring-white animate-bounce">
                                             {pendingDirectorCount}
+                                        </span>
+                                    )}
+                                </button>
+                            ) : (
+                                <button onClick={() => setActiveTab('UNREAD')} className={`relative px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'UNREAD' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>
+                                    หนังสือยังไม่อ่าน
+                                    {unreadDocCount > 0 && (
+                                        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] text-white ring-2 ring-white animate-bounce">
+                                            {unreadDocCount}
                                         </span>
                                     )}
                                 </button>
@@ -1127,6 +1166,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         {docItem.status === 'PendingDirector' && (
                                             <span className="text-[10px] md:text-sm font-black text-white uppercase bg-orange-600 px-4 py-1.5 rounded-full shadow-md animate-pulse border-2 border-white ring-2 ring-orange-100">
                                                 รอ ผอ. สั่งการ
+                                            </span>
+                                        )}
+                                        {!isDirector && docItem.status === 'Distributed' && (docItem.targetTeachers || []).includes(currentUser.id) && !(docItem.acknowledgedBy || []).includes(currentUser.id) && (
+                                            <span className="text-[10px] md:text-sm font-black text-white uppercase bg-red-600 px-4 py-1.5 rounded-full shadow-md animate-pulse border-2 border-white ring-2 ring-red-100">
+                                                ยังไม่อ่าน
                                             </span>
                                         )}
                                         {/* Fix: Hide "Waiting for Vice" if no actual delegate assigned */}

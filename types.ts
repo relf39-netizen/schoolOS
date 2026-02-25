@@ -25,6 +25,7 @@ export type TeacherRole =
   | 'FINANCE_COOP'      // การเงิน (สหกรณ์)
   | 'PLAN_OFFICER'      // งานแผน (สร้างโครงการ)
   | 'ACADEMIC_OFFICER'  // งานวิชาการ (New)
+  | 'ACTING_DIRECTOR'  // รักษาการในตำแหน่งผู้อำนวยการ
   | 'TEACHER';          // ครูทั่วไป
 
 export interface School {
@@ -194,6 +195,7 @@ export interface Teacher {
   // Fix: Added isSuspended to support account suspension logic
   isSuspended?: boolean;
   isApproved?: boolean;   // สถานะการอนุมัติเข้าใช้งาน
+  isActingDirector?: boolean; // รักษาการในตำแหน่งผู้อำนวยการโรงเรียน
   // Fix: Added createdAt property to resolve missing property error in SuperAdminDashboard
   createdAt?: string;
 }

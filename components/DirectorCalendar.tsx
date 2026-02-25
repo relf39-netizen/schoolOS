@@ -43,7 +43,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
     const [currentDate, setCurrentDate] = useState(new Date());
 
     const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
-    const isDirector = currentUser.roles.includes('DIRECTOR');
+    const isDirector = currentUser.roles.includes('DIRECTOR') || currentUser.isActingDirector;
     const isAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
     const canEdit = isDocOfficer || isDirector || isAdmin;
 
@@ -87,9 +87,13 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                             appBaseUrl: data.app_base_url || '',
                             schoolName: data.school_name || ''
                         } as SystemConfig);
+                    } else {
+                        // Reset config if not found for current school to prevent leaking state
+                        setSysConfig(null);
                     }
                 } catch (e) {
                     console.error("Error loading school config from Supabase:", e);
+                    setSysConfig(null);
                 }
             }
         };
@@ -209,7 +213,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
     const notifyDirector = async (event: any, type: 'NEW' | 'TOMORROW' | 'TODAY') => {
         if (!sysConfig?.telegramBotToken) return;
-        const directors = allTeachers.filter(t => t.roles.includes('DIRECTOR') && t.schoolId === currentUser.schoolId);
+        const directors = allTeachers.filter(t => (t.roles.includes('DIRECTOR') || t.isActingDirector) && t.schoolId === currentUser.schoolId);
         if (directors.length === 0) return;
         let title = ""; let icon = "";
         switch (type) { 

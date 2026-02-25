@@ -54,7 +54,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     const [summaryPdfUrl, setSummaryPdfUrl] = useState<string>('');
     const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
-    const isDirectorRole = currentUser.roles.includes('DIRECTOR');
+    const isDirectorRole = currentUser.roles.includes('DIRECTOR') || currentUser.isActingDirector;
     const canViewAll = isDirectorRole || currentUser.roles.includes('SYSTEM_ADMIN') || currentUser.roles.includes('DOCUMENT_OFFICER');
 
     // --- Helpers ---
@@ -164,7 +164,13 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                     };
 
                     const teacher = allTeachers.find(t => t.id === currentReq.teacherId) || currentUser;
-                    const director = allTeachers.find(t => t.roles.includes('DIRECTOR')) || { name: '....................', position: 'ผู้อำนวยการโรงเรียน' };
+                    const director = allTeachers.find(t => t.roles.includes('DIRECTOR')) || 
+                                     allTeachers.find(t => t.isActingDirector) || 
+                                     { name: '....................', position: 'ผู้อำนวยการโรงเรียน', roles: [] as string[], isActingDirector: false, signatureBase64: '' };
+
+                    const directorPosition = (director as any).isActingDirector 
+                        ? 'รักษาการในตำแหน่งผู้อำนวยการโรงเรียน' 
+                        : ((director as any).roles?.includes('DIRECTOR') ? 'ผู้อำนวยการโรงเรียน' : (director.position || 'ผู้อำนวยการโรงเรียน'));
 
                     const base64Pdf = await generateOfficialLeavePdf({
                         req: currentReq,
@@ -172,7 +178,8 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                         teacher,
                         schoolName: currentSchool.name,
                         directorName: director.name,
-                        directorSignatureBase64: currentReq.status !== 'Pending' ? sysConfig?.directorSignatureBase64 : '',
+                        directorPosition: directorPosition,
+                        directorSignatureBase64: currentReq.status !== 'Pending' ? ((director as any).signatureBase64 || ((director as any).roles?.includes('DIRECTOR') ? sysConfig?.directorSignatureBase64 : '')) : '',
                         teacherSignatureBase64: teacher.signatureBase64,
                         officialGarudaBase64: sysConfig?.officialGarudaBase64,
                         directorSignatureScale: sysConfig?.directorSignatureScale,
@@ -213,7 +220,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         if (!error && data) {
             const newReqId = data[0].id;
             if (sysConfig?.telegramBotToken) {
-                const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DIRECTOR'));
+                const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && (t.roles.includes('DIRECTOR') || t.isActingDirector));
                 let message = leaveType === 'OffCampus' 
                     ? `🏃‍♂️ <b>แจ้งเตือน: ขออนุญาตออกนอกบริเวณ</b>\nจาก: <b>${currentUser.name}</b>\nวันที่: <b>${getThaiDate(payload.start_date)}</b>\nเวลา: <b>${startTime} - ${endTime} น.</b>\nครูสอนแทน: ${substituteName || '-'}\nเหตุผล: ${reason}`
                     : `📂 <b>แจ้งเตือน: มีใบเสนอลาใหม่</b>\nจาก: <b>${currentUser.name}</b>\nประเภท: ${getLeaveTypeName(leaveType)}\nเหตุผล: ${reason}\nช่วงวันที่: ${getThaiDate(payload.start_date)} - ${getThaiDate(payload.end_date)}`;
@@ -243,7 +250,10 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
             if (teacher?.telegramChatId && sysConfig?.telegramBotToken) {
                 const icon = isApproved ? '✅' : '❌';
                 const statusText = isApproved ? 'อนุมัติ / อนุญาต' : 'ไม่อนุมัติ';
-                const message = `${icon} <b>แจ้งผลการพิจารณาใบลา</b>\nรายการ: ${getLeaveTypeName(selectedRequest.type)}\nวันที่: ${getThaiDate(selectedRequest.startDate)}\nผลการพิจารณา: <b>${statusText}</b>\nโดย: ผู้อำนวยการโรงเรียน`;
+                const directorPosition = currentUser.isActingDirector 
+                    ? 'รักษาการในตำแหน่งผู้อำนวยการโรงเรียน' 
+                    : 'ผู้อำนวยการโรงเรียน';
+                const message = `${icon} <b>แจ้งผลการพิจารณาใบลา</b>\nรายการ: ${getLeaveTypeName(selectedRequest.type)}\nวันที่: ${getThaiDate(selectedRequest.startDate)}\nผลการพิจารณา: <b>${statusText}</b>\nโดย: ${directorPosition}`;
                 sendTelegramMessage(sysConfig.telegramBotToken, teacher.telegramChatId, message);
             }
             alert("บันทึกการพิจารณาเรียบร้อยแล้ว"); setViewMode('LIST'); fetchRequests();
@@ -279,7 +289,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     const handleGenerateSummaryReport = async () => {
         setIsGeneratingSummary(true);
         try {
-            const director = allTeachers.find(t => t.roles.includes('DIRECTOR'));
+            const director = allTeachers.find(t => t.roles.includes('DIRECTOR')) || allTeachers.find(t => t.isActingDirector);
             const schoolTeachers = allTeachers
                 .filter(t => t.schoolId === currentUser.schoolId && !t.roles.includes('DIRECTOR'))
                 .sort((a, b) => {
@@ -295,8 +305,9 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                 teachers: schoolTeachers,
                 getStatsFn: getTeacherStats,
                 directorName: director?.name || '....................',
+                directorPosition: director?.isActingDirector ? 'รักษาการในตำแหน่งผู้อำนวยการโรงเรียน' : 'ผู้อำนวยการโรงเรียน',
                 officialGarudaBase64: sysConfig?.officialGarudaBase64,
-                directorSignatureBase64: sysConfig?.directorSignatureBase64,
+                directorSignatureBase64: director?.signatureBase64 || (director?.roles.includes('DIRECTOR') ? sysConfig?.directorSignatureBase64 : ''),
                 directorSignatureScale: sysConfig?.directorSignatureScale || 1.0,
                 directorSignatureYOffset: sysConfig?.directorSignatureYOffset || 0,
                 proxyUrl: sysConfig?.scriptUrl 
