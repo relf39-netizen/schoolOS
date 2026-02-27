@@ -9,6 +9,7 @@ export enum SystemView {
   ATTENDANCE = 'ATTENDANCE',
   PLAN = 'PLAN',
   ACADEMIC = 'ACADEMIC', // New View
+  SAVINGS = 'SAVINGS',   // New View for Student Savings
   ADMIN_USERS = 'ADMIN_USERS',
   PROFILE = 'PROFILE',
   DIRECTOR_CALENDAR = 'DIRECTOR_CALENDAR'
@@ -198,6 +199,7 @@ export interface Teacher {
   isActingDirector?: boolean; // รักษาการในตำแหน่งผู้อำนวยการโรงเรียน
   // Fix: Added createdAt property to resolve missing property error in SuperAdminDashboard
   createdAt?: string;
+  assignedClasses?: string[]; // Classes/Rooms this teacher is responsible for
 }
 
 // --- Action Plan Types ---
@@ -264,6 +266,48 @@ export interface AcademicSAR {
   type: SARType;
   fileUrl: string;
   fileName: string;
+}
+
+// --- Student Savings Types (New) ---
+
+export interface Student {
+  id: string;
+  schoolId: string;
+  name: string;
+  currentClass: string; // e.g., "Prathom 1/1"
+  academicYear: string; // e.g., "2567"
+  isActive: boolean;
+  totalSavings?: number; // Calculated field
+}
+
+export type SavingTransactionType = 'DEPOSIT' | 'WITHDRAWAL';
+
+export interface StudentSaving {
+  id: string;
+  studentId: string;
+  schoolId: string;
+  amount: number;
+  type: SavingTransactionType;
+  academicYear: string;
+  createdAt: string;
+  createdBy: string; // Teacher ID
+  editedAt?: string;
+  editedBy?: string;
+  editReason?: string;
+}
+
+export interface ClassRoom {
+  id: string;
+  schoolId: string;
+  name: string; // e.g., "ป.1/1"
+  academicYear: string;
+}
+
+export interface AcademicYear {
+  id: string;
+  schoolId: string;
+  year: string;
+  isCurrent: boolean;
 }
 
 // --- System Configuration ---

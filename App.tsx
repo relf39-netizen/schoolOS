@@ -12,11 +12,12 @@ import LoginScreen from './components/LoginScreen';
 import FirstLoginSetup from './components/FirstLoginSetup';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 import DirectorCalendar from './components/DirectorCalendar'; 
+import StudentSavingsSystem from './components/StudentSavingsSystem';
 import { SystemView, Teacher, School, TeacherRole } from './types';
 import { 
     Activity, Users, Clock, FileText, CalendarRange, 
     Loader, LogOut, AlertCircle,
-    Settings, ChevronLeft, UserCircle, Calendar, GraduationCap, LayoutGrid, UserCheck
+    Settings, ChevronLeft, UserCircle, Calendar, GraduationCap, LayoutGrid, UserCheck, PiggyBank
 } from 'lucide-react';
 import { MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
 import { supabase, isConfigured as isSupabaseConfigured } from './supabaseClient';
@@ -79,6 +80,7 @@ const App: React.FC = () => {
                     signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
                     isSuspended: p.is_suspended, isApproved: p.is_approved !== false,
                     isActingDirector: (p.roles as string[])?.includes('ACTING_DIRECTOR') || false,
+                    assignedClasses: p.assigned_classes || [],
                     isFirstLogin: false
                 }));
                 setAllTeachers(mappedTeachers);
@@ -121,7 +123,8 @@ const App: React.FC = () => {
                             position: p.position, roles: p.roles as TeacherRole[], 
                             signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
                             isSuspended: p.is_suspended, isApproved: p.is_approved !== false,
-                            isActingDirector: (p.roles as string[])?.includes('ACTING_DIRECTOR') || false
+                            isActingDirector: (p.roles as string[])?.includes('ACTING_DIRECTOR') || false,
+                            assignedClasses: p.assigned_classes || []
                         } as any));
                         setAllTeachers(updatedList);
 
@@ -452,6 +455,7 @@ const App: React.FC = () => {
                                 color="#3b82f6"
                             />
                             <DashboardCard view={SystemView.ACADEMIC} title="งานวิชาการ" slogan="สถิตินักเรียน / ผลสอบ O-NET" icon={GraduationCap} color="#6366f1"/>
+                            <DashboardCard view={SystemView.SAVINGS} title="ออมทรัพย์นักเรียน" slogan="บันทึกเงินออม และการเลื่อนชั้น" icon={PiggyBank} color="#ec4899"/>
                             <DashboardCard view={SystemView.PLAN} title="แผนปฏิบัติการ" slogan="วางแผนแม่นยำ สู่ความสำเร็จ" icon={CalendarRange} color="#d946ef"/>
                             <DashboardCard view={SystemView.LEAVE} title="ระบบการลา" slogan="โปร่งใส ตรวจสอบง่าย" icon={UserCheck} color="#10b981" badge={pendingLeaveCount > 0 ? `รออนุมัติ ${pendingLeaveCount}` : null}/>
                             <DashboardCard view={SystemView.ATTENDANCE} title="ลงเวลาทำงาน" slogan="เช็คเวลาแม่นยำ ด้วย GPS" icon={Clock} color="#f43f5e"/>
@@ -472,6 +476,7 @@ const App: React.FC = () => {
                                     case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool!} />;
                                     case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} currentSchool={currentSchool!} />;
                                     case SystemView.ACADEMIC: return <AcademicSystem currentUser={currentUser} />;
+                                    case SystemView.SAVINGS: return <StudentSavingsSystem currentUser={currentUser} />;
                                     case SystemView.ADMIN_USERS: 
                                         if (!currentUser?.roles.includes('SYSTEM_ADMIN')) {
                                             setCurrentView(SystemView.DASHBOARD);

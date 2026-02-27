@@ -361,7 +361,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
      * ส่งคุณครูไปที่ Google Apps Script Bridge เพื่อแสดงหน้าจอที่มีปุ่มกดเปิดเอกสาร
      * เพื่อให้ระบบรับทราบการกดจาก Telegram ได้อย่างแม่นยำ
      */
-    async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, bookNumber: string, isOrder: boolean, fromStr: string, attachments: Attachment[] = [], customTitle?: string) {
+    async function triggerTelegramNotification(teachers: Teacher[], docId: string, title: string, bookNumber: string, isOrder: boolean, fromStr: string, attachments: Attachment[] = [], customTitle?: string, priority: string = 'Normal') {
         if (!sysConfig?.telegramBotToken || !sysConfig?.scriptUrl) return;
         const baseUrl = sysConfig.appBaseUrl || window.location.origin;
         const scriptUrl = sysConfig.scriptUrl;
@@ -369,25 +369,44 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         teachers.forEach(t => {
             if (!t.telegramChatId) return;
 
+            const isRecipientDirector = t.roles.includes('DIRECTOR') || t.isActingDirector;
+            
+            // จัดรูปแบบความเร่งด่วน
+            let priorityText = 'ปกติ';
+            if (priority === 'Urgent') priorityText = '<b>⚠️ ด่วน</b>';
+            if (priority === 'Critical') priorityText = '<b>🚨 ด่วนที่สุด</b>';
+
             let message = `<b>${customTitle || (isOrder ? '📝 มีคำสั่งปฏิบัติราชการใหม่' : '📩 มีหนังสือราชการใหม่')}</b>\n` +
-                            `----------------------------------\n` +
-                            `<b>เลขที่:</b> ${bookNumber}\n` +
-                            `<b>เรื่อง:</b> ${title}\n` +
-                            `<b>จาก:</b> ${fromStr}\n` +
                             `----------------------------------\n`;
             
+            // ถ้าเป็น ผอ. ไม่ต้องแสดงเลขที่หนังสือ แต่แสดงความเร่งด่วนแทน
+            if (isRecipientDirector) {
+                message += `<b>ความเร่งด่วน:</b> ${priorityText}\n`;
+            } else {
+                message += `<b>เลขที่:</b> ${bookNumber}\n`;
+            }
+
+            message += `<b>เรื่อง:</b> ${title}\n` +
+                       `<b>จาก:</b> ${fromStr}\n` +
+                       `----------------------------------\n`;
+            
             if (attachments && attachments.length > 0) {
-                message += `<b>📎 กดเปิดเพื่อดูเอกสารและรับทราบ:</b>\n`;
+                message += `<b>📎 กดเปิดเพื่อดูเอกสาร${isRecipientDirector ? '' : 'และรับทราบ'}:</b>\n`;
                 attachments.forEach((att, idx) => {
-                    const directFileUrl = att.url;
-                    // ลิงก์ที่วิ่งไปที่ GAS เพื่อแสดงหน้าจอ Landing Page พร้อมปุ่ม
-                    const trackingLink = `${scriptUrl}?action=ack&docId=${docId}&userId=${t.id}&target=${encodeURIComponent(directFileUrl)}&appUrl=${encodeURIComponent(baseUrl)}`;
-                    message += `${idx + 1}. <a href="${trackingLink}">${att.name}</a>\n`;
+                    const directFileUrl = getPreviewUrl(att.url);
+                    const finalLink = isRecipientDirector 
+                        ? directFileUrl 
+                        : `${scriptUrl}?action=ack&docId=${docId}&userId=${t.id}&target=${encodeURIComponent(att.url)}&appUrl=${encodeURIComponent(baseUrl)}`;
+                    
+                    // ชื่อไฟล์สั้นๆ ตามคำขอ
+                    message += `${idx + 1}. <a href="${finalLink}">ไฟล์ที่ ${idx + 1}</a>\n`;
                 });
                 message += `----------------------------------\n`;
             }
 
-            message += `✅ ระบบจะนำคุณไปที่หน้าเอกสารเพื่อบันทึกการรับทราบทันทีที่กดปุ่มครับ`;
+            if (!isRecipientDirector) {
+                message += `✅ ระบบจะนำคุณไปที่หน้าเอกสารเพื่อบันทึกการรับทราบทันทีที่กดปุ่มครับ`;
+            }
             
             const appMainLink = `${baseUrl}?view=DOCUMENTS&id=${docId}`;
             sendTelegramMessage(sysConfig.telegramBotToken!, t.telegramChatId, message, appMainLink);
@@ -678,14 +697,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             if (notifyIds.length > 0) {
                 const notifyList = allTeachers.filter(t => notifyIds.includes(t.id) && !t.roles.includes('DIRECTOR'));
                 if (notifyList.length > 0) {
-                    triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts);
+                    triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts, undefined, targetDoc.priority);
                 }
             }
 
             // แจ้งเตือนเจ้าหน้าที่ธุรการ
             const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
             if (officers.length > 0) {
-                triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, directorPosition, notifyAtts, `✅ ${directorPosition} เกษียณหนังสือเรียบร้อยแล้ว`);
+                triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, directorPosition, notifyAtts, `✅ ${directorPosition} เกษียณหนังสือเรียบร้อยแล้ว`, targetDoc.priority);
             }
 
             updateTask(taskId, { status: 'done', message: 'สร้างบันทึกข้อความสั่งการเรียบร้อย' }); 
@@ -709,12 +728,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             if (error) throw error;
             
             if (vice && !vice.roles.includes('DIRECTOR')) {
-                triggerTelegramNotification([vice], taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments);
+                triggerTelegramNotification([vice], taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, undefined, selectedDoc.priority);
             }
             
             const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
             if (officers.length > 0) {
-                triggerTelegramNotification(officers, taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, "✅ ผอ. มอบหมายรองผู้อำนวยการดำเนินการแล้ว");
+                triggerTelegramNotification(officers, taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, "✅ ผอ. มอบหมายรองผู้อำนวยการดำเนินการแล้ว", selectedDoc.priority);
             }
 
             updateTask(taskId, { status: 'done', message: 'มอบหมายสำเร็จ' });
@@ -981,7 +1000,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <span className="relative z-10">หนังสือยังไม่อ่าน ({unreadDocCount})</span>
                         </button>
                     )}
-                    {(isDocOfficer || isSystemAdmin || isDirector) && (
+                    {isSystemAdmin && (
                         <button 
                             onClick={() => setShowAgencyManager(true)}
                             className="bg-slate-700 hover:bg-slate-600 p-2 px-4 rounded-xl text-xs font-bold flex items-center gap-2 border border-slate-600 transition-all"
@@ -1304,10 +1323,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                 if (data) { 
                                     const savedId = data[0].id.toString();
                                     if (docCategory === 'ORDER' && selectedTeachers.length > 0) {
-                                        triggerTelegramNotification(allTeachers.filter(t => selectedTeachers.includes(t.id)), savedId, created.title, created.bookNumber, true, currentSchool.name, tempAttachments);
+                                        triggerTelegramNotification(allTeachers.filter(t => selectedTeachers.includes(t.id)), savedId, created.title, created.bookNumber, true, currentSchool.name, tempAttachments, undefined, created.priority);
                                     } else if (docCategory === 'INCOMING') {
                                         const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DIRECTOR'));
-                                        if (directors.length > 0) triggerTelegramNotification(directors, savedId, created.title, created.bookNumber, false, created.from, tempAttachments);
+                                        if (directors.length > 0) triggerTelegramNotification(directors, savedId, created.title, created.bookNumber, false, created.from, tempAttachments, undefined, created.priority);
                                     }
                                 }
                             }

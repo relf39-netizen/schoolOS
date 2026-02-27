@@ -83,6 +83,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
     
     const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
     const [isGettingLocation, setIsGettingLocation] = useState(false);
+    const [availableClasses, setAvailableClasses] = useState<string[]>([]);
 
     const gasCode = `/**
  * SchoolOS - Cloud Storage & Telegram Tracking Bridge v12.6
@@ -119,6 +120,7 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
     if (data.message) return handleTelegramWebhook(data.message);
     if (data.action === 'fetchRemote') return fetchRemoteFile(data.url);
+    if (data.action === 'setup') return setTelegramWebhook();
     
     if (data.folderId && data.fileData) {
       var folder = DriveApp.getFolderById(data.folderId);
@@ -185,9 +187,10 @@ function createJsonResponse(obj) {
 function setTelegramWebhook() {
   var botToken = "${config.telegramBotToken ? config.telegramBotToken.replace(/"/g, '\\"') : ''}";
   var scriptUrl = "${config.scriptUrl ? config.scriptUrl.replace(/"/g, '\\"') : ''}";
-  if (!botToken || !scriptUrl) return;
+  if (!botToken || !scriptUrl) return createJsonResponse({'status': 'error', 'message': 'Missing Token or URL'});
   var url = "https://api.telegram.org/bot" + botToken + "/setWebhook?url=" + encodeURIComponent(scriptUrl);
-  UrlFetchApp.fetch(url);
+  var resp = UrlFetchApp.fetch(url);
+  return createJsonResponse({'status': 'success', 'result': JSON.parse(resp.getContentText())});
 }
 `;
 
@@ -248,6 +251,21 @@ function setTelegramWebhook() {
         fetchConfig();
     }, [currentSchool.id]);
 
+    useEffect(() => {
+        const fetchClasses = async () => {
+            if (!supabase) return;
+            const { data, error } = await supabase
+                .from('class_rooms')
+                .select('name')
+                .eq('school_id', currentSchool.id);
+            if (data) {
+                const uniqueClasses = Array.from(new Set(data.map(c => c.name))).sort();
+                setAvailableClasses(uniqueClasses);
+            }
+        };
+        fetchClasses();
+    }, [currentSchool.id]);
+
     const handleSaveConfig = async (e: React.FormEvent) => {
         e.preventDefault();
         const client = supabase;
@@ -287,11 +305,21 @@ function setTelegramWebhook() {
             ...editForm, 
             roles: editForm.roles || ['TEACHER'], 
             schoolId: currentSchool.id, 
-            isApproved: true 
+            isApproved: true,
+            assignedClasses: editForm.assignedClasses || []
         } as Teacher;
         try {
             if (isAdding) await onAddTeacher(teacherData);
             else await onEditTeacher(teacherData);
+            
+            // Update assigned_classes in Supabase profiles table
+            if (supabase) {
+                await supabase
+                    .from('profiles')
+                    .update({ assigned_classes: teacherData.assignedClasses })
+                    .eq('id', teacherData.id);
+            }
+
             setIsAdding(false); setEditingId(null); setEditForm({});
         } catch(err: any) {
             alert("บันทึกไม่สำเร็จ: " + err.message);
@@ -476,6 +504,33 @@ function setTelegramWebhook() {
                                         <div className="bg-white p-6 rounded-2xl border border-slate-100 space-y-6 shadow-sm">
                                             <div className="space-y-1"><label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Bot API Token</label><input type="password" value={config.telegramBotToken || ''} onChange={e => setConfig({...config, telegramBotToken: e.target.value})} className="w-full px-4 py-2 border border-slate-100 focus:border-indigo-500 rounded-lg font-mono text-xs bg-slate-50 outline-none shadow-inner" placeholder="123456789:ABCDefgh..."/></div>
                                             <div className="space-y-1"><label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Bot Username</label><input type="text" value={config.telegramBotUsername || ''} onChange={e => setConfig({...config, telegramBotUsername: e.target.value})} className="w-full px-4 py-2 border border-slate-100 focus:border-indigo-500 rounded-lg font-mono text-xs bg-slate-50 outline-none shadow-inner" placeholder="@SchoolOS_Bot"/></div>
+                                            <button 
+                                                type="button"
+                                                onClick={async () => {
+                                                    if (!config.scriptUrl || !config.telegramBotToken) {
+                                                        alert("กรุณาระบุ GAS Web App URL และ Bot Token ก่อน");
+                                                        return;
+                                                    }
+                                                    try {
+                                                        const resp = await fetch(config.scriptUrl, {
+                                                            method: 'POST',
+                                                            body: JSON.stringify({ action: 'setup' }),
+                                                            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                                                        });
+                                                        const res = await resp.json();
+                                                        if (res.status === 'success') {
+                                                            alert("เชื่อมต่อ Webhook สำเร็จ! บอทพร้อมใช้งานแล้ว");
+                                                        } else {
+                                                            alert("เชื่อมต่อล้มเหลว: " + res.message);
+                                                        }
+                                                    } catch (e: any) {
+                                                        alert("ขัดข้อง: " + e.message);
+                                                    }
+                                                }}
+                                                className="w-full py-2 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-100 transition-all flex items-center justify-center gap-2 border border-indigo-100"
+                                            >
+                                                <RefreshCw size={14}/> เชื่อมต่อ Webhook (Set Webhook)
+                                            </button>
                                         </div>
                                     </div>
                                     <div className="lg:col-span-2"><div className="bg-slate-900 p-8 rounded-2xl border-2 border-slate-800 shadow-md relative overflow-hidden group"><h5 className="font-black text-white flex items-center gap-4 uppercase text-[10px] tracking-widest mb-6"><Zap className="text-yellow-400" size={24}/> Application URL</h5><div className="space-y-4"><input type="text" placeholder="https://your-app.vercel.app" value={config.appBaseUrl || ''} onChange={e => setConfig({...config, appBaseUrl: e.target.value})} className="w-full px-6 py-3 bg-white/5 border border-white/10 focus:border-yellow-400 rounded-xl font-mono text-base text-yellow-100 outline-none transition-all shadow-inner"/><div className="flex gap-4 items-center text-slate-500 px-6 py-2 bg-white/5 rounded-xl border border-white/10 w-fit backdrop-blur-md"><Info size={16} className="text-yellow-400 shrink-0"/><p className="text-[10px] font-bold uppercase tracking-widest">* URL หลักของแอปที่ท่านติดตั้ง เพื่อส่งลิงก์ใน Telegram</p></div></div></div></div>
@@ -544,7 +599,43 @@ function setTelegramWebhook() {
                                 </div>
                             </div>
 
-                            <div className="space-y-4"><label className="block text-[10px] font-black text-slate-400 uppercase ml-1">สิทธิ์และบทบาท</label><div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-inner">{AVAILABLE_ROLES.map(role => { const isChecked = editForm.roles?.includes(role.id); return (<div key={role.id} onClick={() => toggleRole(role.id)} className={`flex items-center gap-3 cursor-pointer p-3 rounded-xl transition-all border group ${isChecked ? 'border-blue-500 bg-white shadow-md' : 'border-transparent opacity-60 hover:opacity-100 hover:bg-white/80'}`}><div className={`transition-all ${isChecked ? 'text-blue-600' : 'text-slate-300'}`}>{isChecked ? <CheckSquare size={20}/> : <Square size={20}/>}</div><span className={`text-[11px] font-black transition-colors ${isChecked ? 'text-blue-900' : 'text-slate-500'}`}>{role.label}</span></div>); })}</div></div>
+                            <div className="space-y-4">
+                                <label className="block text-[10px] font-black text-slate-400 uppercase ml-1">ห้องเรียนที่รับผิดชอบ (ครูประจำชั้น)</label>
+                                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-inner">
+                                    {availableClasses.length === 0 ? (
+                                        <p className="text-[10px] text-slate-400 font-bold italic">ยังไม่มีข้อมูลห้องเรียนในระบบ (กรุณาเพิ่มในเมนูออมทรัพย์)</p>
+                                    ) : (
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                            {availableClasses.map(className => {
+                                                const isAssigned = editForm.assignedClasses?.includes(className);
+                                                return (
+                                                    <div 
+                                                        key={className}
+                                                        onClick={() => {
+                                                            const current = editForm.assignedClasses || [];
+                                                            setEditForm({
+                                                                ...editForm,
+                                                                assignedClasses: isAssigned 
+                                                                    ? current.filter(c => c !== className)
+                                                                    : [...current, className]
+                                                            });
+                                                        }}
+                                                        className={`flex items-center gap-2 cursor-pointer p-2 rounded-lg transition-all border ${isAssigned ? 'border-blue-500 bg-white shadow-sm' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                                                    >
+                                                        <div className={isAssigned ? 'text-blue-600' : 'text-slate-300'}>
+                                                            {isAssigned ? <CheckSquare size={16}/> : <Square size={16}/>}
+                                                        </div>
+                                                        <span className={`text-[10px] font-bold ${isAssigned ? 'text-blue-900' : 'text-slate-500'}`}>{className}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="space-y-4"><label className="block text-[10px] font-black text-slate-400 uppercase ml-1">สิทธิ์และบทบาท</label>
+<div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-inner">{AVAILABLE_ROLES.map(role => { const isChecked = editForm.roles?.includes(role.id); return (<div key={role.id} onClick={() => toggleRole(role.id)} className={`flex items-center gap-3 cursor-pointer p-3 rounded-xl transition-all border group ${isChecked ? 'border-blue-500 bg-white shadow-md' : 'border-transparent opacity-60 hover:opacity-100 hover:bg-white/80'}`}><div className={`transition-all ${isChecked ? 'text-blue-600' : 'text-slate-300'}`}>{isChecked ? <CheckSquare size={20}/> : <Square size={20}/>}</div><span className={`text-[11px] font-black transition-colors ${isChecked ? 'text-blue-900' : 'text-slate-500'}`}>{role.label}</span></div>); })}</div></div>
                             <div className="pt-6 flex gap-4"><button type="button" onClick={() => { setIsAdding(false); setEditingId(null); }} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-[10px] hover:bg-slate-200 transition-all">ยกเลิก</button><button type="submit" disabled={isSubmittingUser} className="flex-[2] py-3 bg-blue-600 text-white rounded-xl font-black text-base shadow-xl hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-3 border-b-4 border-blue-950 uppercase text-xs">{isSubmittingUser ? <Loader className="animate-spin" size={20}/> : <Save size={20}/>} ยืนยันบันทึกข้อมูล SQL</button></div>
                         </form>
                     </div>

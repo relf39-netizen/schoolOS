@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL || 'https://dixmxlukmonjgkphakxc.supabase.co';
@@ -11,22 +10,6 @@ export const supabase = isConfigured
   : null;
 
 export const DATABASE_SQL = `
--- ==========================================
--- 0. ระบบความปลอดภัยสูงสุด
--- ==========================================
-CREATE TABLE IF NOT EXISTS super_admins (
-  username TEXT PRIMARY KEY,
-  password TEXT NOT NULL
-);
-
-INSERT INTO super_admins (username, password) 
-VALUES ('admin', 'schoolos')
-ON CONFLICT (username) DO NOTHING;
-
--- ==========================================
--- 1. ตารางพื้นฐานระบบ (ข้อมูลโรงเรียนและบุคลากร)
--- ==========================================
-
 -- 1. ตารางโรงเรียน
 CREATE TABLE IF NOT EXISTS schools (
   id TEXT PRIMARY KEY,
@@ -131,5 +114,54 @@ CREATE TABLE IF NOT EXISTS plan_projects (
   actual_expense FLOAT DEFAULT 0,
   status TEXT DEFAULT 'Draft',
   fiscal_year TEXT
+);
+
+-- 9. ตารางโครงการในแผนปฏิบัติการ
+CREATE TABLE IF NOT EXISTS plan_projects (
+  id TEXT PRIMARY KEY,
+  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
+  department_name TEXT NOT NULL,
+  name TEXT NOT NULL,
+  subsidy_budget FLOAT DEFAULT 0,
+  learner_dev_budget FLOAT DEFAULT 0,
+  actual_expense FLOAT DEFAULT 0,
+  status TEXT DEFAULT 'Draft',
+  fiscal_year TEXT
+);
+
+
+-- 10. ตารางนักเรียน
+CREATE TABLE IF NOT EXISTS students (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  current_class TEXT NOT NULL,
+  academic_year TEXT NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 11. ตารางการออมทรัพย์นักเรียน
+CREATE TABLE IF NOT EXISTS student_savings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
+  amount FLOAT NOT NULL,
+  type TEXT NOT NULL, -- DEPOSIT, WITHDRAWAL
+  academic_year TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_by TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+  edited_at TIMESTAMP WITH TIME ZONE,
+  edited_by TEXT REFERENCES profiles(id) ON DELETE SET NULL,
+  edit_reason TEXT
+);
+
+-- 12. ตารางปีการศึกษา
+CREATE TABLE IF NOT EXISTS academic_years (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
+  year TEXT NOT NULL,
+  is_current BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 `;
