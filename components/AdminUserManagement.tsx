@@ -120,14 +120,17 @@ function doPost(e) {
     if (data.message) return handleTelegramWebhook(data.message);
     if (data.action === 'fetchRemote') return fetchRemoteFile(data.url);
     
-    var folder = DriveApp.getFolderById(data.folderId);
-    var bytes = Utilities.base64Decode(data.fileData);
-    var blob = Utilities.newBlob(bytes, data.mimeType, data.fileName);
-    var file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    return createJsonResponse({'status': 'success', 'url': file.getUrl(), 'id': file.getId(), 'viewUrl': "https://drive.google.com/file/d/" + file.getId() + "/view"});
+    if (data.folderId && data.fileData) {
+      var folder = DriveApp.getFolderById(data.folderId);
+      var bytes = Utilities.base64Decode(data.fileData);
+      var blob = Utilities.newBlob(bytes, data.mimeType, data.fileName);
+      var file = folder.createFile(blob);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      return createJsonResponse({'status': 'success', 'url': file.getUrl(), 'id': file.getId(), 'viewUrl': "https://drive.google.com/file/d/" + file.getId() + "/view"});
+    }
+    return ContentService.createTextOutput("ok");
   } catch (f) {
-    return createJsonResponse({ 'status': 'error', 'message': f.toString() });
+    return ContentService.createTextOutput("error: " + f.toString());
   }
 }
 
@@ -143,17 +146,29 @@ function fetchRemoteFile(url) {
 }
 
 function handleTelegramWebhook(msg) {
-  var chatId = msg.chat.id.toString();
-  var text = msg.text || "";
-  var botToken = "${config.telegramBotToken ? config.telegramBotToken.replace(/"/g, '\\"') : ''}";
-  if (text.indexOf("/start") === 0) {
-    var parts = text.split(" ");
-    if (parts.length > 1) {
-      var citizenId = parts[1].trim();
-      var url = SUPABASE_URL + "/rest/v1/profiles?id=eq." + citizenId;
-      UrlFetchApp.fetch(url, { "method": "patch", "headers": { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" }, "payload": JSON.stringify({ "telegram_chat_id": chatId }) });
-      sendMessage(botToken, chatId, "✅ <b>เชื่อมต่อสำเร็จ!</b>\\nท่านจะได้รับแจ้งเตือนผ่านบอทตัวนี้ครับ");
+  try {
+    if (!msg || !msg.chat || !msg.chat.id) return ContentService.createTextOutput("ok");
+    var chatId = msg.chat.id.toString();
+    var text = msg.text || "";
+    if (text.indexOf("/start") === 0) {
+      var parts = text.split(" ");
+      if (parts.length > 1) {
+        var citizenId = parts[1].trim();
+        var url = SUPABASE_URL + "/rest/v1/profiles?id=eq." + citizenId;
+        UrlFetchApp.fetch(url, { 
+          "method": "patch", 
+          "headers": { 
+            "apikey": SUPABASE_KEY, 
+            "Authorization": "Bearer " + SUPABASE_KEY, 
+            "Content-Type": "application/json" 
+          }, 
+          "payload": JSON.stringify({ "telegram_chat_id": chatId }) 
+        });
+        // การแจ้งเตือนถูกปิดตามคำขอของผู้ใช้เพื่อป้องกันการส่งข้อความซ้ำ
+      }
     }
+  } catch (e) {
+    // Return OK anyway to stop Telegram from retrying
   }
   return ContentService.createTextOutput("ok");
 }
