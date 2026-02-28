@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Teacher, SystemConfig } from '../types';
 import { ACADEMIC_POSITIONS } from '../constants';
-import { User, Lock, Save, UploadCloud, FileSignature, Briefcase, Eye, EyeOff, Loader, MessageCircle, Smartphone, CheckCircle, Zap, AlertCircle } from 'lucide-react';
+import { User, Lock, Save, UploadCloud, FileSignature, Briefcase, Eye, EyeOff, Loader, MessageCircle, Smartphone, CheckCircle, Zap, AlertCircle, Info } from 'lucide-react';
 import { db, isConfigured as isFirebaseConfigured, doc, setDoc } from '../firebaseConfig';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
 
@@ -36,9 +36,13 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
                     
                     if (data && data.telegram_bot_username) {
                         setBotUsername(data.telegram_bot_username);
+                    } else {
+                        // Reset if no bot is configured for this specific school
+                        setBotUsername('');
                     }
                 } catch (err) {
                     console.error("Error loading bot config:", err);
+                    setBotUsername('');
                 } finally {
                     setIsLoadingConfig(false);
                 }
@@ -282,9 +286,15 @@ const UserProfile: React.FC<UserProfileProps> = ({ currentUser, onUpdateUser }) 
                             )}
                         </div>
                         <div className="flex-1 flex flex-col justify-center gap-2">
-                            <p className="text-xs text-slate-500 mb-2">
-                                อัปโหลดรูปภาพลายเซ็น (ไฟล์ภาพจะถูกบีบอัดอัตโนมัติเพื่อให้ลายเซ็นแสดงใน PDF ได้ดีที่สุด)
-                            </p>
+                            <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-2">
+                                <p className="text-[10px] md:text-xs text-blue-700 font-bold leading-relaxed">
+                                    <Info size={14} className="inline mr-1 mb-1"/> <b>คำแนะนำขนาดลายเซ็น:</b><br/>
+                                    1. แนะนำขนาด <b>400 x 200 พิกเซล</b> (หรือสัดส่วน 2:1)<br/>
+                                    2. ควรใช้พื้นหลัง <b>โปร่งใส (Transparent PNG)</b><br/>
+                                    3. วางลายเซ็นให้ <b>อยู่กึ่งกลางรูปภาพ</b> พอดี<br/>
+                                    เพื่อให้ลายเซ็นวางบนเส้นประในเอกสารได้สวยงามที่สุด
+                                </p>
+                            </div>
                             <label className="cursor-pointer bg-purple-50 text-purple-700 border border-purple-200 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-purple-100 transition-colors">
                                 <UploadCloud size={20}/> เลือกรูปภาพลายเซ็น
                                 <input type="file" className="hidden" accept="image/*" onChange={handleSignatureUpload}/>

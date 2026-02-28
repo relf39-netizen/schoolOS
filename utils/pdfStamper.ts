@@ -278,6 +278,10 @@ export const generateDirectorCommandMemoPdf = async (opt: CommandMemoOptions): P
 
     curY -= 40;
     const sigX = 320;
+    const linePrefix = "(ลงชื่อ)";
+    const lineDots = ".................................................";
+    const prefixW = thaiFont.widthOfTextAtSize(linePrefix, textSize);
+    const dotsW = thaiFont.widthOfTextAtSize(lineDots, textSize);
     
     if (opt.signatureBase64 && opt.signatureBase64.length > 50) {
         try {
@@ -288,15 +292,15 @@ export const generateDirectorCommandMemoPdf = async (opt: CommandMemoOptions): P
             
             const sDim = sig.scaleToFit(110 * (opt.signatureScale || 1), 50);
             page.drawImage(sig, { 
-                x: sigX + (120 - sDim.width) / 2, 
-                y: curY + (opt.signatureYOffset || 0) + 15, 
+                x: sigX + prefixW + (dotsW - sDim.width) / 2, 
+                y: curY + (opt.signatureYOffset || 0) + 12, 
                 width: sDim.width, 
                 height: sDim.height 
             });
         } catch (e) {}
     }
     
-    page.drawText(`(ลงชื่อ).................................................`, { x: sigX, y: curY, size: textSize, font: thaiFont });
+    page.drawText(`${linePrefix}${lineDots}`, { x: sigX, y: curY, size: textSize, font: thaiFont });
     curY -= 25;
     page.drawText(`(${opt.directorName})`, { x: sigX + 25, y: curY, size: textSize, font: thaiFont });
     curY -= 25;
@@ -789,17 +793,27 @@ export const generateLeaveSummaryPdf = async (opt: any): Promise<string> => {
 
     // Signature Area
     const sigX = 320;
+    const linePrefix = "(ลงชื่อ)";
+    const lineDots = ".................................................";
+    const prefixW = thaiFont.widthOfTextAtSize(linePrefix, 14);
+    const dotsW = thaiFont.widthOfTextAtSize(lineDots, 14);
+
     if (opt.directorSignatureBase64) {
         try {
             const dSigBytes = dataURItoUint8Array(opt.directorSignatureBase64);
             let dSigImage;
             try { dSigImage = await pdfDoc.embedPng(dSigBytes); } catch { dSigImage = await pdfDoc.embedJpg(dSigBytes); }
             const dDim = dSigImage.scaleToFit(100 * (opt.directorSignatureScale || 1), 45);
-            page.drawImage(dSigImage, { x: sigX + 40, y: curY + (opt.directorSignatureYOffset || 0) + 15, width: dDim.width, height: dDim.height });
+            page.drawImage(dSigImage, { 
+                x: sigX + prefixW + (dotsW - dDim.width) / 2, 
+                y: curY + (opt.directorSignatureYOffset || 0) + 12, 
+                width: dDim.width, 
+                height: dDim.height 
+            });
         } catch (e) {}
     }
     
-    page.drawText(`(ลงชื่อ).................................................`, { x: sigX, y: curY, size: 14, font: thaiFont });
+    page.drawText(`${linePrefix}${lineDots}`, { x: sigX, y: curY, size: 14, font: thaiFont });
     curY -= 25;
     page.drawText(`(${opt.directorName})`, { x: sigX + 25, y: curY, size: 14, font: thaiFont });
     curY -= 25;

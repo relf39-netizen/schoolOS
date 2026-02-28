@@ -7,7 +7,7 @@ import {
     ChevronRight, Info, Search, LayoutGrid, FileText,
     ChevronLeft, ChevronsLeft, ChevronsRight, Shield, UserCog,
     FileCheck, BookOpen, Fingerprint, Key, Activity, BarChart3,
-    Lock, Mail, Bell, ZapOff, ChevronDown
+    Lock, Mail, Bell, ZapOff, ChevronDown, Image
 } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
@@ -278,7 +278,11 @@ function setTelegramWebhook() {
                 script_url: config.scriptUrl,
                 telegram_bot_token: config.telegramBotToken,
                 telegram_bot_username: config.telegramBotUsername,
-                app_base_url: config.appBaseUrl
+                app_base_url: config.appBaseUrl,
+                official_garuda_base_64: config.officialGarudaBase64,
+                director_signature_base_64: config.directorSignatureBase64,
+                director_signature_scale: config.directorSignatureScale,
+                director_signature_y_offset: config.directorSignatureYOffset
             });
             if (!error) alert("บันทึกการตั้งค่าสำเร็จ");
             else throw error;
@@ -531,6 +535,44 @@ function setTelegramWebhook() {
                                             >
                                                 <RefreshCw size={14}/> เชื่อมต่อ Webhook (Set Webhook)
                                             </button>
+                                        </div>
+                                    </div>
+                                    <div className="lg:col-span-2">
+                                        <div className="bg-white p-6 rounded-2xl border border-slate-100 space-y-6 shadow-sm">
+                                            <h5 className="font-black text-slate-800 flex items-center gap-3 uppercase text-[10px] tracking-widest">
+                                                <Image size={20} className="text-orange-500"/> ตราครุฑ / ตราโรงเรียน (สำหรับหัวจดหมาย)
+                                            </h5>
+                                            <div className="flex flex-col md:flex-row gap-6 items-center">
+                                                <div className="w-24 h-24 bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center overflow-hidden shrink-0">
+                                                    {config.officialGarudaBase64 ? (
+                                                        <img src={config.officialGarudaBase64} className="w-full h-full object-contain" alt="Garuda" />
+                                                    ) : (
+                                                        <span className="text-[10px] text-slate-300 font-bold">ไม่มีรูป</span>
+                                                    )}
+                                                </div>
+                                                <div className="flex-1 space-y-3">
+                                                    <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+                                                        แนะนำรูปภาพประเภท PNG พื้นหลังโปร่งใส ขนาดประมาณ 300x300 พิกเซล <br/>
+                                                        รูปนี้จะใช้เป็นตราครุฑใน "บันทึกข้อความ" และเอกสารราชการต่างๆ
+                                                    </p>
+                                                    <input 
+                                                        type="file" 
+                                                        accept="image/*"
+                                                        onChange={async (e) => {
+                                                            const file = e.target.files?.[0];
+                                                            if (file) {
+                                                                const reader = new FileReader();
+                                                                reader.onload = (event) => {
+                                                                    const base64 = event.target?.result as string;
+                                                                    setConfig({ ...config, officialGarudaBase64: base64 });
+                                                                };
+                                                                reader.readAsDataURL(file);
+                                                            }
+                                                        }}
+                                                        className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 transition-all"
+                                                    />
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="lg:col-span-2"><div className="bg-slate-900 p-8 rounded-2xl border-2 border-slate-800 shadow-md relative overflow-hidden group"><h5 className="font-black text-white flex items-center gap-4 uppercase text-[10px] tracking-widest mb-6"><Zap className="text-yellow-400" size={24}/> Application URL</h5><div className="space-y-4"><input type="text" placeholder="https://your-app.vercel.app" value={config.appBaseUrl || ''} onChange={e => setConfig({...config, appBaseUrl: e.target.value})} className="w-full px-6 py-3 bg-white/5 border border-white/10 focus:border-yellow-400 rounded-xl font-mono text-base text-yellow-100 outline-none transition-all shadow-inner"/><div className="flex gap-4 items-center text-slate-500 px-6 py-2 bg-white/5 rounded-xl border border-white/10 w-fit backdrop-blur-md"><Info size={16} className="text-yellow-400 shrink-0"/><p className="text-[10px] font-bold uppercase tracking-widest">* URL หลักของแอปที่ท่านติดตั้ง เพื่อส่งลิงก์ใน Telegram</p></div></div></div></div>
