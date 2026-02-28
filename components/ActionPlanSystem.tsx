@@ -5,7 +5,8 @@ import {
     Wallet, BookOpen, Settings, X, Save, CalendarRange, ChevronDown, 
     CheckSquare, Coins, Edit3, AlertCircle, TrendingUp, PieChart, 
     FileText, UserPlus, ToggleLeft, ToggleRight, CalendarPlus,
-    Users, Zap, Layers, Download, Printer, FileSpreadsheet, RefreshCw
+    Users, Zap, Layers, Download, Printer, FileSpreadsheet, RefreshCw,
+    ArrowRight
 } from 'lucide-react';
 import { supabase, isConfigured } from '../supabaseClient';
 import { generateActionPlanPdf } from '../utils/pdfStamper';
@@ -311,19 +312,44 @@ const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser, curren
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {departments.map(dept => {
+                        {departments.map((dept, index) => {
                             const deptAllocated = dept.projects.reduce((sum, p) => sum + p.subsidyBudget + p.learnerDevBudget, 0);
                             const deptSpent = dept.projects.reduce((sum, p) => sum + (p.actualExpense || 0), 0);
                             const style = getDeptStyle(dept.name);
+                            const gradients = [
+                                'from-blue-500 to-indigo-600',
+                                'from-orange-500 to-amber-600',
+                                'from-emerald-500 to-teal-600',
+                                'from-slate-600 to-slate-800',
+                                'from-rose-500 to-pink-600'
+                            ];
+                            const gradient = gradients[index % gradients.length];
                             return (
-                                <div key={dept.id} onClick={() => { setSelectedDept(dept); setViewMode('DETAIL'); }} className={`bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 hover:shadow-2xl cursor-pointer transition-all group hover:-translate-y-1 relative overflow-hidden ${style.borderHover}`}>
-                                    <div className={`absolute top-0 right-0 p-8 opacity-[0.05] group-hover:scale-125 transition-transform duration-700 ${style.ghostText}`}>{React.createElement(style.icon, { size: 120 })}</div>
-                                    <div className={`${style.bgClass} ${style.colorClass} p-4 w-fit rounded-2xl transition-all mb-6 shadow-inner border border-white`}>{React.createElement(style.icon, { size: 28 })}</div>
-                                    <h4 className="font-black text-xl text-slate-800 mb-2 leading-tight">{dept.name}</h4>
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">{dept.projects.length} โครงการในกลุ่มงาน</p>
-                                    <div className="space-y-3 border-t pt-6 border-slate-50">
-                                        <div className="flex justify-between items-center text-xs font-bold"><span className="text-slate-400">งบประมาณจัดสรร:</span><span className="text-slate-700 font-black">฿{deptAllocated.toLocaleString()}</span></div>
-                                        <div className="flex justify-between items-center text-xs font-bold"><span className="text-slate-400">ใช้จ่ายจริงแล้ว:</span><span className="text-emerald-600 font-black">฿{deptSpent.toLocaleString()}</span></div>
+                                <div 
+                                    key={dept.id} 
+                                    onClick={() => { setSelectedDept(dept); setViewMode('DETAIL'); }} 
+                                    className={`relative p-8 rounded-[2.5rem] shadow-lg hover:shadow-2xl cursor-pointer transition-all group hover:-translate-y-2 overflow-hidden bg-gradient-to-br ${gradient} text-white border-none`}
+                                >
+                                    <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-150 group-hover:rotate-12 transition-all duration-700 text-white">
+                                        {React.createElement(style.icon, { size: 140 })}
+                                    </div>
+                                    <div className="bg-white/20 backdrop-blur-md p-4 w-fit rounded-2xl transition-all mb-6 shadow-xl border border-white/20 text-white">
+                                        {React.createElement(style.icon, { size: 28 })}
+                                    </div>
+                                    <h4 className="font-black text-xl text-white mb-2 leading-tight drop-shadow-md">{dept.name}</h4>
+                                    <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-6">{dept.projects.length} โครงการในกลุ่มงาน</p>
+                                    <div className="space-y-3 border-t pt-6 border-white/20">
+                                        <div className="flex justify-between items-center text-xs font-bold">
+                                            <span className="text-white/70">งบประมาณจัดสรร:</span>
+                                            <span className="text-white font-black">฿{deptAllocated.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-xs font-bold">
+                                            <span className="text-white/70">ใช้จ่ายจริงแล้ว:</span>
+                                            <span className="text-white font-black">฿{deptSpent.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                    <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
+                                        <ArrowRight className="text-white"/>
                                     </div>
                                 </div>
                             );

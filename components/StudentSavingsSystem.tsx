@@ -1055,8 +1055,9 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
                             key={student.id}
-                            className={`bg-white p-6 rounded-[2.5rem] shadow-sm border transition-all group relative ${isSelectionMode && selectedIds.has(student.id) ? 'border-pink-500 ring-2 ring-pink-200' : 'border-slate-100 hover:shadow-xl'}`}
+                            className={`p-6 rounded-[2.5rem] shadow-sm border transition-all group relative overflow-hidden ${isSelectionMode && selectedIds.has(student.id) ? 'bg-pink-50 border-pink-500 ring-2 ring-pink-200' : 'bg-white border-slate-100 hover:shadow-xl hover:bg-gradient-to-br hover:from-white hover:to-slate-50'}`}
                         >
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-pink-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-700"></div>
                             {isSelectionMode && (
                                 <div 
                                     className="absolute top-4 right-4 z-10"

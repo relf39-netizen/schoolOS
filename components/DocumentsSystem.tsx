@@ -1136,7 +1136,15 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         {displayedDocs.map(docItem => (
                             <div key={docItem.id} className="group bg-white p-4 md:p-5 rounded-2xl border-2 transition-all cursor-pointer overflow-hidden flex flex-col md:flex-row md:items-center gap-4 md:gap-6 border-slate-50 hover:border-blue-200 hover:shadow-md" onClick={() => { setSelectedDoc(docItem); setViewMode('DETAIL'); }}>
                                 <div className="flex items-center gap-4 md:gap-6 flex-1 min-w-0">
-                                    <div className={`p-4 md:p-5 rounded-2xl shrink-0 transition-all group-hover:scale-125 shadow-lg group-hover:shadow-2xl border-2 border-white ring-4 ${docItem.category === 'ORDER' ? 'bg-gradient-to-br from-emerald-50 to-teal-700 text-white ring-emerald-50' : 'bg-gradient-to-br from-blue-50 to-indigo-700 text-white ring-blue-50'}`}>
+                                    <div className={`p-4 md:p-5 rounded-2xl shrink-0 transition-all group-hover:scale-125 shadow-lg group-hover:shadow-2xl border-2 border-white ring-4 ${
+                                        docItem.category === 'ORDER' 
+                                            ? 'bg-gradient-to-br from-emerald-400 to-teal-700 text-white ring-emerald-50' 
+                                            : docItem.status === 'PendingDirector'
+                                                ? 'bg-gradient-to-br from-orange-400 to-red-700 text-white ring-orange-50'
+                                                : docItem.status === 'Distributed'
+                                                    ? 'bg-gradient-to-br from-blue-400 to-indigo-700 text-white ring-blue-50'
+                                                    : 'bg-gradient-to-br from-slate-400 to-slate-700 text-white ring-slate-50'
+                                    }`}>
                                         {docItem.category === 'ORDER' ? <Megaphone size={24}/> : <FileText size={24}/>}
                                     </div>
                                     <div className="flex-1 min-w-0 space-y-1">

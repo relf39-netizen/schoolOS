@@ -352,24 +352,40 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                     <div className="lg:col-span-4 space-y-4">
                         <h3 className="font-black text-xl text-slate-800 flex items-center gap-2 px-2"><Clock className="text-amber-500"/> งานรอพิจารณา {pendingRequests.length > 0 && <span className="bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full">{pendingRequests.length}</span>}</h3>
                         {pendingRequests.length === 0 ? (<div className="bg-slate-50 border-2 border-dashed border-slate-200 p-10 rounded-3xl text-center text-slate-400 font-bold">ไม่มีรายการค้างพิจารณา</div>) : (
-                            pendingRequests.map(req => (
-                                <div key={req.id} onClick={() => { setSelectedRequest(req); setViewMode('PDF'); }} className="bg-white p-5 rounded-3xl shadow-sm border-2 border-slate-100 hover:border-emerald-500 cursor-pointer transition-all hover:shadow-xl group relative overflow-hidden">
-                                    <div className="flex justify-between items-start mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-black">{req.teacherName[0]}</div>
-                                            <div>
-                                                <p className="font-black text-slate-800 leading-none mb-1">{req.teacherName}</p>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase">{req.teacherPosition}</p>
-                                            </div>
+                            pendingRequests.map((req, idx) => {
+                                const gradients = [
+                                    'from-emerald-500 to-teal-600',
+                                    'from-blue-500 to-indigo-600',
+                                    'from-purple-500 to-fuchsia-600',
+                                    'from-orange-500 to-amber-600',
+                                    'from-rose-500 to-pink-600'
+                                ];
+                                const gradient = gradients[idx % gradients.length];
+                                return (
+                                    <div key={req.id} onClick={() => { setSelectedRequest(req); setViewMode('PDF'); }} className={`p-5 rounded-3xl shadow-lg cursor-pointer transition-all hover:shadow-2xl group relative overflow-hidden bg-gradient-to-br ${gradient} text-white border-none hover:-translate-y-1`}>
+                                        <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-10 group-hover:opacity-20 transition-opacity">
+                                            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <circle cx="90" cy="10" r="30" fill="white" />
+                                                <circle cx="10" cy="90" r="20" fill="white" />
+                                            </svg>
                                         </div>
-                                        <ChevronRight className="text-slate-200 group-hover:text-emerald-500 transition-colors"/>
+                                        <div className="flex justify-between items-start mb-3 relative z-10">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-2xl bg-white/20 text-white flex items-center justify-center font-black backdrop-blur-md shadow-inner">{req.teacherName[0]}</div>
+                                                <div>
+                                                    <p className="font-black text-white leading-none mb-1 drop-shadow-sm">{req.teacherName}</p>
+                                                    <p className="text-[10px] text-white/70 font-bold uppercase tracking-wider">{req.teacherPosition}</p>
+                                                </div>
+                                            </div>
+                                            <ChevronRight className="text-white/50 group-hover:text-white transition-colors"/>
+                                        </div>
+                                        <div className="bg-white/10 backdrop-blur-md p-3 rounded-2xl space-y-1 relative z-10 border border-white/10">
+                                            <div className="flex justify-between items-center text-[11px] font-black"><span className="text-white/60">ประเภท:</span><span className="text-white">{getLeaveTypeName(req.type)}</span></div>
+                                            <div className="flex justify-between items-center text-[11px] font-black"><span className="text-white/60">วันที่:</span><span className="text-white">{getThaiDate(req.startDate)}</span></div>
+                                        </div>
                                     </div>
-                                    <div className="bg-slate-50 p-3 rounded-2xl space-y-1">
-                                        <div className="flex justify-between items-center text-[11px] font-black"><span className="text-slate-400">ประเภท:</span><span className="text-indigo-600">{getLeaveTypeName(req.type)}</span></div>
-                                        <div className="flex justify-between items-center text-[11px] font-black"><span className="text-slate-400">วันที่:</span><span className="text-slate-700">{getThaiDate(req.startDate)}</span></div>
-                                    </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
 

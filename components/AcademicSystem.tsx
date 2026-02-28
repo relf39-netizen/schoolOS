@@ -343,16 +343,16 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
         return (
             <div className="space-y-8 pb-20 animate-fade-in">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <button onClick={() => setViewMode('DASHBOARD')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${viewMode === 'DASHBOARD' ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' : 'bg-white text-slate-500 border-slate-100 hover:border-indigo-200'}`}>
+                    <button onClick={() => setViewMode('DASHBOARD')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${viewMode === 'DASHBOARD' ? 'bg-gradient-to-br from-indigo-500 to-blue-700 text-white border-transparent shadow-lg shadow-indigo-200' : 'bg-white text-slate-500 border-slate-100 hover:border-indigo-200'}`}>
                         <LayoutDashboard size={24}/><span className="text-xs font-black uppercase tracking-widest">สรุปภาพรวม</span>
                     </button>
-                    <button onClick={() => setViewMode('CALENDAR')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${viewMode === 'CALENDAR' ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' : 'bg-white text-slate-500 border-slate-100 hover:border-indigo-200'}`}>
+                    <button onClick={() => setViewMode('CALENDAR')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${viewMode === 'CALENDAR' ? 'bg-gradient-to-br from-purple-500 to-indigo-700 text-white border-transparent shadow-lg shadow-purple-200' : 'bg-white text-slate-500 border-slate-100 hover:border-purple-200'}`}>
                         <Calendar size={24}/><span className="text-xs font-black uppercase tracking-widest">ปฏิทินปฏิบัติงาน</span>
                     </button>
-                    <button onClick={() => setViewMode('SAR')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${viewMode === 'SAR' ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' : 'bg-white text-slate-500 border-slate-100 hover:border-indigo-200'}`}>
+                    <button onClick={() => setViewMode('SAR')} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${viewMode === 'SAR' ? 'bg-gradient-to-br from-emerald-500 to-teal-700 text-white border-transparent shadow-lg shadow-emerald-200' : 'bg-white text-slate-500 border-slate-100 hover:border-emerald-200'}`}>
                         <FileText size={24}/><span className="text-xs font-black uppercase tracking-widest">รายงาน SAR</span>
                     </button>
-                    <div className="bg-indigo-50 p-4 rounded-2xl border-2 border-indigo-100 flex flex-col items-center justify-center text-indigo-700">
+                    <div className="bg-gradient-to-br from-slate-100 to-slate-200 p-4 rounded-2xl border-2 border-slate-200 flex flex-col items-center justify-center text-slate-600 shadow-inner">
                         <Database size={20}/><span className="text-[10px] font-black uppercase mt-1 tracking-widest">SQL Cloud Link</span>
                     </div>
                 </div>

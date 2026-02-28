@@ -320,34 +320,41 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {accounts.filter(a => a.type === activeTab).map((acc, index) => {
                     const balance = getAccountBalance(acc.id);
-                    const styles = activeTab === 'Coop' 
-                        ? ['bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-200']
+                    const gradients = activeTab === 'Coop' 
+                        ? ['from-purple-500 to-indigo-600', 'from-fuchsia-500 to-purple-600', 'from-violet-500 to-indigo-700']
                         : activeTab === 'NonBudget' 
-                            ? ['bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200']
-                            : ['bg-gradient-to-br from-amber-50 to-orange-50 border-orange-200'];
+                            ? ['from-blue-500 to-cyan-600', 'from-cyan-500 to-blue-600', 'from-sky-500 to-indigo-600']
+                            : ['from-amber-500 to-orange-600', 'from-orange-500 to-red-600', 'from-yellow-500 to-amber-600'];
+                    const gradient = gradients[index % gradients.length];
                     return (
                         <div 
                             key={acc.id} 
                             onClick={() => { setSelectedAccount(acc); setViewMode('DETAIL'); }}
-                            className={`relative rounded-[2rem] shadow-sm hover:shadow-xl border-2 p-8 transition-all cursor-pointer group hover:-translate-y-1 ${styles[index % styles.length]}`}
+                            className={`relative rounded-[2.5rem] shadow-lg hover:shadow-2xl p-8 transition-all cursor-pointer group hover:-translate-y-2 bg-gradient-to-br ${gradient} text-white border-none overflow-hidden`}
                         >
+                            <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-10 group-hover:opacity-20 transition-opacity">
+                                <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M0,50 Q25,0 50,50 T100,50" stroke="white" strokeWidth="2" fill="none" />
+                                    <circle cx="80" cy="20" r="15" fill="white" />
+                                </svg>
+                            </div>
                             {canEdit && activeTab === 'Budget' && (
-                                <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 rounded-full p-1 border">
-                                    <button onClick={(e) => { e.stopPropagation(); setEditingAccount(acc); setNewAccountName(acc.name); setShowEditAccountModal(true); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors"><Edit2 size={14}/></button>
-                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteAccount(acc.id); }} className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={14}/></button>
+                                <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/20 backdrop-blur-md rounded-full p-1 border border-white/20 z-20">
+                                    <button onClick={(e) => { e.stopPropagation(); setEditingAccount(acc); setNewAccountName(acc.name); setShowEditAccountModal(true); }} className="p-2 text-white hover:bg-white/20 rounded-full transition-colors"><Edit2 size={14}/></button>
+                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteAccount(acc.id); }} className="p-2 text-white hover:bg-red-500 rounded-full transition-colors"><Trash2 size={14}/></button>
                                 </div>
                             )}
-                            <div className="flex justify-between items-start mb-8">
-                                <div className="p-4 rounded-2xl bg-white shadow-inner border border-slate-100">
-                                    {activeTab === 'Coop' ? <ShoppingBag size={28} className="text-purple-600"/> : <FileText size={28} className="text-slate-600"/>}
+                            <div className="flex justify-between items-start mb-8 relative z-10">
+                                <div className="p-4 rounded-2xl bg-white/20 backdrop-blur-md shadow-xl border border-white/20 text-white">
+                                    {activeTab === 'Coop' ? <ShoppingBag size={28}/> : <FileText size={28}/>}
                                 </div>
                             </div>
-                            <h3 className="font-black text-xl text-slate-800 line-clamp-2 min-h-[3.5rem] leading-tight">{acc.name}</h3>
-                            <div className="flex justify-between items-end border-t pt-4 mt-4 border-slate-200/50">
-                                <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">ยอดคงเหลือ</span>
-                                <span className={`text-2xl font-black ${balance >= 0 ? 'text-slate-800' : 'text-red-600'}`}>฿{balance.toLocaleString()}</span>
+                            <h3 className="font-black text-xl text-white line-clamp-2 min-h-[3.5rem] leading-tight drop-shadow-md relative z-10">{acc.name}</h3>
+                            <div className="flex justify-between items-end border-t pt-4 mt-4 border-white/20 relative z-10">
+                                <span className="text-[10px] text-white/70 font-black uppercase tracking-widest">ยอดคงเหลือ</span>
+                                <span className={`text-2xl font-black drop-shadow-md`}>฿{balance.toLocaleString()}</span>
                             </div>
-                            <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0"><ArrowRight className="text-slate-400"/></div>
+                            <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0 z-10"><ArrowRight className="text-white"/></div>
                         </div>
                     );
                 })}

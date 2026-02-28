@@ -10,6 +10,7 @@ export enum SystemView {
   PLAN = 'PLAN',
   ACADEMIC = 'ACADEMIC', // New View
   SAVINGS = 'SAVINGS',   // New View for Student Savings
+  STUDENT_ATTENDANCE = 'STUDENT_ATTENDANCE', // New View for Student Attendance
   ADMIN_USERS = 'ADMIN_USERS',
   PROFILE = 'PROFILE',
   DIRECTOR_CALENDAR = 'DIRECTOR_CALENDAR'
@@ -278,6 +279,24 @@ export interface Student {
   academicYear: string; // e.g., "2567"
   isActive: boolean;
   totalSavings?: number; // Calculated field
+  
+  // Alumni Fields
+  isAlumni?: boolean;
+  graduationYear?: string;
+  batchNumber?: string;
+}
+
+export type StudentAttendanceStatus = 'Present' | 'Late' | 'Sick' | 'Absent';
+
+export interface StudentAttendance {
+  id: string;
+  schoolId: string;
+  studentId: string;
+  date: string; // YYYY-MM-DD
+  status: StudentAttendanceStatus;
+  academicYear: string;
+  createdBy: string; // Teacher ID
+  createdAt: string;
 }
 
 export type SavingTransactionType = 'DEPOSIT' | 'WITHDRAWAL';
