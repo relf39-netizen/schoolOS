@@ -7,12 +7,15 @@ import {
     ChevronRight, Info, Search, LayoutGrid, FileText,
     ChevronLeft, ChevronsLeft, ChevronsRight, Shield, UserCog,
     FileCheck, BookOpen, Fingerprint, Key, Activity, BarChart3,
-    Lock, Mail, Bell, ZapOff, ChevronDown, Image
+    Lock, Mail, Bell, ZapOff, ChevronDown, Image, GraduationCap,
+    Calendar, Plus, FileSpreadsheet, ArrowUpRight, ArrowDownRight,
+    Filter, Edit2, Download
 } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
-import { Teacher, TeacherRole, SystemConfig, School } from '../types';
+import { Teacher, TeacherRole, SystemConfig, School, Student, ClassRoom, AcademicYear } from '../types';
 import { ACADEMIC_POSITIONS } from '../constants';
+import * as XLSX from 'xlsx';
 
 interface AdminUserManagementProps {
     teachers: Teacher[];
@@ -44,7 +47,7 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
     currentSchool, 
     onUpdateSchool 
 }) => {
-    const [activeTab, setActiveTab] = useState<'USERS' | 'PENDING' | 'SCHOOL_SETTINGS' | 'SETTINGS' | 'CLOUD_SETUP'>('USERS');
+    const [activeTab, setActiveTab] = useState<'USERS' | 'PENDING' | 'STUDENTS' | 'SCHOOL_SETTINGS' | 'SETTINGS' | 'CLOUD_SETUP'>('USERS');
     const [copied, setCopied] = useState(false);
     const [userSearch, setUserSearch] = useState('');
     
@@ -57,6 +60,32 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
 
     const [currentPage, setCurrentPage] = useState(1);
     const ITEMS_PER_PAGE = 12;
+
+    // Student Management State
+    const [students, setStudents] = useState<Student[]>([]);
+    const [classRooms, setClassRooms] = useState<ClassRoom[]>([]);
+    const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+    const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+    const [studentSearch, setStudentSearch] = useState('');
+    const [selectedClass, setSelectedClass] = useState<string>('All');
+    const [currentAcademicYear, setCurrentAcademicYear] = useState<string>('');
+    
+    const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
+    const [isEditStudentOpen, setIsEditStudentOpen] = useState(false);
+    const [isManageClassesOpen, setIsManageClassesOpen] = useState(false);
+    const [isManageYearsOpen, setIsManageYearsOpen] = useState(false);
+    const [isPromoteOpen, setIsPromoteOpen] = useState(false);
+    const [isAlumniOpen, setIsAlumniOpen] = useState(false);
+
+    const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+    const [newStudentName, setNewStudentName] = useState('');
+    const [newStudentClass, setNewStudentClass] = useState('');
+    const [newClassName, setNewClassName] = useState('');
+    const [newYearName, setNewYearName] = useState('');
+    const [promoteFromClass, setPromoteFromClass] = useState('');
+    const [promoteToClass, setPromoteToClass] = useState('');
+    const [graduationYear, setGraduationYear] = useState<string>((new Date().getFullYear() + 543).toString());
+    const [batchNumber, setBatchNumber] = useState<string>('');
 
     const approvedTeachers = teachers.filter(t => 
         t.isApproved !== false && 
@@ -266,6 +295,252 @@ function setTelegramWebhook() {
         fetchClasses();
     }, [currentSchool.id]);
 
+    const fetchStudentData = async () => {
+        if (!supabase) return;
+        setIsLoadingStudents(true);
+        try {
+            // Fetch Years
+            const { data: yearsData } = await supabase
+                .from('academic_years')
+                .select('*')
+                .eq('school_id', currentSchool.id)
+                .order('year', { ascending: false });
+            
+            if (yearsData) {
+                const mappedYears = yearsData.map(y => ({
+                    id: y.id,
+                    schoolId: y.school_id,
+                    year: y.year,
+                    isCurrent: y.is_current
+                }));
+                setAcademicYears(mappedYears);
+                const current = mappedYears.find(y => y.isCurrent);
+                if (current) setCurrentAcademicYear(current.year);
+            }
+
+            // Fetch Classes
+            const { data: classesData } = await supabase
+                .from('class_rooms')
+                .select('*')
+                .eq('school_id', currentSchool.id);
+            
+            if (classesData) {
+                setClassRooms(classesData.map(c => ({
+                    id: c.id,
+                    schoolId: c.school_id,
+                    name: c.name,
+                    academicYear: c.academic_year
+                })));
+            }
+
+            // Fetch Students
+            const { data: studentsData } = await supabase
+                .from('students')
+                .select('*')
+                .eq('school_id', currentSchool.id)
+                .eq('is_active', true);
+            
+            if (studentsData) {
+                setStudents(studentsData.map(s => ({
+                    id: s.id,
+                    schoolId: s.school_id,
+                    name: s.name,
+                    currentClass: s.current_class,
+                    academicYear: s.academic_year,
+                    isActive: s.is_active,
+                    isAlumni: s.is_alumni,
+                    graduationYear: s.graduation_year,
+                    batchNumber: s.batch_number
+                })));
+            }
+        } catch (err) {
+            console.error("Error fetching student data:", err);
+        } finally {
+            setIsLoadingStudents(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'STUDENTS') {
+            fetchStudentData();
+        }
+    }, [activeTab, currentSchool.id]);
+
+    const handleAddStudent = async () => {
+        if (!newStudentName || !newStudentClass || !supabase) return;
+        try {
+            const { data, error } = await supabase
+                .from('students')
+                .insert([{
+                    school_id: currentSchool.id,
+                    name: newStudentName,
+                    current_class: newStudentClass,
+                    academic_year: currentAcademicYear,
+                    is_active: true
+                }])
+                .select();
+            if (error) throw error;
+            if (data) {
+                fetchStudentData();
+                setIsAddStudentOpen(false);
+                setNewStudentName('');
+                setNewStudentClass('');
+            }
+        } catch (err) { console.error(err); }
+    };
+
+    const handleEditStudent = async () => {
+        if (!selectedStudent || !supabase) return;
+        try {
+            const { error } = await supabase
+                .from('students')
+                .update({
+                    name: selectedStudent.name,
+                    current_class: selectedStudent.currentClass
+                })
+                .eq('id', selectedStudent.id);
+            if (error) throw error;
+            fetchStudentData();
+            setIsEditStudentOpen(false);
+            setSelectedStudent(null);
+        } catch (err) { console.error(err); }
+    };
+
+    const handleDeleteStudent = async (id: string) => {
+        if (!confirm('ยืนยันลบนักเรียน?') || !supabase) return;
+        try {
+            const { error } = await supabase.from('students').delete().eq('id', id);
+            if (error) throw error;
+            fetchStudentData();
+        } catch (err) { console.error(err); }
+    };
+
+    const handlePromoteStudents = async () => {
+        if (!promoteFromClass || !promoteToClass || !supabase) return;
+        if (!confirm(`เลื่อนชั้นจาก ${promoteFromClass} ไป ${promoteToClass}?`)) return;
+        try {
+            const { error } = await supabase
+                .from('students')
+                .update({ current_class: promoteToClass })
+                .eq('school_id', currentSchool.id)
+                .eq('current_class', promoteFromClass)
+                .eq('is_active', true);
+            if (error) throw error;
+            fetchStudentData();
+            setIsPromoteOpen(false);
+            alert('เลื่อนชั้นสำเร็จ');
+        } catch (err) { console.error(err); }
+    };
+
+    const handleGraduateStudents = async () => {
+        if (!selectedClass || selectedClass === 'All' || !graduationYear || !supabase) return;
+        if (!confirm(`บันทึกนักเรียนชั้น ${selectedClass} เป็นศิษย์เก่า?`)) return;
+        try {
+            const { error } = await supabase
+                .from('students')
+                .update({
+                    is_active: false,
+                    is_alumni: true,
+                    graduation_year: graduationYear,
+                    batch_number: batchNumber
+                })
+                .eq('school_id', currentSchool.id)
+                .eq('current_class', selectedClass)
+                .eq('is_active', true);
+            if (error) throw error;
+            fetchStudentData();
+            setIsAlumniOpen(false);
+            alert('บันทึกศิษย์เก่าสำเร็จ');
+        } catch (err) { console.error(err); }
+    };
+
+    const handleAddClass = async () => {
+        if (!newClassName || !supabase) return;
+        try {
+            const { error } = await supabase.from('class_rooms').insert([{
+                school_id: currentSchool.id,
+                name: newClassName,
+                academic_year: currentAcademicYear
+            }]);
+            if (error) throw error;
+            fetchStudentData();
+            setNewClassName('');
+        } catch (err) { console.error(err); }
+    };
+
+    const handleDeleteClass = async (id: string) => {
+        if (!confirm('ลบห้องเรียน?') || !supabase) return;
+        try {
+            const { error } = await supabase.from('class_rooms').delete().eq('id', id);
+            if (error) throw error;
+            fetchStudentData();
+        } catch (err) { console.error(err); }
+    };
+
+    const handleAddYear = async () => {
+        if (!newYearName || !supabase) return;
+        try {
+            const { error } = await supabase.from('academic_years').insert([{
+                school_id: currentSchool.id,
+                year: newYearName,
+                is_current: academicYears.length === 0
+            }]);
+            if (error) throw error;
+            fetchStudentData();
+            setNewYearName('');
+        } catch (err) { console.error(err); }
+    };
+
+    const handleSetCurrentYear = async (id: string) => {
+        if (!supabase) return;
+        try {
+            await supabase.from('academic_years').update({ is_current: false }).eq('school_id', currentSchool.id);
+            await supabase.from('academic_years').update({ is_current: true }).eq('id', id);
+            fetchStudentData();
+        } catch (err) { console.error(err); }
+    };
+
+    const downloadTemplate = () => {
+        const templateData = [
+            { 'ชื่อ-นามสกุล': 'เด็กชายตัวอย่าง ดีมาก', 'ชั้น': 'ป.1/1' },
+            { 'ชื่อ-นามสกุล': 'เด็กหญิงใจดี เรียนเก่ง', 'ชั้น': 'ป.1/1' }
+        ];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Template");
+        XLSX.writeFile(wb, "student_import_template.xlsx");
+    };
+
+    const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !supabase) return;
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            const bstr = evt.target?.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const data = XLSX.utils.sheet_to_json(ws) as any[];
+            const toInsert = data.map(row => ({
+                school_id: currentSchool.id,
+                name: row.name || row['ชื่อ-นามสกุล'] || row['ชื่อ'],
+                current_class: row.class || row['ชั้น'] || row['ห้อง'],
+                academic_year: currentAcademicYear,
+                is_active: true
+            })).filter(s => s.name && s.current_class);
+            if (toInsert.length > 0 && supabase) {
+                const { error } = await supabase.from('students').insert(toInsert);
+                if (!error) { fetchStudentData(); alert('นำเข้าสำเร็จ'); }
+                else alert('ขัดข้อง: ' + error.message);
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
+    const filteredStudents = students.filter(s => 
+        (selectedClass === 'All' || s.currentClass === selectedClass) &&
+        (s.name.includes(studentSearch) || s.id.includes(studentSearch))
+    );
+
     const handleSaveConfig = async (e: React.FormEvent) => {
         e.preventDefault();
         const client = supabase;
@@ -395,6 +670,7 @@ function setTelegramWebhook() {
                         รออนุมัติ
                         {pendingTeachers.length > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-full font-bold">{pendingTeachers.length}</span>}
                     </button>
+                    <button onClick={() => setActiveTab('STUDENTS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'STUDENTS' ? 'bg-white text-indigo-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>จัดการนักเรียน</button>
                     <button onClick={() => setActiveTab('SCHOOL_SETTINGS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-white text-orange-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>ข้อมูลโรงเรียน</button>
                     <button onClick={() => setActiveTab('SETTINGS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'SETTINGS' ? 'bg-white text-indigo-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>การเชื่อมต่อ</button>
                     <button onClick={() => setActiveTab('CLOUD_SETUP')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'CLOUD_SETUP' ? 'bg-white text-emerald-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>Cloud Logic</button>
@@ -403,40 +679,114 @@ function setTelegramWebhook() {
 
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 min-h-[500px]">
                 {activeTab === 'USERS' && (
-                    <div className="space-y-6">
+                    <div className="space-y-6 animate-fade-in">
                         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                            <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><Users className="text-blue-600" size={20}/> ทะเบียนบุคลากร ({approvedTeachers.length})</h3>
-                            <div className="flex gap-2 w-full md:w-auto">
+                            <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><Users className="text-blue-600" size={20}/> บัญชีผู้ใช้งาน ({approvedTeachers.length})</h3>
+                            <div className="flex flex-wrap gap-2 w-full md:w-auto">
                                 <div className="relative flex-1 md:w-64">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                                    <input type="text" placeholder="ค้นหาชื่อ..." value={userSearch} onChange={e => { setUserSearch(e.target.value); setCurrentPage(1); }} className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl outline-none focus:border-blue-500 font-bold text-sm shadow-inner"/>
+                                    <input type="text" placeholder="ค้นหาชื่อ หรือ ID..." value={userSearch} onChange={e => setUserSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl outline-none focus:border-blue-500 font-bold text-sm shadow-inner"/>
                                 </div>
-                                <button onClick={() => { setIsAdding(true); setEditForm({id:'', name:'', position:'ครู', roles:['TEACHER'], password:'123456'}); }} className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md hover:bg-blue-700 transition-all text-xs"><UserPlus size={16}/> เพิ่มรายใหม่</button>
+                                <button onClick={() => { setEditForm({}); setIsAdding(true); }} className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md hover:bg-blue-700 transition-all text-sm"><UserPlus size={18}/> เพิ่มบุคลากร</button>
                             </div>
                         </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {approvedTeachers.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE).map(t => (
+                                <div key={t.id} className="bg-slate-50 p-5 rounded-2xl border border-slate-100 group hover:bg-white hover:border-blue-200 transition-all shadow-sm relative overflow-hidden">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-black text-lg shadow-inner">
+                                                {t.name[0]}
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-slate-800 leading-none mb-1">{t.name}</p>
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t.position}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                            <button onClick={() => { setEditForm(t); setEditingId(t.id); }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"><Edit size={16}/></button>
+                                            <button onClick={() => { if(confirm('ยืนยันลบผู้ใช้งาน?')) onDeleteTeacher(t.id); }} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={16}/></button>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {t.roles.map(role => (
+                                            <span key={role} className="px-2 py-0.5 bg-white border border-slate-100 text-slate-500 rounded-md text-[9px] font-bold uppercase tracking-tighter">
+                                                {AVAILABLE_ROLES.find(r => r.id === role)?.label.split(' ')[0] || role}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    {t.isSuspended && (
+                                        <div className="absolute top-0 right-0 bg-red-500 text-white text-[8px] font-black px-2 py-0.5 rounded-bl-lg uppercase tracking-widest">Suspended</div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        {approvedTeachers.length > ITEMS_PER_PAGE && (
+                            <div className="flex justify-center gap-2 pt-6">
+                                <button 
+                                    disabled={currentPage === 1}
+                                    onClick={() => setCurrentPage(prev => prev - 1)}
+                                    className="p-2 rounded-xl border bg-white disabled:opacity-30 hover:bg-slate-50 transition-all"
+                                >
+                                    <ChevronLeft size={20}/>
+                                </button>
+                                <div className="flex items-center px-4 font-bold text-slate-500 text-sm">
+                                    หน้า {currentPage} จาก {Math.ceil(approvedTeachers.length / ITEMS_PER_PAGE)}
+                                </div>
+                                <button 
+                                    disabled={currentPage === Math.ceil(approvedTeachers.length / ITEMS_PER_PAGE)}
+                                    onClick={() => setCurrentPage(prev => prev + 1)}
+                                    className="p-2 rounded-xl border bg-white disabled:opacity-30 hover:bg-slate-50 transition-all"
+                                >
+                                    <ChevronRight size={20}/>
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {activeTab === 'STUDENTS' && (
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                            <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><GraduationCap className="text-indigo-600" size={20}/> ทะเบียนนักเรียน ({filteredStudents.length})</h3>
+                            <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                                <div className="relative flex-1 md:w-48">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+                                    <input type="text" placeholder="ค้นหาชื่อ..." value={studentSearch} onChange={e => setStudentSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl outline-none focus:border-indigo-500 font-bold text-sm shadow-inner"/>
+                                </div>
+                                <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="px-4 py-2 bg-slate-50 border rounded-xl font-bold text-sm outline-none focus:border-indigo-500 shadow-inner">
+                                    <option value="All">ทุกชั้นเรียน</option>
+                                    {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                </select>
+                                <button onClick={() => setIsAddStudentOpen(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md hover:bg-indigo-700 transition-all text-xs"><Plus size={16}/> เพิ่มนักเรียน</button>
+                                <button onClick={() => setIsManageClassesOpen(true)} className="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all text-xs"><LayoutGrid size={16}/> จัดการห้องเรียน</button>
+                                <button onClick={() => setIsManageYearsOpen(true)} className="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all text-xs"><Calendar size={16}/> ปีการศึกษา</button>
+                                <button onClick={() => setIsPromoteOpen(true)} className="bg-amber-50 text-amber-700 px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-amber-100 transition-all text-xs border border-amber-100"><ArrowUpRight size={16}/> เลื่อนชั้น</button>
+                                <button onClick={() => setIsAlumniOpen(true)} className="bg-rose-50 text-rose-700 px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-rose-100 transition-all text-xs border border-rose-100"><GraduationCap size={16}/> บันทึกศิษย์เก่า</button>
+                            </div>
+                        </div>
+
                         <div className="overflow-x-auto rounded-xl border border-slate-100">
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-slate-50 text-slate-500 font-bold text-[10px] uppercase tracking-wider border-b">
-                                    <tr><th className="px-6 py-4">โปรไฟล์บุคลากร</th><th className="px-6 py-4">ตำแหน่ง/สิทธิ์</th><th className="px-6 py-4 text-center">สถานภาพ</th><th className="px-6 py-4 text-right">ดำเนินการ</th></tr>
+                                    <tr><th className="px-6 py-4">ชื่อ-นามสกุล</th><th className="px-6 py-4">ชั้นเรียน</th><th className="px-6 py-4">ปีการศึกษา</th><th className="px-6 py-4 text-right">ดำเนินการ</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
-                                    {paginatedTeachers.map(t => (
-                                        <tr key={t.id} className="hover:bg-slate-50/50 transition-all group">
-                                            <td className="px-6 py-3">
-                                                <div className="font-bold text-slate-800">{t.name}</div>
-                                                <div className="text-[10px] text-slate-400 font-mono">ID: {t.id}</div>
-                                            </td>
-                                            <td className="px-6 py-3">
-                                                <div className="text-xs font-bold text-slate-600 mb-1">{t.position}</div>
-                                                <div className="flex flex-wrap gap-1">
-                                                    {t.roles.map(r => <span key={r} className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-100 uppercase">{r}</span>)}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-3 text-center"><span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${t.isSuspended ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>{t.isSuspended ? 'ระงับ' : 'ปกติ'}</span></td>
+                                    {isLoadingStudents ? (
+                                        <tr><td colSpan={4} className="px-6 py-10 text-center animate-pulse text-slate-400 font-bold">กำลังโหลดข้อมูล...</td></tr>
+                                    ) : filteredStudents.length === 0 ? (
+                                        <tr><td colSpan={4} className="px-6 py-10 text-center text-slate-300 italic">ไม่พบข้อมูลนักเรียน</td></tr>
+                                    ) : filteredStudents.map(s => (
+                                        <tr key={s.id} className="hover:bg-slate-50/50 transition-all group">
+                                            <td className="px-6 py-3 font-bold text-slate-800">{s.name}</td>
+                                            <td className="px-6 py-3 font-bold text-slate-600">{s.currentClass}</td>
+                                            <td className="px-6 py-3 text-slate-400">{s.academicYear}</td>
                                             <td className="px-6 py-3 text-right">
                                                 <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                                                    <button onClick={() => { setEditingId(t.id); setEditForm(t); setIsAdding(false); }} className="p-1.5 text-blue-600 bg-white rounded-lg hover:bg-blue-600 hover:text-white border shadow-sm transition-all"><Edit size={14}/></button>
-                                                    <button onClick={() => { if(confirm('ยืนยันลบ?')) onDeleteTeacher(t.id); }} className="p-1.5 text-red-400 bg-white rounded-lg hover:bg-red-600 hover:text-white border shadow-sm transition-all"><Trash2 size={14}/></button>
+                                                    <button onClick={() => { setSelectedStudent(s); setIsEditStudentOpen(true); }} className="p-1.5 text-blue-600 bg-white rounded-lg hover:bg-blue-600 hover:text-white border shadow-sm transition-all"><Edit2 size={14}/></button>
+                                                    <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-red-400 bg-white rounded-lg hover:bg-red-600 hover:text-white border shadow-sm transition-all"><Trash2 size={14}/></button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -611,6 +961,188 @@ function setTelegramWebhook() {
                 )}
             </div>
 
+            {/* Modals for Student Management */}
+            {isAddStudentOpen && (
+                <div className="fixed inset-0 bg-slate-950/80 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
+                        <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><Plus className="text-indigo-600"/> เพิ่มนักเรียนใหม่</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อ-นามสกุล</label>
+                                <input type="text" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-inner"/>
+                            </div>
+                            <div>
+                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ชั้นเรียน</label>
+                                <select value={newStudentClass} onChange={e => setNewStudentClass(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-inner">
+                                    <option value="">-- เลือกชั้นเรียน --</option>
+                                    {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="pt-4 border-t border-slate-50">
+                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">หรือนำเข้าจาก Excel</label>
+                                <div className="flex flex-col gap-2 mt-2">
+                                    <button onClick={downloadTemplate} className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 p-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-emerald-100 transition-all">
+                                        <Download size={16}/> ดาวน์โหลดเทมเพลต Excel
+                                    </button>
+                                    <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-600 p-3 rounded-xl font-bold text-center text-xs flex items-center justify-center gap-2 transition-all">
+                                        <FileSpreadsheet size={16}/> เลือกไฟล์ Excel เพื่อนำเข้า
+                                        <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleImportExcel}/>
+                                    </label>
+                                </div>
+                            </div>
+                            <div className="flex gap-3 pt-6">
+                                <button onClick={() => setIsAddStudentOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-[10px]">ยกเลิก</button>
+                                <button onClick={handleAddStudent} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl font-black shadow-lg hover:bg-indigo-700 transition-all">บันทึกข้อมูล</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isEditStudentOpen && selectedStudent && (
+                <div className="fixed inset-0 bg-slate-950/80 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
+                        <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><Edit2 className="text-blue-600"/> แก้ไขข้อมูลนักเรียน</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อ-นามสกุล</label>
+                                <input type="text" value={selectedStudent.name} onChange={e => setSelectedStudent({...selectedStudent, name: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-blue-500 shadow-inner"/>
+                            </div>
+                            <div>
+                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ชั้นเรียน</label>
+                                <select value={selectedStudent.currentClass} onChange={e => setSelectedStudent({...selectedStudent, currentClass: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-blue-500 shadow-inner">
+                                    {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="flex gap-3 pt-6">
+                                <button onClick={() => setIsEditStudentOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-[10px]">ยกเลิก</button>
+                                <button onClick={handleEditStudent} className="flex-[2] py-3 bg-blue-600 text-white rounded-xl font-black shadow-lg hover:bg-blue-700 transition-all">บันทึกการแก้ไข</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isManageClassesOpen && (
+                <div className="fixed inset-0 bg-slate-950/80 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><LayoutGrid className="text-indigo-600"/> จัดการห้องเรียน</h3>
+                            <button onClick={() => setIsManageClassesOpen(false)} className="p-2 hover:bg-slate-50 rounded-full text-slate-300"><X size={20}/></button>
+                        </div>
+                        <div className="space-y-6">
+                            <div className="flex gap-2">
+                                <input type="text" value={newClassName} onChange={e => setNewClassName(e.target.value)} placeholder="ชื่อห้อง เช่น ป.1/1" className="flex-1 p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-inner"/>
+                                <button onClick={handleAddClass} className="bg-indigo-600 text-white px-4 rounded-xl font-bold hover:bg-indigo-700 transition-all"><Plus size={20}/></button>
+                            </div>
+                            <div className="max-h-64 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                                {classRooms.length === 0 ? <p className="text-center text-slate-300 italic py-4">ยังไม่มีข้อมูลห้องเรียน</p> : classRooms.map(c => (
+                                    <div key={c.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                        <span className="font-bold text-slate-700">{c.name}</span>
+                                        <button onClick={() => handleDeleteClass(c.id)} className="text-red-400 hover:text-red-600 transition-all"><Trash2 size={16}/></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isManageYearsOpen && (
+                <div className="fixed inset-0 bg-slate-950/80 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Calendar className="text-indigo-600"/> จัดการปีการศึกษา</h3>
+                            <button onClick={() => setIsManageYearsOpen(false)} className="p-2 hover:bg-slate-50 rounded-full text-slate-300"><X size={20}/></button>
+                        </div>
+                        <div className="space-y-6">
+                            <div className="flex gap-2">
+                                <input type="text" value={newYearName} onChange={e => setNewYearName(e.target.value)} placeholder="ปีการศึกษา เช่น 2567" className="flex-1 p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-inner"/>
+                                <button onClick={handleAddYear} className="bg-indigo-600 text-white px-4 rounded-xl font-bold hover:bg-indigo-700 transition-all"><Plus size={20}/></button>
+                            </div>
+                            <div className="max-h-64 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                                {academicYears.map(y => (
+                                    <div key={y.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                        <div className="flex items-center gap-3">
+                                            <span className="font-bold text-slate-700">{y.year}</span>
+                                            {y.isCurrent && <span className="bg-emerald-100 text-emerald-600 text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">ปัจจุบัน</span>}
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {!y.isCurrent && <button onClick={() => handleSetCurrentYear(y.id)} className="text-xs font-bold text-indigo-600 hover:underline">ตั้งเป็นปัจจุบัน</button>}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isPromoteOpen && (
+                <div className="fixed inset-0 bg-slate-950/80 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
+                        <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><ArrowUpRight className="text-amber-600"/> เลื่อนระดับชั้นนักเรียน</h3>
+                        <div className="space-y-6">
+                            <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 mb-6">
+                                <p className="text-xs text-amber-700 font-bold leading-relaxed">ระบบจะเปลี่ยนชั้นเรียนของนักเรียนทุกคนในชั้นต้นทาง ไปยังชั้นปลายทางที่เลือก</p>
+                            </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">จากชั้นเรียน</label>
+                                    <select value={promoteFromClass} onChange={e => setPromoteFromClass(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-amber-500 shadow-inner">
+                                        <option value="">-- เลือกชั้นต้นทาง --</option>
+                                        {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="flex justify-center py-2 text-slate-300"><ChevronDown size={24}/></div>
+                                <div>
+                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ไปยังชั้นเรียน</label>
+                                    <select value={promoteToClass} onChange={e => setPromoteToClass(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-amber-500 shadow-inner">
+                                        <option value="">-- เลือกชั้นปลายทาง --</option>
+                                        {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="flex gap-3 pt-6">
+                                <button onClick={() => setIsPromoteOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-[10px]">ยกเลิก</button>
+                                <button onClick={handlePromoteStudents} className="flex-[2] py-3 bg-amber-600 text-white rounded-xl font-black shadow-lg hover:bg-amber-700 transition-all">ยืนยันการเลื่อนชั้น</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isAlumniOpen && (
+                <div className="fixed inset-0 bg-slate-950/80 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
+                        <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><GraduationCap className="text-rose-600"/> บันทึกศิษย์เก่า</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">เลือกชั้นเรียนที่จบ</label>
+                                <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-rose-500 shadow-inner">
+                                    <option value="All">-- เลือกชั้นเรียน --</option>
+                                    {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ปีที่จบ (พ.ศ.)</label>
+                                    <input type="text" value={graduationYear} onChange={e => setGraduationYear(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-rose-500 shadow-inner"/>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">รุ่นที่จบ</label>
+                                    <input type="text" value={batchNumber} onChange={e => setBatchNumber(e.target.value)} placeholder="เช่น รุ่นที่ 50" className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-rose-500 shadow-inner"/>
+                                </div>
+                            </div>
+                            <div className="flex gap-3 pt-6">
+                                <button onClick={() => setIsAlumniOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-[10px]">ยกเลิก</button>
+                                <button onClick={handleGraduateStudents} className="flex-[2] py-3 bg-rose-600 text-white rounded-xl font-black shadow-lg hover:bg-rose-700 transition-all">บันทึกศิษย์เก่า</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {(isAdding || editingId) && (
                 <div className="fixed inset-0 bg-slate-950/90 z-[70] flex items-center justify-center p-4 backdrop-blur-md animate-fade-in">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-8 animate-scale-up border-2 border-blue-50 overflow-y-auto max-h-[90vh] no-scrollbar relative">
@@ -645,7 +1177,7 @@ function setTelegramWebhook() {
                                 <label className="block text-[10px] font-black text-slate-400 uppercase ml-1">ห้องเรียนที่รับผิดชอบ (ครูประจำชั้น)</label>
                                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-inner">
                                     {availableClasses.length === 0 ? (
-                                        <p className="text-[10px] text-slate-400 font-bold italic">ยังไม่มีข้อมูลห้องเรียนในระบบ (กรุณาเพิ่มในเมนูออมทรัพย์)</p>
+                                        <p className="text-[10px] text-slate-400 font-bold italic">ยังไม่มีข้อมูลห้องเรียนในระบบ (กรุณาเพิ่มในแท็บจัดการนักเรียน)</p>
                                     ) : (
                                         <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                                             {availableClasses.map(className => {

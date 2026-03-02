@@ -457,7 +457,7 @@ const App: React.FC = () => {
                             />
                             <DashboardCard view={SystemView.ACADEMIC} title="งานวิชาการ" slogan="สถิตินักเรียน / ผลสอบ O-NET" icon={GraduationCap} gradient="from-indigo-500 to-purple-700"/>
                             <DashboardCard view={SystemView.STUDENT_ATTENDANCE} title="เช็คชื่อนักเรียน" slogan="บันทึกการมาเรียนรายวัน" icon={UserCheck} gradient="from-emerald-500 to-teal-600"/>
-                            <DashboardCard view={SystemView.SAVINGS} title="ออมทรัพย์นักเรียน" slogan="บันทึกเงินออม และการเลื่อนชั้น" icon={PiggyBank} gradient="from-pink-500 to-rose-600"/>
+                            <DashboardCard view={SystemView.SAVINGS} title="ออมทรัพย์นักเรียน" slogan="บันทึกเงินออมนักเรียน" icon={PiggyBank} gradient="from-pink-500 to-rose-600"/>
                             <DashboardCard view={SystemView.PLAN} title="แผนปฏิบัติการ" slogan="วางแผนแม่นยำ สู่ความสำเร็จ" icon={CalendarRange} gradient="from-fuchsia-500 to-purple-700"/>
                             <DashboardCard view={SystemView.LEAVE} title="ระบบการลา" slogan="โปร่งใส ตรวจสอบง่าย" icon={UserCheck} gradient="from-emerald-400 to-teal-600" badge={pendingLeaveCount > 0 ? `รออนุมัติ ${pendingLeaveCount}` : null}/>
                             <DashboardCard view={SystemView.ATTENDANCE} title="ลงเวลาทำงาน" slogan="เช็คเวลาแม่นยำ ด้วย GPS" icon={Clock} gradient="from-rose-400 to-red-600"/>

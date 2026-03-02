@@ -36,7 +36,7 @@ interface StudentAttendanceSystemProps {
 }
 
 const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ currentUser }) => {
-    const [viewMode, setViewMode] = useState<'DASHBOARD' | 'RECORD' | 'HISTORY' | 'ALUMNI'>('DASHBOARD');
+    const [viewMode, setViewMode] = useState<'DASHBOARD' | 'RECORD' | 'HISTORY'>('DASHBOARD');
     const [students, setStudents] = useState<Student[]>([]);
     const [attendance, setAttendance] = useState<StudentAttendance[]>([]);
     const [classRooms, setClassRooms] = useState<ClassRoom[]>([]);
@@ -54,10 +54,6 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
     // Statistics State
     const [statsDate, setStatsDate] = useState<string>(formatToISODate(new Date()));
     const [individualStudent, setIndividualStudent] = useState<Student | null>(null);
-
-    // Alumni State
-    const [graduationYear, setGraduationYear] = useState<string>((new Date().getFullYear() + 543).toString());
-    const [batchNumber, setBatchNumber] = useState<string>('');
 
     const isAdmin = currentUser.roles.includes('SYSTEM_ADMIN') || currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('VICE_DIRECTOR');
     const isDirector = currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('VICE_DIRECTOR');
@@ -228,38 +224,6 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
         } catch (error) {
             console.error('Error saving attendance:', error);
             alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const handleGraduate = async () => {
-        if (!selectedClass || !graduationYear || !supabase) return;
-        if (!confirm(`ยืนยันการบันทึกนักเรียนชั้น ${selectedClass} เป็นศิษย์เก่ารุ่นที่ ${batchNumber || '-'} ปีที่จบ ${graduationYear}?`)) return;
-        
-        setIsSaving(true);
-        try {
-            const classStudents = students.filter(s => s.currentClass === selectedClass);
-            const studentIds = classStudents.map(s => s.id);
-
-            const { error } = await supabase
-                .from('students')
-                .update({
-                    is_active: false,
-                    is_alumni: true,
-                    graduation_year: graduationYear,
-                    batch_number: batchNumber
-                })
-                .in('id', studentIds);
-
-            if (error) throw error;
-            
-            alert('บันทึกข้อมูลศิษย์เก่าเรียบร้อยแล้ว');
-            await fetchInitialData();
-            setViewMode('DASHBOARD');
-        } catch (error) {
-            console.error('Error graduating students:', error);
-            alert('เกิดข้อผิดพลาดในการบันทึกข้อมูลศิษย์เก่า');
         } finally {
             setIsSaving(false);
         }
@@ -453,14 +417,6 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                             style={{ width: `${(dailyStats.recorded / dailyStats.total) * 100}%` }}
                                         ></div>
                                     </div>
-                                    <div className="pt-4 border-t border-slate-50">
-                                        <button 
-                                            onClick={() => setViewMode('ALUMNI')}
-                                            className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
-                                        >
-                                            <GraduationCap size={18} /> จัดการศิษย์เก่า
-                                        </button>
-                                    </div>
                                 </div>
                             </div>
 
@@ -541,81 +497,6 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                     </div>
                                 </div>
                             ))}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {viewMode === 'ALUMNI' && (
-                <div className="space-y-6 animate-slide-up">
-                    <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
-                        <div className="flex justify-between items-center mb-8 border-b pb-6 border-slate-50">
-                            <div className="flex items-center gap-4">
-                                <button onClick={() => setViewMode('DASHBOARD')} className="p-2 hover:bg-slate-50 rounded-full text-slate-400 transition-all">
-                                    <ArrowLeft size={24} />
-                                </button>
-                                <div>
-                                    <h3 className="font-black text-xl text-slate-800">จัดการข้อมูลศิษย์เก่า</h3>
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">บันทึกนักเรียนที่จบการศึกษา</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="max-w-2xl mx-auto space-y-8 py-8">
-                            <div className="bg-indigo-50 p-8 rounded-[2.5rem] border border-indigo-100 text-center">
-                                <div className="w-20 h-20 bg-white text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl border-4 border-indigo-200">
-                                    <GraduationCap size={40} />
-                                </div>
-                                <h4 className="font-black text-xl text-indigo-900 mb-2">บันทึกจบการศึกษา</h4>
-                                <p className="text-sm text-indigo-700 font-medium">เลือกชั้นเรียนที่ต้องการบันทึกเป็นศิษย์เก่า ระบบจะเปลี่ยนสถานะนักเรียนทุกคนในชั้นนี้เป็นศิษย์เก่าและหยุดการนับสถิติการมาเรียน</p>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-2">
-                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">เลือกชั้นเรียน</label>
-                                    <select 
-                                        className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 outline-none focus:border-indigo-500 transition-all"
-                                        value={selectedClass}
-                                        onChange={(e) => setSelectedClass(e.target.value)}
-                                    >
-                                        <option value="">-- เลือกชั้นเรียน --</option>
-                                        {filteredClassRooms.map(c => (
-                                            <option key={c.id} value={c.name}>{c.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ปีที่จบ (พ.ศ.)</label>
-                                    <input 
-                                        type="text" 
-                                        className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 outline-none focus:border-indigo-500 transition-all"
-                                        value={graduationYear}
-                                        onChange={(e) => setGraduationYear(e.target.value)}
-                                        placeholder="เช่น 2567"
-                                    />
-                                </div>
-                                <div className="md:col-span-2 space-y-2">
-                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">รุ่นที่จบ (ถ้ามี)</label>
-                                    <input 
-                                        type="text" 
-                                        className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-700 outline-none focus:border-indigo-500 transition-all"
-                                        value={batchNumber}
-                                        onChange={(e) => setBatchNumber(e.target.value)}
-                                        placeholder="เช่น รุ่นที่ 50"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="pt-6">
-                                <button 
-                                    onClick={handleGraduate}
-                                    disabled={!selectedClass || isSaving}
-                                    className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-lg shadow-xl hover:bg-black transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
-                                >
-                                    {isSaving ? <TrendingUp className="animate-spin" size={24} /> : <CheckCircle2 size={24} />}
-                                    ยืนยันบันทึกศิษย์เก่า
-                                </button>
-                            </div>
                         </div>
                     </div>
                 </div>

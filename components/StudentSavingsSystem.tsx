@@ -27,10 +27,6 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
     const [currentAcademicYear, setCurrentAcademicYear] = useState<string>(new Date().getFullYear() + 543 + '');
     
     // Modals
-    const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
-    const [isEditStudentOpen, setIsEditStudentOpen] = useState(false);
-    const [isManageClassesOpen, setIsManageClassesOpen] = useState(false);
-    const [isManageYearsOpen, setIsManageYearsOpen] = useState(false);
     const [isTransactionOpen, setIsTransactionOpen] = useState(false);
     const [isDetailViewOpen, setIsDetailViewOpen] = useState(false);
     const [isEditTransactionOpen, setIsEditTransactionOpen] = useState(false);
@@ -52,20 +48,6 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
     // Modals
     const [isManageTeachersOpen, setIsManageTeachersOpen] = useState(false);
     const [selectedTeacherForEdit, setSelectedTeacherForEdit] = useState<Teacher | null>(null);
-
-    // New Student Form
-    const [newStudentName, setNewStudentName] = useState('');
-    const [newStudentClass, setNewStudentClass] = useState('');
-
-    // New Class Form
-    const [newClassName, setNewClassName] = useState('');
-
-    // New Year Form
-    const [newYearName, setNewYearName] = useState('');
-
-    // Promotion Form
-    const [promoteFromClass, setPromoteFromClass] = useState('');
-    const [promoteToClass, setPromoteToClass] = useState('');
 
     const isAdmin = currentUser.roles.includes('SYSTEM_ADMIN') || currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('VICE_DIRECTOR') || currentUser.roles.includes('ACTING_DIRECTOR');
     const isDirector = currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('VICE_DIRECTOR') || currentUser.roles.includes('ACTING_DIRECTOR');
@@ -191,179 +173,17 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
         }
     };
 
-    const handleAddStudent = async () => {
-        if (!newStudentName || !newStudentClass || !supabase) return;
-
-        try {
-            const { data, error } = await supabase
-                .from('students')
-                .insert([{
-                    school_id: currentUser.schoolId,
-                    name: newStudentName,
-                    current_class: newStudentClass,
-                    academic_year: currentAcademicYear,
-                    is_active: true
-                }])
-                .select();
-
-            if (error) throw error;
-
-            if (data) {
-                const newStudent: Student = {
-                    id: data[0].id,
-                    schoolId: data[0].school_id,
-                    name: data[0].name,
-                    currentClass: data[0].current_class,
-                    academicYear: data[0].academic_year,
-                    isActive: data[0].is_active,
-                    totalSavings: 0
-                };
-                setStudents([...students, newStudent]);
-                setIsAddStudentOpen(false);
-                setNewStudentName('');
-                setNewStudentClass('');
+    const toggleSelectStudent = (id: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
             }
-        } catch (error) {
-            console.error('Error adding student:', error);
-        }
+            return next;
+        });
     };
-
-    const handleAddClass = async () => {
-        if (!newClassName || !supabase) return;
-        try {
-            const { data, error } = await supabase
-                .from('class_rooms')
-                .insert([{
-                    school_id: currentUser.schoolId,
-                    name: newClassName,
-                    academic_year: currentAcademicYear
-                }])
-                .select();
-            if (error) throw error;
-            if (data) {
-                setClassRooms([...classRooms, {
-                    id: data[0].id,
-                    schoolId: data[0].school_id,
-                    name: data[0].name,
-                    academicYear: data[0].academic_year
-                }]);
-                setNewClassName('');
-            }
-        } catch (error) {
-            console.error('Error adding class:', error);
-        }
-    };
-
-    const handleDeleteClass = async (id: string) => {
-        if (!confirm('ยืนยันลบห้องเรียนนี้?') || !supabase) return;
-        try {
-            const { error } = await supabase.from('class_rooms').delete().eq('id', id);
-            if (error) throw error;
-            setClassRooms(classRooms.filter(c => c.id !== id));
-        } catch (error) {
-            console.error('Error deleting class:', error);
-        }
-    };
-
-    const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file || !supabase) return;
-
-        const reader = new FileReader();
-        reader.onload = async (evt) => {
-            const bstr = evt.target?.result;
-            const wb = XLSX.read(bstr, { type: 'binary' });
-            const wsname = wb.SheetNames[0];
-            const ws = wb.Sheets[wsname];
-            const data = XLSX.utils.sheet_to_json(ws) as any[];
-
-            const studentsToInsert = data.map(row => ({
-                school_id: currentUser.schoolId,
-                name: row.name || row['ชื่อ-นามสกุล'] || row['ชื่อ'],
-                current_class: row.class || row['ชั้น'] || row['ห้อง'],
-                academic_year: currentAcademicYear,
-                is_active: true
-            })).filter(s => s.name && s.current_class);
-
-            if (studentsToInsert.length === 0) {
-                alert('ไม่พบข้อมูลนักเรียนในไฟล์ หรือรูปแบบไม่ถูกต้อง (ต้องการคอลัมน์ name และ class)');
-                return;
-            }
-
-            try {
-                if (!supabase) return;
-                const { data: insertedData, error } = await supabase
-                    .from('students')
-                    .insert(studentsToInsert)
-                    .select();
-
-                if (error) throw error;
-                if (insertedData) {
-                    fetchData(); // Reload all
-                    alert(`นำเข้าข้อมูลนักเรียน ${insertedData.length} คนเรียบร้อยแล้ว`);
-                }
-            } catch (error) {
-                console.error('Error importing students:', error);
-                alert('เกิดข้อผิดพลาดในการนำเข้าข้อมูล');
-            }
-        };
-        reader.readAsBinaryString(file);
-    };
-
-    const downloadTemplate = () => {
-        const templateData = [
-            { 'ชื่อ-นามสกุล': 'เด็กชายตัวอย่าง ดีมาก', 'ชั้น': 'ป.1/1' },
-            { 'ชื่อ-นามสกุล': 'เด็กหญิงใจดี เรียนเก่ง', 'ชั้น': 'ป.1/1' }
-        ];
-        const ws = XLSX.utils.json_to_sheet(templateData);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Students");
-        XLSX.writeFile(wb, "Student_Import_Template.xlsx");
-    };
-
-    const handleAddYear = async () => {
-        if (!newYearName || !supabase) return;
-        try {
-            const { data, error } = await supabase
-                .from('academic_years')
-                .insert([{
-                    school_id: currentUser.schoolId,
-                    year: newYearName,
-                    is_current: academicYears.length === 0
-                }])
-                .select();
-            if (error) throw error;
-            if (data) {
-                fetchData();
-                setNewYearName('');
-            }
-        } catch (error) {
-            console.error('Error adding year:', error);
-        }
-    };
-
-    const handleSetCurrentYear = async (id: string) => {
-        if (!supabase) return;
-        try {
-            await supabase.from('academic_years').update({ is_current: false }).eq('school_id', currentUser.schoolId);
-            await supabase.from('academic_years').update({ is_current: true }).eq('id', id);
-            fetchData();
-        } catch (error) {
-            console.error('Error setting current year:', error);
-        }
-    };
-
-    const handleDeleteYear = async (id: string) => {
-        if (!confirm('ยืนยันลบปีการศึกษานี้?') || !supabase) return;
-        try {
-            const { error } = await supabase.from('academic_years').delete().eq('id', id);
-            if (error) throw error;
-            fetchData();
-        } catch (error) {
-            console.error('Error deleting year:', error);
-        }
-    };
-
     const printIndividualReport = (student: Student) => {
         const studentTransactions = savings
             .filter(s => s.studentId === student.id)
@@ -624,128 +444,6 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
         }
     };
 
-    const handleDeleteStudent = async (studentId: string) => {
-        if (!confirm('ยืนยันลบข้อมูลนักเรียนและประวัติการออมทั้งหมด? การดำเนินการนี้ไม่สามารถย้อนกลับได้') || !supabase) return;
-
-        try {
-            // Delete savings first
-            const { error: savingsError } = await supabase
-                .from('student_savings')
-                .delete()
-                .eq('student_id', studentId);
-
-            if (savingsError) throw savingsError;
-
-            // Delete student
-            const { error: studentError } = await supabase
-                .from('students')
-                .delete()
-                .eq('id', studentId);
-
-            if (studentError) throw studentError;
-
-            // Update local state
-            setStudents(prev => prev.filter(s => s.id !== studentId));
-            setSavings(prev => prev.filter(s => s.studentId !== studentId));
-            setSelectedIds(prev => {
-                const next = new Set(prev);
-                next.delete(studentId);
-                return next;
-            });
-            
-            if (selectedStudent?.id === studentId) {
-                setIsDetailViewOpen(false);
-                setSelectedStudent(null);
-            }
-
-            alert('ลบข้อมูลนักเรียนเรียบร้อยแล้ว');
-        } catch (error) {
-            console.error('Error deleting student:', error);
-            alert('เกิดข้อผิดพลาดในการลบข้อมูล');
-        }
-    };
-
-    const handleDeleteSelected = async () => {
-        if (selectedIds.size === 0 || !supabase) return;
-        
-        if (!confirm(`ยืนยันลบข้อมูลนักเรียนที่เลือกจำนวน ${selectedIds.size} คน และประวัติการออมทั้งหมด? การดำเนินการนี้ไม่สามารถย้อนกลับได้`)) return;
-
-        try {
-            const idsArray = Array.from(selectedIds);
-
-            // Delete savings
-            const { error: savingsError } = await supabase
-                .from('student_savings')
-                .delete()
-                .in('student_id', idsArray);
-
-            if (savingsError) throw savingsError;
-
-            // Delete students
-            const { error: studentError } = await supabase
-                .from('students')
-                .delete()
-                .in('id', idsArray);
-
-            if (studentError) throw studentError;
-
-            // Update local state
-            setStudents(prev => prev.filter(s => !selectedIds.has(s.id)));
-            setSavings(prev => prev.filter(s => !selectedIds.has(s.studentId)));
-            setSelectedIds(new Set());
-            setIsSelectionMode(false);
-            
-            alert(`ลบข้อมูลนักเรียนจำนวน ${idsArray.length} คนเรียบร้อยแล้ว`);
-        } catch (error) {
-            console.error('Error deleting selected students:', error);
-            alert('เกิดข้อผิดพลาดในการลบข้อมูล');
-        }
-    };
-
-    const handleDeleteAllInClass = async () => {
-        if (selectedClass === 'All') {
-            alert('กรุณาเลือกชั้นเรียนที่ต้องการลบข้อมูลทั้งหมด');
-            return;
-        }
-
-        if (!confirm(`ยืนยันลบข้อมูลนักเรียนทั้งหมดในชั้น ${selectedClass} และประวัติการออมทั้งหมด? การดำเนินการนี้ไม่สามารถย้อนกลับได้`) || !supabase) return;
-
-        try {
-            const classStudents = students.filter(s => s.currentClass === selectedClass);
-            const studentIds = classStudents.map(s => s.id);
-
-            if (studentIds.length === 0) {
-                alert('ไม่พบนักเรียนในชั้นเรียนนี้');
-                return;
-            }
-
-            // Delete savings
-            const { error: savingsError } = await supabase
-                .from('student_savings')
-                .delete()
-                .in('student_id', studentIds);
-
-            if (savingsError) throw savingsError;
-
-            // Delete students
-            const { error: studentError } = await supabase
-                .from('students')
-                .delete()
-                .in('id', studentIds);
-
-            if (studentError) throw studentError;
-
-            // Update local state
-            setStudents(prev => prev.filter(s => !studentIds.includes(s.id)));
-            setSavings(prev => prev.filter(s => !studentIds.includes(s.studentId)));
-            
-            alert(`ลบข้อมูลนักเรียนในชั้น ${selectedClass} จำนวน ${studentIds.length} คนเรียบร้อยแล้ว`);
-        } catch (error) {
-            console.error('Error deleting class students:', error);
-            alert('เกิดข้อผิดพลาดในการลบข้อมูล');
-        }
-    };
-
     const handleUpdateTeacherClasses = async (teacherId: string, assignedClasses: string[]) => {
         if (!supabase) return;
         try {
@@ -761,72 +459,6 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
         } catch (error) {
             console.error('Error updating teacher classes:', error);
             alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-        }
-    };
-
-    const handlePromoteStudents = async (fromClass: string, toClass: string) => {
-        if (!confirm(`ต้องการเลื่อนชั้นนักเรียนจาก ${fromClass} ไปยัง ${toClass} ใช่หรือไม่?`) || !supabase) return;
-
-        try {
-            const studentsToPromote = students.filter(s => s.currentClass === fromClass);
-            
-            for (const student of studentsToPromote) {
-                const { error } = await supabase
-                    .from('students')
-                    .update({ current_class: toClass })
-                    .eq('id', student.id);
-                
-                if (error) throw error;
-            }
-
-            setStudents(prev => prev.map(s => s.currentClass === fromClass ? { ...s, currentClass: toClass } : s));
-            alert('เลื่อนชั้นนักเรียนเรียบร้อยแล้ว');
-        } catch (error) {
-            console.error('Error promoting students:', error);
-            alert('เกิดข้อผิดพลาดในการเลื่อนชั้น');
-        }
-    };
-
-    const toggleSelectStudent = (id: string) => {
-        setSelectedIds(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) {
-                next.delete(id);
-            } else {
-                next.add(id);
-            }
-            return next;
-        });
-    };
-
-    const handleEditStudent = async () => {
-        if (!selectedStudent || !newStudentName || !newStudentClass || !supabase) return;
-
-        try {
-            const { error } = await supabase
-                .from('students')
-                .update({
-                    name: newStudentName,
-                    current_class: newStudentClass
-                })
-                .eq('id', selectedStudent.id);
-
-            if (error) throw error;
-
-            setStudents(prev => prev.map(s => s.id === selectedStudent.id ? {
-                ...s,
-                name: newStudentName,
-                currentClass: newStudentClass
-            } : s));
-
-            setIsEditStudentOpen(false);
-            setSelectedStudent(null);
-            setNewStudentName('');
-            setNewStudentClass('');
-            alert('แก้ไขข้อมูลนักเรียนเรียบร้อยแล้ว');
-        } catch (error) {
-            console.error('Error editing student:', error);
-            alert('เกิดข้อผิดพลาดในการแก้ไขข้อมูล');
         }
     };
 
@@ -920,14 +552,6 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                             <p className="text-slate-400 text-sm font-bold uppercase tracking-wider">ปีการศึกษาปัจจุบัน</p>
                             <div className="flex items-center gap-2 mt-1">
                                 <h2 className="text-3xl font-black text-slate-800">{currentAcademicYear}</h2>
-                                {isAdmin && (
-                                    <button 
-                                        onClick={() => setIsManageYearsOpen(true)}
-                                        className="p-1 text-slate-400 hover:text-pink-600 transition-colors"
-                                    >
-                                        <Settings size={16} />
-                                    </button>
-                                )}
                             </div>
                         </div>
                         <div className="bg-purple-50 p-3 rounded-2xl text-purple-600">
@@ -965,84 +589,39 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                     </div>
                 </div>
                 
-                <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
-                    {isAdmin && (
+                    <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
+                        {isAdmin && (
+                            <button 
+                                onClick={() => {
+                                    setIsSelectionMode(!isSelectionMode);
+                                    if (isSelectionMode) setSelectedIds(new Set());
+                                }}
+                                className={`p-3 rounded-2xl transition-all flex items-center gap-2 font-bold ${isSelectionMode ? 'bg-pink-600 text-white shadow-lg shadow-pink-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                                title="เลือกหลายรายการ"
+                            >
+                                <CheckCircle2 size={20} />
+                                <span className="hidden md:inline">{isSelectionMode ? 'ยกเลิกการเลือก' : 'เลือกหลายคน'}</span>
+                            </button>
+                        )}
+                        {isSelectionMode && (
+                            <button 
+                                onClick={selectAllFiltered}
+                                className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl transition-all font-bold flex items-center gap-2"
+                                title="เลือกทั้งหมดที่แสดงอยู่"
+                            >
+                                <LayoutGrid size={20} />
+                                <span className="hidden md:inline">เลือกทั้งหมด</span>
+                            </button>
+                        )}
                         <button 
-                            onClick={() => {
-                                setIsSelectionMode(!isSelectionMode);
-                                if (isSelectionMode) setSelectedIds(new Set());
-                            }}
-                            className={`p-3 rounded-2xl transition-all flex items-center gap-2 font-bold ${isSelectionMode ? 'bg-pink-600 text-white shadow-lg shadow-pink-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
-                            title="เลือกหลายรายการ"
+                            onClick={printClassReport}
+                            className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-3 rounded-2xl font-bold transition-all"
+                            title="พิมพ์รายงานสรุปชั้นเรียน"
                         >
-                            <CheckCircle2 size={20} />
-                            <span className="hidden md:inline">{isSelectionMode ? 'ยกเลิกการเลือก' : 'เลือกหลายคน'}</span>
+                            <Printer size={20} />
+                            <span className="hidden md:inline">พิมพ์รายงาน</span>
                         </button>
-                    )}
-                    {isSelectionMode && (
-                        <button 
-                            onClick={selectAllFiltered}
-                            className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl transition-all font-bold flex items-center gap-2"
-                            title="เลือกทั้งหมดที่แสดงอยู่"
-                        >
-                            <LayoutGrid size={20} />
-                            <span className="hidden md:inline">เลือกทั้งหมด</span>
-                        </button>
-                    )}
-                    {isSelectionMode && selectedIds.size > 0 && (
-                        <button 
-                            onClick={handleDeleteSelected}
-                            className="flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 text-white px-4 py-3 rounded-2xl font-bold transition-all shadow-lg shadow-rose-200"
-                        >
-                            <Trash2 size={20} />
-                            <span>ลบที่เลือก ({selectedIds.size})</span>
-                        </button>
-                    )}
-                    <button 
-                        onClick={printClassReport}
-                        className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-3 rounded-2xl font-bold transition-all"
-                        title="พิมพ์รายงานสรุปชั้นเรียน"
-                    >
-                        <Printer size={20} />
-                        <span className="hidden md:inline">พิมพ์รายงาน</span>
-                    </button>
-                    {isAdmin && (
-                        <button 
-                            onClick={() => setIsManageTeachersOpen(true)}
-                            className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl transition-all"
-                            title="มอบหมายครูประจำชั้น"
-                        >
-                            <Settings size={20} />
-                        </button>
-                    )}
-                    {isAdmin && (
-                        <button 
-                            onClick={() => setIsManageClassesOpen(true)}
-                            className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl transition-all"
-                            title="จัดการห้องเรียน"
-                        >
-                            <LayoutGrid size={20} />
-                        </button>
-                    )}
-                    {isAdmin && selectedClass !== 'All' && (
-                        <button 
-                            onClick={handleDeleteAllInClass}
-                            className="p-3 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-2xl transition-all"
-                            title={`ลบนักเรียนทั้งหมดในชั้น ${selectedClass}`}
-                        >
-                            <Trash2 size={20} />
-                        </button>
-                    )}
-                    {isAdmin && (
-                        <button 
-                            onClick={() => setIsAddStudentOpen(true)}
-                            className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-2xl font-black transition-all shadow-lg shadow-pink-200 whitespace-nowrap"
-                        >
-                            <UserPlus size={20} />
-                            <span>เพิ่มนักเรียน</span>
-                        </button>
-                    )}
-                </div>
+                    </div>
             </div>
 
             {/* Student List */}
@@ -1096,29 +675,6 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                                         >
                                             <Printer size={16} />
                                         </button>
-                                        {isAdmin && (
-                                            <button 
-                                                onClick={() => {
-                                                    setSelectedStudent(student);
-                                                    setNewStudentName(student.name);
-                                                    setNewStudentClass(student.currentClass);
-                                                    setIsEditStudentOpen(true);
-                                                }}
-                                                className="p-2 text-slate-300 hover:text-blue-500 transition-colors"
-                                                title="แก้ไขข้อมูลนักเรียน"
-                                            >
-                                                <Edit2 size={16} />
-                                            </button>
-                                        )}
-                                        {isAdmin && (
-                                            <button 
-                                                onClick={() => handleDeleteStudent(student.id)}
-                                                className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
-                                                title="ลบข้อมูลนักเรียน"
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                        )}
                                     </div>
                                     <div className="text-right mt-1">
                                         <p className="text-[10px] font-black text-slate-300 uppercase tracking-tighter">ยอดออมสะสม</p>
@@ -1156,292 +712,7 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                 </AnimatePresence>
             </div>
 
-            {/* Promotion Section (Admin Only) */}
-            {isAdmin && (
-                <div className="mt-12 bg-slate-900 p-8 rounded-[3rem] text-white overflow-hidden relative">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-pink-500/10 blur-3xl rounded-full -mr-32 -mt-32"></div>
-                    <div className="relative z-10">
-                        <div className="flex items-center gap-4 mb-6">
-                            <div className="p-3 bg-white/10 rounded-2xl">
-                                <TrendingUp size={24} className="text-pink-400" />
-                            </div>
-                            <div>
-                                <h2 className="text-2xl font-black">ระบบเลื่อนชั้นนักเรียน</h2>
-                                <p className="text-slate-400 font-bold">จัดการย้ายชั้นเรียนเมื่อสิ้นปีการศึกษา</p>
-                            </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            <div className="bg-white/5 p-6 rounded-3xl border border-white/10">
-                                <h3 className="font-bold mb-4 flex items-center gap-2">
-                                    <AlertCircle size={18} className="text-amber-400" />
-                                    คำแนะนำการเลื่อนชั้น
-                                </h3>
-                                <ul className="space-y-3 text-sm text-slate-300 font-medium">
-                                    <li className="flex gap-2">
-                                        <span className="text-pink-400">•</span>
-                                        ยอดเงินออมจะถูกยกยอดไปพร้อมกับตัวนักเรียน
-                                    </li>
-                                    <li className="flex gap-2">
-                                        <span className="text-pink-400">•</span>
-                                        กรุณาตรวจสอบความถูกต้องก่อนดำเนินการ
-                                    </li>
-                                    <li className="flex gap-2">
-                                        <span className="text-pink-400">•</span>
-                                        นักเรียนที่จบการศึกษา (เช่น ป.6) สามารถตั้งค่าเป็น "จบการศึกษา"
-                                    </li>
-                                </ul>
-                            </div>
-                            
-                            <div className="space-y-4">
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-xs font-black text-slate-500 uppercase tracking-widest">จากชั้นเรียน</label>
-                                    <select 
-                                        id="fromClass"
-                                        className="bg-white/10 border-white/20 rounded-2xl py-3 px-4 text-white font-bold focus:ring-pink-500"
-                                        value={promoteFromClass}
-                                        onChange={(e) => setPromoteFromClass(e.target.value)}
-                                    >
-                                        <option value="" className="text-slate-800">เลือกชั้นเรียน</option>
-                                        {classes.filter(c => c !== 'All').map(c => (
-                                            <option key={c} value={c} className="text-slate-800">{c}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-xs font-black text-slate-500 uppercase tracking-widest">ไปที่ชั้นเรียน</label>
-                                    <input 
-                                        id="toClass"
-                                        type="text" 
-                                        placeholder="เช่น ป.2/1 หรือ จบการศึกษา"
-                                        className="bg-white/10 border-white/20 rounded-2xl py-3 px-4 text-white font-bold focus:ring-pink-500"
-                                        value={promoteToClass}
-                                        onChange={(e) => setPromoteToClass(e.target.value)}
-                                    />
-                                </div>
-                                <button 
-                                    onClick={() => {
-                                        if (promoteFromClass && promoteToClass) handlePromoteStudents(promoteFromClass, promoteToClass);
-                                    }}
-                                    className="w-full bg-pink-600 hover:bg-pink-700 text-white py-4 rounded-2xl font-black transition-all shadow-xl shadow-pink-900/20 flex items-center justify-center gap-2"
-                                >
-                                    <CheckCircle2 size={20} />
-                                    ยืนยันการเลื่อนชั้น
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Add Student Modal */}
-            {isAddStudentOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <motion.div 
-                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
-                    >
-                        <div className="p-8">
-                            <div className="flex justify-between items-center mb-8">
-                                <h2 className="text-2xl font-black text-slate-800">เพิ่มนักเรียนใหม่</h2>
-                                <button onClick={() => setIsAddStudentOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
-                                    <X size={24} className="text-slate-400" />
-                                </button>
-                            </div>
-                            
-                            <div className="space-y-6">
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-300 flex flex-col items-center justify-center gap-2">
-                                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">นำเข้าจาก Excel</label>
-                                        <label className="cursor-pointer bg-pink-50 text-pink-700 px-4 py-2 rounded-xl font-black text-[10px] hover:bg-pink-100 transition-all flex items-center gap-2">
-                                            <FileSpreadsheet size={14} />
-                                            เลือกไฟล์
-                                            <input 
-                                                type="file" 
-                                                accept=".xlsx, .xls"
-                                                onChange={handleImportExcel}
-                                                className="hidden"
-                                            />
-                                        </label>
-                                    </div>
-                                    <div className="p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-300 flex flex-col items-center justify-center gap-2">
-                                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Template</label>
-                                        <button 
-                                            onClick={downloadTemplate}
-                                            className="bg-blue-50 text-blue-700 px-4 py-2 rounded-xl font-black text-[10px] hover:bg-blue-100 transition-all flex items-center gap-2"
-                                        >
-                                            <Download size={14} />
-                                            ดาวน์โหลด
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="relative flex items-center py-2">
-                                    <div className="flex-grow border-t border-slate-200"></div>
-                                    <span className="flex-shrink mx-4 text-slate-400 text-[10px] font-black uppercase">หรือเพิ่มทีละคน</span>
-                                    <div className="flex-grow border-t border-slate-200"></div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">ชื่อ-นามสกุล นักเรียน</label>
-                                    <input 
-                                        type="text" 
-                                        className="w-full px-5 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
-                                        placeholder="ระบุชื่อ-นามสกุล"
-                                        value={newStudentName}
-                                        onChange={(e) => setNewStudentName(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">ชั้นเรียน</label>
-                                    <select 
-                                        className="w-full px-5 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
-                                        value={newStudentClass}
-                                        onChange={(e) => setNewStudentClass(e.target.value)}
-                                    >
-                                        <option value="">เลือกชั้นเรียน</option>
-                                        {classRooms
-                                            .filter(c => isAdmin || (currentUser.assignedClasses || []).includes(c.name))
-                                            .map(c => (
-                                                <option key={c.id} value={c.name}>{c.name}</option>
-                                            ))
-                                        }
-                                    </select>
-                                </div>
-                                
-                                <button 
-                                    onClick={handleAddStudent}
-                                    className="w-full bg-pink-600 hover:bg-pink-700 text-white py-5 rounded-2xl font-black text-lg transition-all shadow-lg shadow-pink-200"
-                                >
-                                    บันทึกข้อมูล
-                                </button>
-                            </div>
-                        </div>
-                    </motion.div>
-                </div>
-            )}
-
-            {/* Manage Classes Modal */}
-            {isManageClassesOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <motion.div 
-                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
-                    >
-                        <div className="p-8">
-                            <div className="flex justify-between items-center mb-8">
-                                <h2 className="text-2xl font-black text-slate-800">จัดการห้องเรียน</h2>
-                                <button onClick={() => setIsManageClassesOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
-                                    <X size={24} className="text-slate-400" />
-                                </button>
-                            </div>
-
-                            <div className="space-y-6">
-                                <div className="flex gap-2">
-                                    <input 
-                                        type="text" 
-                                        className="flex-1 px-4 py-3 bg-slate-50 border-none rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
-                                        placeholder="ชื่อห้อง เช่น ป.1/1"
-                                        value={newClassName}
-                                        onChange={(e) => setNewClassName(e.target.value)}
-                                    />
-                                    <button 
-                                        onClick={handleAddClass}
-                                        className="bg-pink-600 text-white p-3 rounded-2xl hover:bg-pink-700 transition-all"
-                                    >
-                                        <Plus size={24} />
-                                    </button>
-                                </div>
-
-                                <div className="max-h-64 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                                    {classRooms.map(c => (
-                                        <div key={c.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                            <span className="font-bold text-slate-700">{c.name}</span>
-                                            <button 
-                                                onClick={() => handleDeleteClass(c.id)}
-                                                className="text-rose-400 hover:text-rose-600 p-1"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {classRooms.length === 0 && (
-                                        <p className="text-center text-slate-400 text-sm font-bold py-4">ยังไม่มีข้อมูลห้องเรียน</p>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </motion.div>
-                </div>
-            )}
-
-            {/* Manage Years Modal */}
-            {isManageYearsOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <motion.div 
-                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
-                    >
-                        <div className="p-8">
-                            <div className="flex justify-between items-center mb-8">
-                                <h2 className="text-2xl font-black text-slate-800">จัดการปีการศึกษา</h2>
-                                <button onClick={() => setIsManageYearsOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
-                                    <X size={24} className="text-slate-400" />
-                                </button>
-                            </div>
-
-                            <div className="space-y-6">
-                                <div className="flex gap-2">
-                                    <input 
-                                        type="text" 
-                                        className="flex-1 px-4 py-3 bg-slate-50 border-none rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
-                                        placeholder="เช่น 2567"
-                                        value={newYearName}
-                                        onChange={(e) => setNewYearName(e.target.value)}
-                                    />
-                                    <button 
-                                        onClick={handleAddYear}
-                                        className="bg-pink-600 text-white p-3 rounded-2xl hover:bg-pink-700 transition-all"
-                                    >
-                                        <Plus size={24} />
-                                    </button>
-                                </div>
-
-                                <div className="max-h-64 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                                    {academicYears.map(y => (
-                                        <div key={y.id} className={`flex justify-between items-center p-3 rounded-xl border transition-all ${y.isCurrent ? 'bg-pink-50 border-pink-200' : 'bg-slate-50 border-slate-100'}`}>
-                                            <div className="flex items-center gap-3">
-                                                <span className={`font-black ${y.isCurrent ? 'text-pink-700' : 'text-slate-700'}`}>{y.year}</span>
-                                                {y.isCurrent && <span className="text-[9px] bg-pink-600 text-white px-2 py-0.5 rounded-full font-black uppercase">ปัจจุบัน</span>}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                {!y.isCurrent && (
-                                                    <button 
-                                                        onClick={() => handleSetCurrentYear(y.id)}
-                                                        className="text-xs font-bold text-blue-600 hover:underline"
-                                                    >
-                                                        ตั้งเป็นปัจจุบัน
-                                                    </button>
-                                                )}
-                                                <button 
-                                                    onClick={() => handleDeleteYear(y.id)}
-                                                    className="text-rose-400 hover:text-rose-600 p-1"
-                                                >
-                                                    <Trash2 size={18} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </motion.div>
-                </div>
-            )}
-
+            {/* Student List */}
             {/* Transaction Modal */}
             {isTransactionOpen && selectedStudent && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -1535,28 +806,6 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                                 >
                                     <Printer size={20} />
                                 </button>
-                                {isAdmin && (
-                                    <button 
-                                        onClick={() => {
-                                            setNewStudentName(selectedStudent.name);
-                                            setNewStudentClass(selectedStudent.currentClass);
-                                            setIsEditStudentOpen(true);
-                                        }}
-                                        className="p-3 bg-white hover:bg-blue-50 text-blue-500 rounded-2xl transition-all shadow-sm"
-                                        title="แก้ไขข้อมูลนักเรียน"
-                                    >
-                                        <Edit2 size={20} />
-                                    </button>
-                                )}
-                                {isAdmin && (
-                                    <button 
-                                        onClick={() => handleDeleteStudent(selectedStudent.id)}
-                                        className="p-3 bg-white hover:bg-rose-50 text-rose-500 rounded-2xl transition-all shadow-sm"
-                                        title="ลบนักเรียน"
-                                    >
-                                        <Trash2 size={20} />
-                                    </button>
-                                )}
                                 <button onClick={() => setIsDetailViewOpen(false)} className="p-3 bg-white hover:bg-slate-50 text-slate-400 rounded-2xl transition-all shadow-sm">
                                     <X size={20} />
                                 </button>
@@ -1621,133 +870,6 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                                             </div>
                                         </div>
                                     ))}
-                            </div>
-                        </div>
-                    </motion.div>
-                </div>
-            )}
-
-            {/* Manage Teachers Modal */}
-            {isManageTeachersOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <motion.div 
-                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
-                    >
-                        <div className="p-8 border-b border-slate-100 flex justify-between items-center">
-                            <div>
-                                <h2 className="text-2xl font-black text-slate-800">มอบหมายครูประจำชั้น</h2>
-                                <p className="text-sm font-bold text-slate-400">กำหนดห้องเรียนที่คุณครูแต่ละท่านรับผิดชอบ</p>
-                            </div>
-                            <button onClick={() => setIsManageTeachersOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
-                                <X size={24} className="text-slate-400" />
-                            </button>
-                        </div>
-
-                        <div className="p-8 overflow-y-auto space-y-4">
-                            {teacherProfiles
-                                .filter(t => !t.roles.includes('DIRECTOR')) // Don't need to assign classes to director
-                                .map(teacher => (
-                                <div key={teacher.id} className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center font-black">
-                                                {teacher.name[0]}
-                                            </div>
-                                            <div>
-                                                <h3 className="font-black text-slate-800">{teacher.name}</h3>
-                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                                    {teacher.roles.join(', ')}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-3">
-                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ห้องเรียนที่รับผิดชอบ</p>
-                                        <div className="flex flex-wrap gap-2">
-                                            {classRooms.map(room => {
-                                                const assignedClasses = teacher.assignedClasses || [];
-                                                const isAssigned = assignedClasses.includes(room.name);
-                                                return (
-                                                    <button
-                                                        key={room.id}
-                                                        onClick={() => {
-                                                            const newAssigned = isAssigned
-                                                                ? assignedClasses.filter(c => c !== room.name)
-                                                                : [...assignedClasses, room.name];
-                                                            handleUpdateTeacherClasses(teacher.id, newAssigned);
-                                                        }}
-                                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                                                            isAssigned 
-                                                            ? 'bg-pink-600 text-white shadow-md shadow-pink-100' 
-                                                            : 'bg-white text-slate-500 border border-slate-200 hover:border-pink-300'
-                                                        }`}
-                                                    >
-                                                        {room.name}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                        {classRooms.length === 0 && (
-                                            <p className="text-xs text-slate-400 italic">กรุณาเพิ่มห้องเรียนก่อนมอบหมาย</p>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </motion.div>
-                </div>
-            )}
-
-            {/* Edit Student Modal */}
-            {isEditStudentOpen && selectedStudent && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-                    <motion.div 
-                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden"
-                    >
-                        <div className="p-8">
-                            <div className="flex justify-between items-center mb-8">
-                                <h2 className="text-2xl font-black text-slate-800">แก้ไขข้อมูลนักเรียน</h2>
-                                <button onClick={() => setIsEditStudentOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
-                                    <X size={24} className="text-slate-400" />
-                                </button>
-                            </div>
-                            
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">ชื่อ-นามสกุล นักเรียน</label>
-                                    <input 
-                                        type="text" 
-                                        className="w-full px-5 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
-                                        placeholder="ระบุชื่อ-นามสกุล"
-                                        value={newStudentName}
-                                        onChange={(e) => setNewStudentName(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">ชั้นเรียน</label>
-                                    <select 
-                                        className="w-full px-5 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
-                                        value={newStudentClass}
-                                        onChange={(e) => setNewStudentClass(e.target.value)}
-                                    >
-                                        <option value="">เลือกชั้นเรียน</option>
-                                        {classRooms.map(c => (
-                                            <option key={c.id} value={c.name}>{c.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                
-                                <button 
-                                    onClick={handleEditStudent}
-                                    className="w-full bg-pink-600 hover:bg-pink-700 text-white py-5 rounded-2xl font-black text-lg transition-all shadow-lg shadow-pink-200"
-                                >
-                                    บันทึกการแก้ไข
-                                </button>
                             </div>
                         </div>
                     </motion.div>
