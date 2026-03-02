@@ -298,7 +298,7 @@ const App: React.FC = () => {
     const currentSchool = allSchools.find(s => s.id === currentUser?.schoolId);
     const schoolTeachers = allTeachers.filter(t => t.schoolId === currentUser?.schoolId);
 
-    const DashboardCard = ({ view, title, slogan, icon: Icon, gradient, badge, hasBorder }: any) => (
+    const DashboardCard = ({ view, title, slogan, icon: Icon, gradient, notification, hasBorder }: any) => (
         <button 
             onClick={() => setCurrentView(view)}
             className={`group relative p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-lg hover:shadow-2xl transition-all duration-700 text-left overflow-hidden flex flex-col justify-between h-56 md:h-60 hover:-translate-y-2 bg-gradient-to-br ${gradient} text-white border-none`}
@@ -312,15 +312,20 @@ const App: React.FC = () => {
             </div>
             <div className={`absolute -right-12 -top-12 w-48 h-48 rounded-full opacity-[0.1] group-hover:scale-125 transition-transform duration-1000 bg-white`}></div>
             <div className={`absolute left-0 bottom-0 w-32 h-32 rounded-full opacity-[0.05] blur-3xl bg-white`}></div>
+            
+            {notification && (
+                <div className="absolute top-6 right-6 z-30 animate-bounce">
+                    <div className="bg-white text-slate-900 px-4 py-2 rounded-2xl shadow-2xl border-2 border-white/50 flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-red-500 animate-ping"></div>
+                        <span className="text-[10px] md:text-xs font-black tracking-tight whitespace-nowrap">{notification}</span>
+                    </div>
+                </div>
+            )}
+
             <div className="relative z-10">
                 <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl flex items-center justify-center mb-4 md:mb-6 shadow-xl bg-white/20 backdrop-blur-md text-white transition-all duration-500 group-hover:rotate-6 group-hover:scale-110`}>
                     <Icon size={32} className="md:w-[36px] md:h-[36px]" />
                 </div>
-                {badge && (
-                    <div className="absolute top-0 right-0 bg-white text-blue-600 text-[9px] md:text-[10px] font-black px-2 md:px-3 py-1 md:py-1.5 rounded-full animate-pulse shadow-lg border-2 border-white/50 z-20">
-                        {badge}
-                    </div>
-                )}
                 <h3 className="text-xl md:text-2xl font-black text-white mb-1 drop-shadow-sm">{title}</h3>
                 <div className="relative">
                     <p className={`text-xs md:text-sm font-bold leading-relaxed opacity-90 drop-shadow-sm`}>
@@ -341,9 +346,9 @@ const App: React.FC = () => {
 
     const getDocBadge = () => {
         if (pendingDocCount === 0) return null;
-        if (currentUser?.roles.includes('DIRECTOR')) return `รอกิจกรรม ${pendingDocCount}`;
-        if (currentUser?.roles.includes('VICE_DIRECTOR')) return `รอพิจารณา ${pendingDocCount}`;
-        return `หนังสือใหม่ ${pendingDocCount}`;
+        if (currentUser?.roles.includes('DIRECTOR')) return `มีหนังสือต้องเกษียณ ${pendingDocCount} ฉบับ`;
+        if (currentUser?.roles.includes('VICE_DIRECTOR')) return `มีหนังสือรอพิจารณา ${pendingDocCount} ฉบับ`;
+        return `มีหนังสือเข้าใหม่ ${pendingDocCount} ฉบับ`;
     };
 
     if (isLoading || !isDataLoaded) return <div className="h-screen flex flex-col items-center justify-center bg-slate-50 gap-6 font-sarabun">
@@ -442,16 +447,21 @@ const App: React.FC = () => {
                 <div className="max-w-7xl mx-auto">
                     {currentView === SystemView.DASHBOARD ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8 animate-fade-in">
-                            {/* Reordered Dashboard Cards with unique gradients */}
-                            <DashboardCard view={SystemView.DOCUMENTS} title="งานสารบรรณ" slogan="รับ-ส่ง รวดเร็ว ทันใจ" icon={FileText} gradient="from-cyan-400 to-blue-600" badge={getDocBadge()} hasBorder={true}/>
+                            {/* Dashboard Cards with original intense gradients */}
+                            <DashboardCard 
+                                view={SystemView.DOCUMENTS} 
+                                title="งานสารบรรณ" 
+                                slogan="รับ-ส่ง รวดเร็ว ทันใจ" 
+                                icon={FileText} 
+                                gradient="from-cyan-400 to-blue-600" 
+                                notification={getDocBadge()} 
+                                hasBorder={true}
+                            />
                             <DashboardCard 
                                 view={SystemView.DIRECTOR_CALENDAR} 
                                 title="ปฏิทินปฏิบัติงาน ผอ." 
-                                slogan={hasDirectorMissionToday ? (
-                                    <span className="text-white font-black animate-pulse flex items-center gap-1">
-                                        <AlertCircle size={14}/> มีภารกิจวันนี้
-                                    </span>
-                                ) : "แจ้งเตือนนัดหมาย และภารกิจ"} 
+                                slogan="แจ้งเตือนนัดหมาย และภารกิจ" 
+                                notification={hasDirectorMissionToday ? "มีภารกิจวันนี้" : null}
                                 icon={Calendar} 
                                 gradient="from-blue-500 to-indigo-700"
                             />
@@ -459,7 +469,14 @@ const App: React.FC = () => {
                             <DashboardCard view={SystemView.STUDENT_ATTENDANCE} title="เช็คชื่อนักเรียน" slogan="บันทึกการมาเรียนรายวัน" icon={UserCheck} gradient="from-emerald-500 to-teal-600"/>
                             <DashboardCard view={SystemView.SAVINGS} title="ออมทรัพย์นักเรียน" slogan="บันทึกเงินออมนักเรียน" icon={PiggyBank} gradient="from-pink-500 to-rose-600"/>
                             <DashboardCard view={SystemView.PLAN} title="แผนปฏิบัติการ" slogan="วางแผนแม่นยำ สู่ความสำเร็จ" icon={CalendarRange} gradient="from-fuchsia-500 to-purple-700"/>
-                            <DashboardCard view={SystemView.LEAVE} title="ระบบการลา" slogan="โปร่งใส ตรวจสอบง่าย" icon={UserCheck} gradient="from-emerald-400 to-teal-600" badge={pendingLeaveCount > 0 ? `รออนุมัติ ${pendingLeaveCount}` : null}/>
+                            <DashboardCard 
+                                view={SystemView.LEAVE} 
+                                title="ระบบการลา" 
+                                slogan="โปร่งใส ตรวจสอบง่าย" 
+                                icon={UserCheck} 
+                                gradient="from-emerald-400 to-teal-600" 
+                                notification={pendingLeaveCount > 0 ? `รออนุมัติ ${pendingLeaveCount}` : null}
+                            />
                             <DashboardCard view={SystemView.ATTENDANCE} title="ลงเวลาทำงาน" slogan="เช็คเวลาแม่นยำ ด้วย GPS" icon={Clock} gradient="from-rose-400 to-red-600"/>
                             <DashboardCard view={SystemView.FINANCE} title="ระบบการเงิน" slogan="งบประมาณ และรายรับ-จ่าย" icon={Activity} gradient="from-amber-400 to-orange-600"/>
                             {currentUser?.roles.includes('SYSTEM_ADMIN') && (
