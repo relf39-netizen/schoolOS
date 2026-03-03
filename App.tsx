@@ -466,7 +466,7 @@ const App: React.FC = () => {
                                 gradient="from-blue-500 to-indigo-700"
                             />
                             <DashboardCard view={SystemView.ACADEMIC} title="งานวิชาการ" slogan="สถิตินักเรียน / ผลสอบ O-NET" icon={GraduationCap} gradient="from-indigo-500 to-purple-700"/>
-                            <DashboardCard view={SystemView.STUDENT_ATTENDANCE} title="เช็คชื่อนักเรียน" slogan="บันทึกการมาเรียนรายวัน" icon={UserCheck} gradient="from-emerald-500 to-teal-600"/>
+                            <DashboardCard view={SystemView.STUDENT_ATTENDANCE} title="ระบบดูแลช่วยเหลือนักเรียน" slogan="เช็คชื่อ / ข้อมูลพื้นฐานนักเรียน" icon={UserCheck} gradient="from-emerald-500 to-teal-600"/>
                             <DashboardCard view={SystemView.SAVINGS} title="ออมทรัพย์นักเรียน" slogan="บันทึกเงินออมนักเรียน" icon={PiggyBank} gradient="from-pink-500 to-rose-600"/>
                             <DashboardCard view={SystemView.PLAN} title="แผนปฏิบัติการ" slogan="วางแผนแม่นยำ สู่ความสำเร็จ" icon={CalendarRange} gradient="from-fuchsia-500 to-purple-700"/>
                             <DashboardCard 
