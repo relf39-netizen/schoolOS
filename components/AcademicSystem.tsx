@@ -823,16 +823,25 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                         <button onClick={() => setViewMode('DASHBOARD')} className="p-3 bg-white border rounded-2xl text-slate-400 hover:text-slate-800 transition-all"><ChevronLeft size={24}/></button>
                         <h2 className="text-2xl font-black text-slate-800">แก้ไขคะแนน {tempScore.testType.replace('_', ' ')} ปี {tempScore.year}</h2>
                     </div>
-                    <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
-                        {(['RT', 'NT', 'ONET_P6', 'ONET_M3'] as TestType[]).map(t => (
-                            <button 
-                                key={t} 
-                                onClick={() => { setSelectedTestType(t); initScoreForm(tempScore.year, t); }}
-                                className={`px-4 py-2 rounded-lg font-black text-xs transition-all ${tempScore.testType === t ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}
-                            >
-                                {t.replace('_', ' ')}
-                            </button>
-                        ))}
+                    <div className="flex flex-col md:flex-row gap-2">
+                        <select 
+                            value={tempScore.year} 
+                            onChange={e => { setSelectedYear(e.target.value); initScoreForm(e.target.value, tempScore.testType); }} 
+                            className="px-4 py-2 border rounded-xl font-black bg-white outline-none focus:ring-2 ring-indigo-500/20 text-xs"
+                        >
+                            {availableYears.map(y => <option key={y} value={y}>ปีการศึกษา {y}</option>)}
+                        </select>
+                        <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
+                            {(['RT', 'NT', 'ONET_P6', 'ONET_M3'] as TestType[]).map(t => (
+                                <button 
+                                    key={t} 
+                                    onClick={() => { setSelectedTestType(t); initScoreForm(tempScore.year, t); }}
+                                    className={`px-4 py-2 rounded-lg font-black text-xs transition-all ${tempScore.testType === t ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-white'}`}
+                                >
+                                    {t.replace('_', ' ')}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
                 <div className="bg-white p-8 rounded-[2rem] border shadow-sm">
