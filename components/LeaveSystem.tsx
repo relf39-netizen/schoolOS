@@ -54,8 +54,8 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     const [summaryPdfUrl, setSummaryPdfUrl] = useState<string>('');
     const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
-    const isDirectorRole = currentUser.roles.includes('DIRECTOR') || currentUser.isActingDirector;
-    const canViewAll = isDirectorRole || currentUser.roles.includes('SYSTEM_ADMIN') || currentUser.roles.includes('DOCUMENT_OFFICER');
+    const isDirectorRole = (currentUser.roles || []).includes('DIRECTOR') || currentUser.isActingDirector;
+    const canViewAll = isDirectorRole || (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('DOCUMENT_OFFICER');
 
     // --- Helpers ---
     const getThaiDate = (dateStr: string) => dateStr ? new Date(dateStr).toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }) : '';
@@ -164,13 +164,13 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                     };
 
                     const teacher = allTeachers.find(t => t.id === currentReq.teacherId) || currentUser;
-                    const director = allTeachers.find(t => t.roles.includes('DIRECTOR')) || 
+                    const director = allTeachers.find(t => (t.roles || []).includes('DIRECTOR')) || 
                                      allTeachers.find(t => t.isActingDirector) || 
                                      { name: '....................', position: 'ผู้อำนวยการโรงเรียน', roles: [] as string[], isActingDirector: false, signatureBase64: '' };
 
                     const directorPosition = (director as any).isActingDirector 
                         ? 'รักษาการในตำแหน่งผู้อำนวยการโรงเรียน' 
-                        : ((director as any).roles?.includes('DIRECTOR') ? 'ผู้อำนวยการโรงเรียน' : (director.position || 'ผู้อำนวยการโรงเรียน'));
+                        : (((director as any).roles || []).includes('DIRECTOR') ? 'ผู้อำนวยการโรงเรียน' : (director.position || 'ผู้อำนวยการโรงเรียน'));
 
                     const base64Pdf = await generateOfficialLeavePdf({
                         req: currentReq,
@@ -179,7 +179,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                         schoolName: currentSchool.name,
                         directorName: director.name,
                         directorPosition: directorPosition,
-                        directorSignatureBase64: currentReq.status !== 'Pending' ? ((director as any).signatureBase64 || ((director as any).roles?.includes('DIRECTOR') ? sysConfig?.directorSignatureBase64 : '')) : '',
+                        directorSignatureBase64: currentReq.status !== 'Pending' ? ((director as any).signatureBase64 || (((director as any).roles || []).includes('DIRECTOR') ? sysConfig?.directorSignatureBase64 : '')) : '',
                         teacherSignatureBase64: teacher.signatureBase64,
                         officialGarudaBase64: sysConfig?.officialGarudaBase64,
                         directorSignatureScale: sysConfig?.directorSignatureScale,
@@ -220,7 +220,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
         if (!error && data) {
             const newReqId = data[0].id;
             if (sysConfig?.telegramBotToken) {
-                const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && (t.roles.includes('DIRECTOR') || t.isActingDirector));
+                const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && ((t.roles || []).includes('DIRECTOR') || t.isActingDirector));
                 let message = leaveType === 'OffCampus' 
                     ? `🏃‍♂️ <b>แจ้งเตือน: ขออนุญาตออกนอกบริเวณ</b>\nจาก: <b>${currentUser.name}</b>\nวันที่: <b>${getThaiDate(payload.start_date)}</b>\nเวลา: <b>${startTime} - ${endTime} น.</b>\nครูสอนแทน: ${substituteName || '-'}\nเหตุผล: ${reason}`
                     : `📂 <b>แจ้งเตือน: มีใบเสนอลาใหม่</b>\nจาก: <b>${currentUser.name}</b>\nประเภท: ${getLeaveTypeName(leaveType)}\nเหตุผล: ${reason}\nช่วงวันที่: ${getThaiDate(payload.start_date)} - ${getThaiDate(payload.end_date)}`;
@@ -289,9 +289,9 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
     const handleGenerateSummaryReport = async () => {
         setIsGeneratingSummary(true);
         try {
-            const director = allTeachers.find(t => t.roles.includes('DIRECTOR')) || allTeachers.find(t => t.isActingDirector);
+            const director = allTeachers.find(t => (t.roles || []).includes('DIRECTOR')) || allTeachers.find(t => t.isActingDirector);
             const schoolTeachers = allTeachers
-                .filter(t => t.schoolId === currentUser.schoolId && !t.roles.includes('DIRECTOR'))
+                .filter(t => t.schoolId === currentUser.schoolId && !(t.roles || []).includes('DIRECTOR'))
                 .sort((a, b) => {
                     const indexA = ACADEMIC_POSITIONS.indexOf(a.position);
                     const indexB = ACADEMIC_POSITIONS.indexOf(b.position);
@@ -307,7 +307,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                 directorName: director?.name || '....................',
                 directorPosition: director?.isActingDirector ? 'รักษาการในตำแหน่งผู้อำนวยการโรงเรียน' : 'ผู้อำนวยการโรงเรียน',
                 officialGarudaBase64: sysConfig?.officialGarudaBase64,
-                directorSignatureBase64: director?.signatureBase64 || (director?.roles.includes('DIRECTOR') ? sysConfig?.directorSignatureBase64 : ''),
+                directorSignatureBase64: director?.signatureBase64 || ((director?.roles || []).includes('DIRECTOR') ? sysConfig?.directorSignatureBase64 : ''),
                 directorSignatureScale: sysConfig?.directorSignatureScale || 1.0,
                 directorSignatureYOffset: sysConfig?.directorSignatureYOffset || 0,
                 proxyUrl: sysConfig?.scriptUrl 
@@ -630,7 +630,7 @@ const LeaveSystem: React.FC<LeaveSystemProps> = ({ currentUser, allTeachers, cur
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                        {allTeachers.filter(t => t.schoolId === currentUser.schoolId && !t.roles.includes('DIRECTOR')).map(t => {
+                                        {allTeachers.filter(t => t.schoolId === currentUser.schoolId && !(t.roles || []).includes('DIRECTOR')).map(t => {
                                             const s = getTeacherStats(t.id, statStartDate, statEndDate);
                                             return (
                                                 <tr key={t.id} className="hover:bg-slate-50 transition-colors">

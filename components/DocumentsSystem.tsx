@@ -157,24 +157,24 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     const [teacherSearchTerm, setTeacherSearchTerm] = useState('');
 
     // --- Permissions / Role Detection ---
-    const isDirector = currentUser.roles.includes('DIRECTOR') || currentUser.isActingDirector;
-    const isViceDirector = currentUser.roles.includes('VICE_DIRECTOR'); 
-    const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
-    const isSystemAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
+    const isDirector = (currentUser.roles || []).includes('DIRECTOR') || currentUser.isActingDirector;
+    const isViceDirector = (currentUser.roles || []).includes('VICE_DIRECTOR'); 
+    const isDocOfficer = (currentUser.roles || []).includes('DOCUMENT_OFFICER');
+    const isSystemAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN');
     const canManageDoc = isDirector || isDocOfficer || isSystemAdmin;
 
     // --- Data Preparation ---
     const teachersInSchool = useMemo(() => 
         allTeachers.filter(t => 
             t.schoolId === currentUser.schoolId && 
-            !t.roles.includes('DIRECTOR') &&
+            !(t.roles || []).includes('DIRECTOR') &&
             !t.isSuspended
         ).sort((a, b) => a.name.localeCompare(b.name, 'th')),
     [allTeachers, currentUser.schoolId]);
 
     const viceDirectors = useMemo(() => 
         teachersInSchool.filter(t => 
-            t.position.includes('รองผู้อำนวยการ') || t.roles.includes('VICE_DIRECTOR')
+            (t.position || '').includes('รองผู้อำนวยการ') || (t.roles || []).includes('VICE_DIRECTOR')
         ),
     [teachersInSchool]);
 
@@ -612,7 +612,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             let pdfBase64 = '';
             
             if (finalCommand === "รับทราบแล้ว") {
-                const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
+                const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && (t.roles || []).includes('DOCUMENT_OFFICER') && !(t.roles || []).includes('DIRECTOR'));
                 const officer = officers[0] || { name: 'เจ้าหน้าที่ธุรการ', signatureBase64: null };
                 
                 pdfBase64 = await generateAcknowledgeMemoPdf({
@@ -695,14 +695,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             // แจ้งเตือนผู้รับมอบหมาย
             const notifyIds = nextStatus === 'PendingViceDirector' ? [] : targetTeacherIds;
             if (notifyIds.length > 0) {
-                const notifyList = allTeachers.filter(t => notifyIds.includes(t.id) && !t.roles.includes('DIRECTOR'));
+                const notifyList = allTeachers.filter(t => notifyIds.includes(t.id) && !(t.roles || []).includes('DIRECTOR'));
                 if (notifyList.length > 0) {
                     triggerTelegramNotification(notifyList, taskId, targetDoc.title, targetDoc.bookNumber, false, currentSchool.name, notifyAtts, undefined, targetDoc.priority);
                 }
             }
 
             // แจ้งเตือนเจ้าหน้าที่ธุรการ
-            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
+            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && (t.roles || []).includes('DOCUMENT_OFFICER') && !(t.roles || []).includes('DIRECTOR'));
             if (officers.length > 0) {
                 triggerTelegramNotification(officers, taskId, targetDoc.title, targetDoc.bookNumber, false, directorPosition, notifyAtts, `✅ ${directorPosition} เกษียณหนังสือเรียบร้อยแล้ว`, targetDoc.priority);
             }
@@ -727,11 +727,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             const { error } = await client.from('documents').update({ status: 'PendingViceDirector', assigned_vice_director_id: assignedViceDirId, director_command: finalCommand, director_signature_date: nowStr }).eq('id', taskId);
             if (error) throw error;
             
-            if (vice && !vice.roles.includes('DIRECTOR')) {
+            if (vice && !(vice.roles || []).includes('DIRECTOR')) {
                 triggerTelegramNotification([vice], taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, undefined, selectedDoc.priority);
             }
             
-            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DOCUMENT_OFFICER') && !t.roles.includes('DIRECTOR'));
+            const officers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && (t.roles || []).includes('DOCUMENT_OFFICER') && !(t.roles || []).includes('DIRECTOR'));
             if (officers.length > 0) {
                 triggerTelegramNotification(officers, taskId, selectedDoc.title, selectedDoc.bookNumber, false, currentSchool.name, selectedDoc.attachments, "✅ ผอ. มอบหมายรองผู้อำนวยการดำเนินการแล้ว", selectedDoc.priority);
             }
@@ -1333,7 +1333,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     if (docCategory === 'ORDER' && selectedTeachers.length > 0) {
                                         triggerTelegramNotification(allTeachers.filter(t => selectedTeachers.includes(t.id)), savedId, created.title, created.bookNumber, true, currentSchool.name, tempAttachments, undefined, created.priority);
                                     } else if (docCategory === 'INCOMING') {
-                                        const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && t.roles.includes('DIRECTOR'));
+                                        const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && (t.roles || []).includes('DIRECTOR'));
                                         if (directors.length > 0) triggerTelegramNotification(directors, savedId, created.title, created.bookNumber, false, created.from, tempAttachments, undefined, created.priority);
                                     }
                                 }
@@ -1591,7 +1591,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
                                                 {selectedDoc.targetTeachers.map(tid => { 
                                                     const t = allTeachers.find(at => at.id === tid); 
-                                                    const isRead = selectedDoc.acknowledgedBy.includes(tid); 
+                                                    const isRead = (selectedDoc.acknowledgedBy || []).includes(tid); 
                                                     return (
                                                         <div key={tid} className={`p-3 md:p-4 rounded-xl md:rounded-2xl border transition-all flex flex-col gap-2 md:gap-3 group relative ${isRead ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100 grayscale opacity-60'}`}>
                                                             <div className="flex justify-between items-center">

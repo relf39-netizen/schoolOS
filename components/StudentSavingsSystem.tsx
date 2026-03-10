@@ -49,8 +49,8 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
     const [isManageTeachersOpen, setIsManageTeachersOpen] = useState(false);
     const [selectedTeacherForEdit, setSelectedTeacherForEdit] = useState<Teacher | null>(null);
 
-    const isAdmin = currentUser.roles.includes('SYSTEM_ADMIN') || currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('VICE_DIRECTOR') || currentUser.roles.includes('ACTING_DIRECTOR');
-    const isDirector = currentUser.roles.includes('DIRECTOR') || currentUser.roles.includes('VICE_DIRECTOR') || currentUser.roles.includes('ACTING_DIRECTOR');
+    const isAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR') || (currentUser.roles || []).includes('ACTING_DIRECTOR');
+    const isDirector = (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR') || (currentUser.roles || []).includes('ACTING_DIRECTOR');
 
     useEffect(() => {
         fetchData();

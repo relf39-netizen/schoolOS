@@ -42,9 +42,9 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
     const [currentDate, setCurrentDate] = useState(new Date());
 
-    const isDocOfficer = currentUser.roles.includes('DOCUMENT_OFFICER');
-    const isDirector = currentUser.roles.includes('DIRECTOR') || currentUser.isActingDirector;
-    const isAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
+    const isDocOfficer = (currentUser.roles || []).includes('DOCUMENT_OFFICER');
+    const isDirector = (currentUser.roles || []).includes('DIRECTOR') || currentUser.isActingDirector;
+    const isAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN');
     const canEdit = isDocOfficer || isDirector || isAdmin;
 
     // Helper to parse "YYYY-MM-DD" string correctly in local time
@@ -213,7 +213,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
 
     const notifyDirector = async (event: any, type: 'NEW' | 'TOMORROW' | 'TODAY') => {
         if (!sysConfig?.telegramBotToken) return;
-        const directors = allTeachers.filter(t => (t.roles.includes('DIRECTOR') || t.isActingDirector) && t.schoolId === currentUser.schoolId);
+        const directors = allTeachers.filter(t => ((t.roles || []).includes('DIRECTOR') || t.isActingDirector) && t.schoolId === currentUser.schoolId);
         if (directors.length === 0) return;
         let title = ""; let icon = "";
         switch (type) { 
@@ -360,7 +360,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                                                 <div className="flex flex-col md:flex-row gap-4 md:gap-6 relative z-10">
                                                     <div className={`flex flex-col items-center justify-center w-16 h-16 md:w-20 md:h-20 rounded-2xl md:rounded-3xl shrink-0 ${isPast ? 'bg-slate-200 text-slate-400' : 'bg-purple-100 text-purple-700'}`}>
                                                         <Clock size={16} className="mb-1 md:w-5 md:h-5"/>
-                                                        <span className="text-xs md:text-sm font-black">{event.startTime}</span>
+                                                        <span className="text-xs md:text-sm font-black">{event.startTime} น.</span>
                                                     </div>
                                                     <div className="flex-1 space-y-1 md:space-y-2">
                                                         <div className="flex items-center gap-2">
@@ -459,7 +459,7 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
                                     <input type="date" required className="w-full px-4 py-3 md:px-6 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all text-sm md:text-base" value={newEvent.date} onChange={e => setNewEvent({...newEvent, date: e.target.value})}/>
                                 </div>
                                 <div>
-                                    <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">เวลา</label>
+                                    <label className="block text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 ml-1 md:ml-2">เวลา (รูปแบบ 24 ชม.)</label>
                                     <input type="time" required className="w-full px-4 py-3 md:px-6 md:py-4 border-2 border-slate-50 rounded-xl md:rounded-2xl font-bold outline-none focus:border-purple-500 bg-slate-50 transition-all text-sm md:text-base" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})}/>
                                 </div>
                             </div>

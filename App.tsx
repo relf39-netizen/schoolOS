@@ -77,10 +77,10 @@ const App: React.FC = () => {
             if (profilesData) {
                 const mappedTeachers: Teacher[] = profilesData.map(p => ({
                     id: p.id, schoolId: p.school_id, name: p.name, password: p.password,
-                    position: p.position, roles: p.roles as TeacherRole[], 
+                    position: p.position, roles: (p.roles as TeacherRole[]) || [], 
                     signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
                     isSuspended: p.is_suspended, isApproved: p.is_approved !== false,
-                    isActingDirector: (p.roles as string[])?.includes('ACTING_DIRECTOR') || false,
+                    isActingDirector: ((p.roles as string[]) || [])?.includes('ACTING_DIRECTOR') || false,
                     assignedClasses: p.assigned_classes || [],
                     isFirstLogin: false
                 }));
@@ -121,10 +121,10 @@ const App: React.FC = () => {
                     if (data) {
                         const updatedList: Teacher[] = data.map(p => ({
                             id: p.id, schoolId: p.school_id, name: p.name, password: p.password,
-                            position: p.position, roles: p.roles as TeacherRole[], 
+                            position: p.position, roles: (p.roles as TeacherRole[]) || [], 
                             signatureBase64: p.signature_base_64, telegramChatId: p.telegram_chat_id,
                             isSuspended: p.is_suspended, isApproved: p.is_approved !== false,
-                            isActingDirector: (p.roles as string[])?.includes('ACTING_DIRECTOR') || false,
+                            isActingDirector: ((p.roles as string[]) || [])?.includes('ACTING_DIRECTOR') || false,
                             assignedClasses: p.assigned_classes || []
                         } as any));
                         setAllTeachers(updatedList);
@@ -170,8 +170,8 @@ const App: React.FC = () => {
 
             const { data: docData } = await client.from('documents').select('status, target_teachers, acknowledged_by, assigned_vice_director_id').eq('school_id', currentUser.schoolId);
             if (docData) {
-                const isDir = currentUser.roles.includes('DIRECTOR');
-                const isVice = currentUser.roles.includes('VICE_DIRECTOR');
+                const isDir = (currentUser.roles || []).includes('DIRECTOR');
+                const isVice = (currentUser.roles || []).includes('VICE_DIRECTOR');
                 let dCount = 0;
                 if (isDir) dCount = docData.filter(d => d.status === 'PendingDirector').length;
                 else if (isVice) dCount = docData.filter(d => d.status === 'PendingViceDirector' && d.assigned_vice_director_id === currentUser.id).length;
@@ -346,8 +346,8 @@ const App: React.FC = () => {
 
     const getDocBadge = () => {
         if (pendingDocCount === 0) return null;
-        if (currentUser?.roles.includes('DIRECTOR')) return `มีหนังสือต้องเกษียณ ${pendingDocCount} ฉบับ`;
-        if (currentUser?.roles.includes('VICE_DIRECTOR')) return `มีหนังสือรอพิจารณา ${pendingDocCount} ฉบับ`;
+        if (currentUser?.roles && (currentUser.roles || []).includes('DIRECTOR')) return `มีหนังสือต้องเกษียณ ${pendingDocCount} ฉบับ`;
+        if (currentUser?.roles && (currentUser.roles || []).includes('VICE_DIRECTOR')) return `มีหนังสือรอพิจารณา ${pendingDocCount} ฉบับ`;
         return `มีหนังสือเข้าใหม่ ${pendingDocCount} ฉบับ`;
     };
 
@@ -479,7 +479,7 @@ const App: React.FC = () => {
                             />
                             <DashboardCard view={SystemView.ATTENDANCE} title="ลงเวลาทำงาน" slogan="เช็คเวลาแม่นยำ ด้วย GPS" icon={Clock} gradient="from-rose-400 to-red-600"/>
                             <DashboardCard view={SystemView.FINANCE} title="ระบบการเงิน" slogan="งบประมาณ และรายรับ-จ่าย" icon={Activity} gradient="from-amber-400 to-orange-600"/>
-                            {currentUser?.roles.includes('SYSTEM_ADMIN') && (
+                            {currentUser?.roles && (currentUser.roles || []).includes('SYSTEM_ADMIN') && (
                                 <DashboardCard view={SystemView.ADMIN_USERS} title="ผู้ดูแลระบบ" slogan="ตั้งค่าระบบ และผู้ใช้งาน" icon={Settings} gradient="from-slate-500 to-slate-700"/>
                             )}
                             <DashboardCard view={SystemView.PROFILE} title="ข้อมูลส่วนตัว" slogan="แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล" icon={UserCircle} gradient="from-violet-400 to-indigo-600"/>
@@ -498,7 +498,7 @@ const App: React.FC = () => {
                                     case SystemView.SAVINGS: return <StudentSavingsSystem currentUser={currentUser} />;
                                     case SystemView.STUDENT_ATTENDANCE: return <StudentAttendanceSystem currentUser={currentUser} />;
                                     case SystemView.ADMIN_USERS: 
-                                        if (!currentUser?.roles.includes('SYSTEM_ADMIN')) {
+                                        if (!currentUser?.roles || !(currentUser.roles || []).includes('SYSTEM_ADMIN')) {
                                             setCurrentView(SystemView.DASHBOARD);
                                             return null;
                                         }
