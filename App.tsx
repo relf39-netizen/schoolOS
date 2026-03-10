@@ -344,6 +344,10 @@ const App: React.FC = () => {
         </button>
     );
 
+    const isDirector = (currentUser?.roles || []).includes('DIRECTOR') || currentUser?.isActingDirector;
+    const isDocOfficer = (currentUser?.roles || []).includes('DOCUMENT_OFFICER');
+    const isSystemAdmin = (currentUser?.roles || []).includes('SYSTEM_ADMIN');
+
     const getDocBadge = () => {
         if (pendingDocCount === 0) return null;
         if (currentUser?.roles && (currentUser.roles || []).includes('DIRECTOR')) return `มีหนังสือต้องเกษียณ ${pendingDocCount} ฉบับ`;
@@ -457,14 +461,16 @@ const App: React.FC = () => {
                                 notification={getDocBadge()} 
                                 hasBorder={true}
                             />
-                            <DashboardCard 
-                                view={SystemView.DIRECTOR_CALENDAR} 
-                                title="ปฏิทินปฏิบัติงาน ผอ." 
-                                slogan="แจ้งเตือนนัดหมาย และภารกิจ" 
-                                notification={hasDirectorMissionToday ? "มีภารกิจวันนี้" : null}
-                                icon={Calendar} 
-                                gradient="from-blue-500 to-indigo-700"
-                            />
+                            {(isDirector || isDocOfficer || isSystemAdmin) && (
+                                <DashboardCard 
+                                    view={SystemView.DIRECTOR_CALENDAR} 
+                                    title="ปฏิทินปฏิบัติงาน ผอ." 
+                                    slogan="แจ้งเตือนนัดหมาย และภารกิจ" 
+                                    notification={hasDirectorMissionToday ? "มีภารกิจวันนี้" : null}
+                                    icon={Calendar} 
+                                    gradient="from-blue-500 to-indigo-700"
+                                />
+                            )}
                             <DashboardCard view={SystemView.ACADEMIC} title="งานวิชาการ" slogan="สถิตินักเรียน / ผลสอบ O-NET" icon={GraduationCap} gradient="from-indigo-500 to-purple-700"/>
                             <DashboardCard view={SystemView.STUDENT_ATTENDANCE} title="ระบบดูแลช่วยเหลือนักเรียน" slogan="เช็คชื่อ / ข้อมูลพื้นฐานนักเรียน" icon={UserCheck} gradient="from-emerald-500 to-teal-600"/>
                             <DashboardCard view={SystemView.SAVINGS} title="ออมทรัพย์นักเรียน" slogan="บันทึกเงินออมนักเรียน" icon={PiggyBank} gradient="from-pink-500 to-rose-600"/>

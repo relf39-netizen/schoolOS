@@ -22,12 +22,12 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isMobileOp
         { id: SystemView.DASHBOARD, label: 'ภาพรวม', icon: Home, visible: true },
         { id: SystemView.DOCUMENTS, label: 'งานสารบรรณ', icon: FileText, visible: true },
         { id: SystemView.LEAVE, label: 'ระบบการลา', icon: UserMinus, visible: true },
-        { id: SystemView.DIRECTOR_CALENDAR, label: 'ปฏิทินปฏิบัติงาน ผอ.', icon: Calendar, visible: true },
+        { id: SystemView.DIRECTOR_CALENDAR, label: 'ปฏิทินปฏิบัติงาน ผอ.', icon: Calendar, visible: (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('DOCUMENT_OFFICER') || currentUser.isActingDirector },
         { id: SystemView.ACADEMIC, label: 'งานวิชาการ', icon: GraduationCap, visible: true }, 
         { id: SystemView.FINANCE, label: 'ระบบการเงิน', icon: DollarSign, visible: true },
         { id: SystemView.PLAN, label: 'แผนปฏิบัติการ', icon: CalendarRange, visible: true },
         { id: SystemView.ATTENDANCE, label: 'ลงเวลาทำงาน', icon: MapPin, visible: true },
-        { id: SystemView.ADMIN_USERS, label: 'ผู้ดูแลระบบ', icon: Settings, visible: currentUser.roles.includes('SYSTEM_ADMIN') || currentUser.roles.includes('DIRECTOR') },
+        { id: SystemView.ADMIN_USERS, label: 'ผู้ดูแลระบบ', icon: Settings, visible: (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('DIRECTOR') },
     ];
 
     const baseClasses = "fixed inset-y-0 left-0 z-30 w-64 bg-slate-900 text-white transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0";

@@ -50,10 +50,10 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
     const [showSarForm, setShowSarForm] = useState(false);
     const [newSar, setNewSar] = useState({ year: CURRENT_SCHOOL_YEAR, type: 'BASIC' as SARType });
 
-    const isAcademicAdmin = currentUser.roles.includes('ACADEMIC_OFFICER') || 
-                           currentUser.roles.includes('DOCUMENT_OFFICER') || 
-                           currentUser.roles.includes('DIRECTOR') || 
-                           currentUser.roles.includes('SYSTEM_ADMIN');
+    const isAcademicAdmin = (currentUser.roles || []).includes('ACADEMIC_OFFICER') || 
+                           (currentUser.roles || []).includes('DOCUMENT_OFFICER') || 
+                           (currentUser.roles || []).includes('DIRECTOR') || 
+                           (currentUser.roles || []).includes('SYSTEM_ADMIN');
 
     const loadData = async () => {
         setIsLoading(true);

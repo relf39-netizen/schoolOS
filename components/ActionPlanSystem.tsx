@@ -48,8 +48,8 @@ const ActionPlanSystem: React.FC<ActionPlanSystemProps> = ({ currentUser, curren
     
     const [isSaving, setIsSaving] = useState(false);
 
-    const isDirector = currentUser.roles.includes('DIRECTOR');
-    const isPlanOfficer = currentUser.roles.includes('PLAN_OFFICER');
+    const isDirector = (currentUser.roles || []).includes('DIRECTOR');
+    const isPlanOfficer = (currentUser.roles || []).includes('PLAN_OFFICER');
     const isAdmin = isDirector || isPlanOfficer;
 
     const STANDARD_DEPTS = ['กลุ่มบริหารงานวิชาการ', 'กลุ่มบริหารงานงบประมาณ', 'กลุ่มบริหารงานบุคคล', 'กลุ่มบริหารงานทั่วไป', 'งบกลาง / สาธารณูปโภค'];

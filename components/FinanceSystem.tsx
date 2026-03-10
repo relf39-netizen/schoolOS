@@ -35,11 +35,11 @@ const FinanceSystem: React.FC<FinanceSystemProps> = ({ currentUser, allTeachers 
     const ITEMS_PER_PAGE = 15;
 
     // Permissions
-    const isDirector = currentUser.roles.includes('DIRECTOR');
-    const isSystemAdmin = currentUser.roles.includes('SYSTEM_ADMIN');
-    const isBudgetOfficer = currentUser.roles.includes('FINANCE_BUDGET');
-    const isNonBudgetOfficer = currentUser.roles.includes('FINANCE_NONBUDGET');
-    const isCoopOfficer = currentUser.roles.includes('FINANCE_COOP');
+    const isDirector = (currentUser.roles || []).includes('DIRECTOR');
+    const isSystemAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN');
+    const isBudgetOfficer = (currentUser.roles || []).includes('FINANCE_BUDGET');
+    const isNonBudgetOfficer = (currentUser.roles || []).includes('FINANCE_NONBUDGET');
+    const isCoopOfficer = (currentUser.roles || []).includes('FINANCE_COOP');
 
     // Default Tab Logic
     const getDefaultTab = () => {

@@ -47,6 +47,18 @@ const DirectorCalendar: React.FC<DirectorCalendarProps> = ({ currentUser, allTea
     const isAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN');
     const canEdit = isDocOfficer || isDirector || isAdmin;
 
+    if (!canEdit) {
+        return (
+            <div className="max-w-7xl mx-auto p-6 md:p-10 text-center bg-white rounded-[2rem] shadow-sm border border-slate-200">
+                <div className="p-4 bg-red-50 text-red-600 rounded-full w-fit mx-auto mb-4">
+                    <AlertCircle size={40}/>
+                </div>
+                <h2 className="text-xl md:text-2xl font-black text-slate-800 mb-2">เข้าถึงไม่ได้</h2>
+                <p className="text-slate-500 font-medium">เฉพาะผู้อำนวยการและเจ้าหน้าที่ธุรการเท่านั้นที่สามารถเข้าถึงปฏิทินนี้ได้</p>
+            </div>
+        );
+    }
+
     // Helper to parse "YYYY-MM-DD" string correctly in local time
     const parseDateLocal = (dateStr: string) => {
         if (!dateStr) return new Date();

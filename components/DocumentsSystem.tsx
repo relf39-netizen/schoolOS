@@ -590,7 +590,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
         try {
             const isActorVice = targetDoc.status === 'PendingViceDirector' || (targetDoc.assignedViceDirectorId === currentUser.id);
-            const isRealDirector = currentUser.roles.includes('DIRECTOR');
+            const isRealDirector = (currentUser.roles || []).includes('DIRECTOR');
             const signatureToUse = currentUser.signatureBase64 || (isRealDirector ? sysConfig?.directorSignatureBase64 : null);
             
             if (!signatureToUse) throw new Error("ไม่พบลายเซ็นดิจิทัล! กรุณาอัปโหลดลายเซ็นในเมนู 'ข้อมูลส่วนตัว' หรือติดต่อแอดมินเพื่อตรวจสอบลายเซ็นส่วนกลาง");
@@ -607,7 +607,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
             const directorPosition = currentUser.isActingDirector 
                 ? 'รักษาการในตำแหน่งผู้อำนวยการโรงเรียน' 
-                : (currentUser.roles.includes('DIRECTOR') ? 'ผู้อำนวยการโรงเรียน' : currentUser.position);
+                : ((currentUser.roles || []).includes('DIRECTOR') ? 'ผู้อำนวยการโรงเรียน' : currentUser.position);
 
             let pdfBase64 = '';
             
