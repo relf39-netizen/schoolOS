@@ -198,9 +198,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
 
             const result = await response.json();
             if (result.status === 'success') {
-                if (selectedStudentForInfo) {
-                    setSelectedStudentForInfo({ ...selectedStudentForInfo, photoUrl: result.viewUrl });
-                }
+                setSelectedStudentForInfo(prev => prev ? { ...prev, photoUrl: result.viewUrl } : null);
             } else {
                 throw new Error(result.message || "Upload failed");
             }
@@ -214,9 +212,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
     const handleGetStudentLocation = () => {
         navigator.geolocation.getCurrentPosition((pos) => {
             const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-            if (selectedStudentForInfo) {
-                setSelectedStudentForInfo({ ...selectedStudentForInfo, location: loc });
-            }
+            setSelectedStudentForInfo(prev => prev ? { ...prev, location: loc } : null);
         }, (err) => {
             alert("ไม่สามารถดึงพิกัดได้: " + err.message);
         });
@@ -414,7 +410,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                     guardianName: s.guardian_name,
                     medicalConditions: s.medical_conditions,
                     familyAnnualIncome: s.family_annual_income,
-                    location: s.location
+                    location: (s.lat && s.lng) ? { lat: s.lat, lng: s.lng } : undefined
                 })));
             }
 
@@ -1081,19 +1077,19 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                         </div>
                                         <div>
                                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">เบอร์โทรศัพท์</label>
-                                            <input type="text" value={selectedStudentForInfo.phoneNumber || ''} onChange={e => setSelectedStudentForInfo({...selectedStudentForInfo, phoneNumber: e.target.value})} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm"/>
+                                            <input type="text" value={selectedStudentForInfo.phoneNumber || ''} onChange={e => setSelectedStudentForInfo(prev => prev ? {...prev, phoneNumber: e.target.value} : null)} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm"/>
                                         </div>
                                         <div className="md:col-span-2">
                                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">โรคประจำตัว / แพ้อาหาร</label>
-                                            <input type="text" value={selectedStudentForInfo.medicalConditions || ''} onChange={e => setSelectedStudentForInfo({...selectedStudentForInfo, medicalConditions: e.target.value})} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm" placeholder="ถ้าไม่มีให้เว้นว่าง"/>
+                                            <input type="text" value={selectedStudentForInfo.medicalConditions || ''} onChange={e => setSelectedStudentForInfo(prev => prev ? {...prev, medicalConditions: e.target.value} : null)} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm" placeholder="ถ้าไม่มีให้เว้นว่าง"/>
                                         </div>
                                         <div className="md:col-span-2">
                                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">รายได้รวมของครอบครัวต่อปี (บาท)</label>
-                                            <input type="number" value={selectedStudentForInfo.familyAnnualIncome || ''} onChange={e => setSelectedStudentForInfo({...selectedStudentForInfo, familyAnnualIncome: parseFloat(e.target.value) || 0})} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm" placeholder="ระบุจำนวนเงิน"/>
+                                            <input type="number" value={selectedStudentForInfo.familyAnnualIncome || ''} onChange={e => setSelectedStudentForInfo(prev => prev ? {...prev, familyAnnualIncome: parseFloat(e.target.value) || 0} : null)} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm" placeholder="ระบุจำนวนเงิน"/>
                                         </div>
                                         <div className="md:col-span-2">
                                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ที่อยู่ติดต่อ</label>
-                                            <textarea value={selectedStudentForInfo.address || ''} onChange={e => setSelectedStudentForInfo({...selectedStudentForInfo, address: e.target.value})} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm h-24 resize-none"/>
+                                            <textarea value={selectedStudentForInfo.address || ''} onChange={e => setSelectedStudentForInfo(prev => prev ? {...prev, address: e.target.value} : null)} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm h-24 resize-none"/>
                                         </div>
                                         <div className="md:col-span-2">
                                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">พิกัดบ้าน (GPS)</label>
@@ -1120,15 +1116,15 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8 pt-8 border-t border-slate-100">
                                     <div>
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อบิดา</label>
-                                        <input type="text" value={selectedStudentForInfo.fatherName || ''} onChange={e => setSelectedStudentForInfo({...selectedStudentForInfo, fatherName: e.target.value})} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm"/>
+                                        <input type="text" value={selectedStudentForInfo.fatherName || ''} onChange={e => setSelectedStudentForInfo(prev => prev ? {...prev, fatherName: e.target.value} : null)} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm"/>
                                     </div>
                                     <div>
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อมารดา</label>
-                                        <input type="text" value={selectedStudentForInfo.motherName || ''} onChange={e => setSelectedStudentForInfo({...selectedStudentForInfo, motherName: e.target.value})} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm"/>
+                                        <input type="text" value={selectedStudentForInfo.motherName || ''} onChange={e => setSelectedStudentForInfo(prev => prev ? {...prev, motherName: e.target.value} : null)} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm"/>
                                     </div>
                                     <div>
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อผู้ปกครอง</label>
-                                        <input type="text" value={selectedStudentForInfo.guardianName || ''} onChange={e => setSelectedStudentForInfo({...selectedStudentForInfo, guardianName: e.target.value})} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm"/>
+                                        <input type="text" value={selectedStudentForInfo.guardianName || ''} onChange={e => setSelectedStudentForInfo(prev => prev ? {...prev, guardianName: e.target.value} : null)} className="w-full p-3 bg-white border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-sm"/>
                                     </div>
                                 </div>
 
@@ -1682,7 +1678,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                 <div className="flex justify-end mt-8 print:mt-2">
                                     <div className="text-center w-72">
                                         <p className="mb-6 print:mb-2">ลงชื่อ............................................................</p>
-                                        <p className="font-black">( {directorName || schoolConfig?.director_name || '...........................................'} )</p>
+                                        <p className="font-black">( {directorName || schoolConfig?.director_name || '............................................................'} )</p>
                                         <p className="text-sm">ผู้อำนวยการโรงเรียน{schoolConfig?.school_name || '................................................'}</p>
                                     </div>
                                 </div>

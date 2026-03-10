@@ -284,6 +284,17 @@ export interface Student {
   isAlumni?: boolean;
   graduationYear?: string;
   batchNumber?: string;
+
+  // Student Support System Fields (ดูแลช่วยเหลือนักเรียน)
+  photoUrl?: string; // Google Drive URL
+  address?: string;
+  phoneNumber?: string;
+  fatherName?: string;
+  motherName?: string;
+  guardianName?: string;
+  medicalConditions?: string;
+  familyAnnualIncome?: number;
+  location?: { lat: number; lng: number };
 }
 
 export type StudentAttendanceStatus = 'Present' | 'Late' | 'Sick' | 'Absent';
@@ -296,6 +307,18 @@ export interface StudentAttendance {
   status: StudentAttendanceStatus;
   academicYear: string;
   createdBy: string; // Teacher ID
+  createdAt: string;
+}
+
+export interface StudentHealthRecord {
+  id: string;
+  studentId: string;
+  schoolId: string;
+  weight: number;
+  height: number;
+  recordedDate: string; // YYYY-MM-DD
+  academicYear: string;
+  recordedBy: string; // Teacher ID
   createdAt: string;
 }
 
