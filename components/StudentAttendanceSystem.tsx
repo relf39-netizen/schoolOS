@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { Teacher, Student, StudentAttendance, StudentAttendanceStatus, ClassRoom, AcademicYear, StudentHealthRecord } from '../types';
+import { getDirectDriveUrl } from '../utils/drive';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
@@ -318,12 +319,13 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
         setViewMode('STUDENT_INFO');
     };
 
-    const isAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR');
+    const isAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('ADMIN') || (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR');
     const isDirector = (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR');
 
     const filteredClassRooms = useMemo(() => {
         if (isAdmin) return classRooms;
-        if (!currentUser.assignedClasses || currentUser.assignedClasses.length === 0) return [];
+        // If teacher has no assigned classes, let them see all classes for now to avoid "empty screen"
+        if (!currentUser.assignedClasses || currentUser.assignedClasses.length === 0) return classRooms;
         return classRooms.filter(c => currentUser.assignedClasses?.includes(c.name));
     }, [classRooms, isAdmin, currentUser.assignedClasses]);
 
@@ -348,6 +350,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                 .eq('school_id', currentUser.schoolId)
                 .order('year', { ascending: false });
             
+            let currentYear = '';
             if (yearsData) {
                 const mappedYears = yearsData.map(y => ({
                     id: y.id,
@@ -357,33 +360,13 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                 }));
                 setAcademicYears(mappedYears);
                 const current = mappedYears.find(y => y.isCurrent);
-                if (current) setCurrentAcademicYear(current.year);
-            }
-
-            // 2. Fetch Classrooms
-            const { data: classesData } = await supabase
-                .from('class_rooms')
-                .select('*')
-                .eq('school_id', currentUser.schoolId);
-            
-            if (classesData) {
-                const mappedClasses = classesData.map(c => ({
-                    id: c.id,
-                    schoolId: c.school_id,
-                    name: c.name,
-                    academicYear: c.academic_year
-                }));
-                setClassRooms(mappedClasses);
-                
-                // Auto-select class if teacher has assigned classes
-                if (currentUser.assignedClasses && currentUser.assignedClasses.length > 0) {
-                    setSelectedClass(currentUser.assignedClasses[0]);
-                } else if (mappedClasses.length > 0) {
-                    setSelectedClass(mappedClasses[0].name);
+                if (current) {
+                    currentYear = current.year;
+                    setCurrentAcademicYear(currentYear);
                 }
             }
 
-            // 3. Fetch Students
+            // 2. Fetch Students first to derive classes if needed
             const { data: studentsData } = await supabase
                 .from('students')
                 .select('*')
@@ -391,8 +374,9 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                 .eq('is_active', true)
                 .eq('is_alumni', false);
             
+            let mappedStudents: Student[] = [];
             if (studentsData) {
-                setStudents(studentsData.map(s => ({
+                mappedStudents = studentsData.map(s => ({
                     id: s.id,
                     schoolId: s.school_id,
                     name: s.name,
@@ -411,7 +395,46 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                     medicalConditions: s.medical_conditions,
                     familyAnnualIncome: s.family_annual_income,
                     location: (s.lat && s.lng) ? { lat: s.lat, lng: s.lng } : undefined
-                })));
+                }));
+                setStudents(mappedStudents);
+            }
+
+            // 3. Fetch Classrooms
+            const { data: classesData } = await supabase
+                .from('class_rooms')
+                .select('*')
+                .eq('school_id', currentUser.schoolId);
+            
+            let mappedClasses: ClassRoom[] = [];
+            if (classesData && classesData.length > 0) {
+                mappedClasses = classesData.map(c => ({
+                    id: c.id,
+                    schoolId: c.school_id,
+                    name: c.name,
+                    academicYear: c.academic_year
+                }));
+            } else if (mappedStudents.length > 0) {
+                // Derive classes from students if class_rooms table is empty
+                const uniqueClasses = [...new Set(mappedStudents.map(s => s.currentClass))].filter(Boolean);
+                mappedClasses = uniqueClasses.map((className, index) => ({
+                    id: `gen-${index}`,
+                    schoolId: currentUser.schoolId,
+                    name: className as string,
+                    academicYear: currentYear
+                }));
+            }
+            
+            setClassRooms(mappedClasses);
+            
+            // Auto-select class
+            const filtered = (isAdmin || !currentUser.assignedClasses || currentUser.assignedClasses.length === 0)
+                ? mappedClasses 
+                : mappedClasses.filter(c => currentUser.assignedClasses?.includes(c.name));
+
+            if (filtered.length > 0) {
+                setSelectedClass(filtered[0].name);
+            } else if (mappedClasses.length > 0) {
+                setSelectedClass(mappedClasses[0].name);
             }
 
             // 4. Fetch Today's Attendance
@@ -829,15 +852,16 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                                     <span className="text-xs font-black text-slate-300 w-6">{idx + 1}</span>
                                                     <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center font-black text-indigo-500 shadow-sm border border-slate-100 overflow-hidden">
                                                         {student.photoUrl ? (
-                                                            <img src={student.photoUrl} className="w-full h-full object-cover" alt={student.name} referrerPolicy="no-referrer" />
+                                                            <img src={getDirectDriveUrl(student.photoUrl)} className="w-full h-full object-cover" alt={student.name} referrerPolicy="no-referrer" />
                                                         ) : (
                                                             student.name[0]
                                                         )}
                                                     </div>
                                                     <div>
                                                         <p className="font-black text-slate-700">{student.name}</p>
-                                                        <div className="flex items-center gap-2">
+                                                        <div className="flex flex-wrap items-center gap-2">
                                                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ID: {student.id.slice(0,8)}</p>
+                                                            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-md text-[9px] font-black border border-indigo-100 uppercase tracking-tighter">ชั้น {student.currentClass}</span>
                                                             {absenceData && absenceData.count > 0 && (
                                                                 <button 
                                                                     onClick={() => setSelectedStudentForAbsenceDetails(student)}
@@ -989,7 +1013,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                         <span className="text-sm font-black text-slate-300 w-8">{idx + 1}</span>
                                                     <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center font-black text-indigo-500 shadow-sm border border-slate-100 text-xl overflow-hidden">
                                                         {student.photoUrl ? (
-                                                            <img src={student.photoUrl} className="w-full h-full object-cover" alt={student.name} referrerPolicy="no-referrer" />
+                                                            <img src={getDirectDriveUrl(student.photoUrl)} className="w-full h-full object-cover" alt={student.name} referrerPolicy="no-referrer" />
                                                         ) : (
                                                             student.name[0]
                                                         )}
@@ -1044,7 +1068,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                     <div className="flex flex-col items-center gap-4">
                                         <div className="w-40 h-52 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden relative group shadow-inner">
                                             {selectedStudentForInfo.photoUrl ? (
-                                                <img src={selectedStudentForInfo.photoUrl} className="w-full h-full object-cover" alt="Student" referrerPolicy="no-referrer" />
+                                                <img src={getDirectDriveUrl(selectedStudentForInfo.photoUrl)} className="w-full h-full object-cover" alt="Student" referrerPolicy="no-referrer" />
                                             ) : (
                                                 <div className="text-center">
                                                     <User size={48} className="text-slate-200 mx-auto mb-2"/>
@@ -1526,20 +1550,6 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                 <p className="text-sm">ผู้สรุปรายงาน</p>
                             </div>
                         </div>
-
-                        <div className="border-t-2 border-slate-100 pt-4 print:pt-1">
-                            <p className="font-black mb-2 print:mb-1">ความเห็นของผู้อำนวยการโรงเรียน</p>
-                            <div className="space-y-2">
-                                <p className="text-slate-400 print:text-black">................................................................................................................................................................................................................................................................................................................................................................................................................................</p>
-                                <div className="flex justify-end mt-8 print:mt-2">
-                                    <div className="text-center w-72">
-                                        <p className="mb-6 print:mb-2">ลงชื่อ............................................................</p>
-                                        <p className="font-black">( {directorName || schoolConfig?.director_name || '............................................................'} )</p>
-                                        <p className="text-sm">ผู้อำนวยการโรงเรียน{schoolConfig?.school_name || '................................................'}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
             )}
@@ -1668,20 +1678,6 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                                 <p className="mb-6 print:mb-2">ลงชื่อ............................................................</p>
                                 <p className="font-black">( {currentUser.name} )</p>
                                 <p className="text-sm">ครูประจำชั้น {selectedClass}</p>
-                            </div>
-                        </div>
-
-                        <div className="border-t-2 border-slate-100 pt-4 print:pt-1">
-                            <p className="font-black mb-2 print:mb-1">ความเห็นของผู้อำนวยการโรงเรียน</p>
-                            <div className="space-y-2">
-                                <p className="text-slate-400 print:text-black">................................................................................................................................................................................................................................................................................................................................................................................................................................</p>
-                                <div className="flex justify-end mt-8 print:mt-2">
-                                    <div className="text-center w-72">
-                                        <p className="mb-6 print:mb-2">ลงชื่อ............................................................</p>
-                                        <p className="font-black">( {directorName || schoolConfig?.director_name || '............................................................'} )</p>
-                                        <p className="text-sm">ผู้อำนวยการโรงเรียน{schoolConfig?.school_name || '................................................'}</p>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>

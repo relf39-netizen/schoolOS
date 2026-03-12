@@ -3,7 +3,7 @@ import {
     Link as LinkIcon, AlertCircle, MapPin, Target, Crosshair, Clock, 
     RefreshCw, UserCheck, ShieldCheck, ShieldAlert, LogOut, 
     Send, Globe, Copy, Check, Cloud, Building2, Loader, 
-    CheckCircle, HardDrive, Smartphone, Zap, Eye, EyeOff,
+    CheckCircle, HardDrive, Smartphone, Zap, Eye, EyeOff, User, CheckCircle2,
     ChevronRight, Info, Search, LayoutGrid, FileText,
     ChevronLeft, ChevronsLeft, ChevronsRight, Shield, UserCog,
     FileCheck, BookOpen, Fingerprint, Key, Activity, BarChart3,
@@ -14,6 +14,7 @@ import {
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
 import { Teacher, TeacherRole, SystemConfig, School, Student, ClassRoom, AcademicYear } from '../types';
+import { getDirectDriveUrl } from '../utils/drive';
 import { ACADEMIC_POSITIONS } from '../constants';
 import * as XLSX from 'xlsx';
 
@@ -78,14 +79,80 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
     const [isAlumniOpen, setIsAlumniOpen] = useState(false);
 
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-    const [newStudentName, setNewStudentName] = useState('');
-    const [newStudentClass, setNewStudentClass] = useState('');
+    const [newStudentForm, setNewStudentForm] = useState<Partial<Student>>({
+        name: '',
+        currentClass: '',
+        address: '',
+        phoneNumber: '',
+        fatherName: '',
+        motherName: '',
+        guardianName: '',
+        medicalConditions: '',
+        photoUrl: ''
+    });
+    const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
     const [newClassName, setNewClassName] = useState('');
     const [newYearName, setNewYearName] = useState('');
     const [promoteFromClass, setPromoteFromClass] = useState('');
     const [promoteToClass, setPromoteToClass] = useState('');
     const [graduationYear, setGraduationYear] = useState<string>((new Date().getFullYear() + 543).toString());
     const [batchNumber, setBatchNumber] = useState<string>('');
+
+    const handlePhotoUpload = async (file: File, isEdit: boolean) => {
+        if (!config.scriptUrl || !config.driveFolderId) {
+            alert("กรุณาตั้งค่า Google Drive ในแท็บ 'การเชื่อมต่อ' ก่อน");
+            return;
+        }
+
+        setIsUploadingPhoto(true);
+        try {
+            const reader = new FileReader();
+            const base64Promise = new Promise<string>((resolve) => {
+                reader.onload = (e) => resolve((e.target?.result as string).split(',')[1]);
+                reader.readAsDataURL(file);
+            });
+
+            const base64Data = await base64Promise;
+            const payload = {
+                folderId: config.driveFolderId,
+                fileName: `student_${Date.now()}_${file.name}`,
+                mimeType: file.type,
+                fileData: base64Data
+            };
+
+            const response = await fetch(config.scriptUrl, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+            });
+
+            const result = await response.json();
+            if (result.status === 'success') {
+                if (isEdit && selectedStudent) {
+                    setSelectedStudent({ ...selectedStudent, photoUrl: result.viewUrl });
+                } else {
+                    setNewStudentForm({ ...newStudentForm, photoUrl: result.viewUrl });
+                }
+            } else {
+                throw new Error(result.message || "Upload failed");
+            }
+        } catch (err: any) {
+            alert("อัปโหลดรูปภาพล้มเหลว: " + err.message);
+        } finally {
+            setIsUploadingPhoto(false);
+        }
+    };
+
+    const handleGetStudentLocation = (isEdit: boolean) => {
+        navigator.geolocation.getCurrentPosition((pos) => {
+            const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            if (isEdit && selectedStudent) {
+                setSelectedStudent({ ...selectedStudent, location: loc });
+            } else {
+                setNewStudentForm({ ...newStudentForm, location: loc });
+            }
+        }, (err) => alert("ไม่สามารถดึงพิกัดได้: " + err.message));
+    };
 
     const approvedTeachers = teachers.filter(t => 
         t.isApproved !== false && 
@@ -157,7 +224,8 @@ function doPost(e) {
       var blob = Utilities.newBlob(bytes, data.mimeType, data.fileName);
       var file = folder.createFile(blob);
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      return createJsonResponse({'status': 'success', 'url': file.getUrl(), 'id': file.getId(), 'viewUrl': "https://drive.google.com/file/d/" + file.getId() + "/view"});
+      var directUrl = "https://lh3.googleusercontent.com/d/" + file.getId();
+      return createJsonResponse({'status': 'success', 'url': file.getUrl(), 'id': file.getId(), 'viewUrl': directUrl});
     }
     return ContentService.createTextOutput("ok");
   } catch (f) {
@@ -350,7 +418,16 @@ function setTelegramWebhook() {
                     isActive: s.is_active,
                     isAlumni: s.is_alumni,
                     graduationYear: s.graduation_year,
-                    batchNumber: s.batch_number
+                    batchNumber: s.batch_number,
+                    photoUrl: s.photo_url,
+                    address: s.address,
+                    phoneNumber: s.phone_number,
+                    fatherName: s.father_name,
+                    motherName: s.mother_name,
+                    guardianName: s.guardian_name,
+                    medicalConditions: s.medical_conditions,
+                    familyAnnualIncome: s.family_annual_income,
+                    location: (s.lat && s.lng) ? { lat: s.lat, lng: s.lng } : undefined
                 })));
             }
         } catch (err) {
@@ -367,26 +444,60 @@ function setTelegramWebhook() {
     }, [activeTab, currentSchool.id]);
 
     const handleAddStudent = async () => {
-        if (!newStudentName || !newStudentClass || !supabase) return;
+        if (!newStudentForm.name) {
+            alert('กรุณากรอกชื่อนักเรียน');
+            return;
+        }
+        if (!newStudentForm.currentClass) {
+            alert('กรุณาเลือกชั้นเรียน');
+            return;
+        }
+        if (!supabase) return;
+
         try {
             const { data, error } = await supabase
                 .from('students')
                 .insert([{
                     school_id: currentSchool.id,
-                    name: newStudentName,
-                    current_class: newStudentClass,
-                    academic_year: currentAcademicYear,
-                    is_active: true
+                    name: newStudentForm.name,
+                    current_class: newStudentForm.currentClass,
+                    academic_year: currentAcademicYear || (new Date().getFullYear() + 543).toString(),
+                    is_active: true,
+                    photo_url: newStudentForm.photoUrl,
+                    address: newStudentForm.address,
+                    phone_number: newStudentForm.phoneNumber,
+                    father_name: newStudentForm.fatherName,
+                    mother_name: newStudentForm.motherName,
+                    guardian_name: newStudentForm.guardianName,
+                    medical_conditions: newStudentForm.medicalConditions,
+                    lat: newStudentForm.location?.lat,
+                    lng: newStudentForm.location?.lng
                 }])
                 .select();
-            if (error) throw error;
+            if (error) {
+                console.error(error);
+                alert('เกิดข้อผิดพลาดในการเพิ่มนักเรียน: ' + error.message);
+                throw error;
+            }
             if (data) {
                 fetchStudentData();
                 setIsAddStudentOpen(false);
-                setNewStudentName('');
-                setNewStudentClass('');
+                setNewStudentForm({
+                    name: '',
+                    currentClass: '',
+                    address: '',
+                    phoneNumber: '',
+                    fatherName: '',
+                    motherName: '',
+                    guardianName: '',
+                    medicalConditions: '',
+                    photoUrl: ''
+                });
+                alert('เพิ่มนักเรียนสำเร็จ');
             }
-        } catch (err) { console.error(err); }
+        } catch (err) { 
+            console.error(err);
+        }
     };
 
     const handleEditStudent = async () => {
@@ -396,7 +507,16 @@ function setTelegramWebhook() {
                 .from('students')
                 .update({
                     name: selectedStudent.name,
-                    current_class: selectedStudent.currentClass
+                    current_class: selectedStudent.currentClass,
+                    photo_url: selectedStudent.photoUrl,
+                    address: selectedStudent.address,
+                    phone_number: selectedStudent.phoneNumber,
+                    father_name: selectedStudent.fatherName,
+                    mother_name: selectedStudent.motherName,
+                    guardian_name: selectedStudent.guardianName,
+                    medical_conditions: selectedStudent.medicalConditions,
+                    lat: selectedStudent.location?.lat,
+                    lng: selectedStudent.location?.lng
                 })
                 .eq('id', selectedStudent.id);
             if (error) throw error;
@@ -522,10 +642,16 @@ function setTelegramWebhook() {
             const data = XLSX.utils.sheet_to_json(ws) as any[];
             const toInsert = data.map(row => ({
                 school_id: currentSchool.id,
-                name: row.name || row['ชื่อ-นามสกุล'] || row['ชื่อ'],
-                current_class: row.class || row['ชั้น'] || row['ห้อง'],
-                academic_year: currentAcademicYear,
-                is_active: true
+                name: row.name || row['ชื่อ-นามสกุล'] || row['ชื่อ'] || row['ชื่อนักเรียน'],
+                current_class: row.class || row['ชั้น'] || row['ห้อง'] || row['ระดับชั้น'] || row['ชั้นเรียน'],
+                academic_year: currentAcademicYear || (new Date().getFullYear() + 543).toString(),
+                is_active: true,
+                address: row.address || row['ที่อยู่'],
+                phone_number: row.phoneNumber || row['เบอร์โทร'] || row['เบอร์โทรศัพท์'],
+                father_name: row.fatherName || row['ชื่อบิดา'],
+                mother_name: row.motherName || row['ชื่อมารดา'],
+                guardian_name: row.guardianName || row['ชื่อผู้ปกครอง'],
+                medical_conditions: row.medicalConditions || row['โรคประจำตัว'] || row['แพ้อาหาร']
             })).filter(s => s.name && s.current_class);
             if (toInsert.length > 0 && supabase) {
                 const { error } = await supabase.from('students').insert(toInsert);
@@ -748,51 +874,112 @@ function setTelegramWebhook() {
                 )}
 
                 {activeTab === 'STUDENTS' && (
-                    <div className="space-y-6 animate-fade-in">
-                        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                            <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><GraduationCap className="text-indigo-600" size={20}/> ทะเบียนนักเรียน ({filteredStudents.length})</h3>
-                            <div className="flex flex-wrap gap-2 w-full md:w-auto">
-                                <div className="relative flex-1 md:w-48">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                                    <input type="text" placeholder="ค้นหาชื่อ..." value={studentSearch} onChange={e => setStudentSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border rounded-xl outline-none focus:border-indigo-500 font-bold text-sm shadow-inner"/>
+                    <div className="space-y-8 animate-fade-in py-4">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <div className="lg:col-span-2 space-y-6">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                                    <div className="flex items-center gap-4">
+                                        <div className="p-3 bg-indigo-100 text-indigo-600 rounded-2xl"><Users size={24}/></div>
+                                        <div>
+                                            <h3 className="font-black text-xl text-slate-800 leading-none mb-1">รายชื่อนักเรียน</h3>
+                                            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Student Database</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 w-full md:w-auto">
+                                        <button onClick={() => setIsAddStudentOpen(true)} className="flex-1 md:flex-none px-6 py-3 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 active:scale-95"><Plus size={18}/> เพิ่มนักเรียน</button>
+                                        <div className="flex gap-1">
+                                            <button onClick={() => setIsManageClassesOpen(true)} className="px-4 py-3 bg-slate-50 text-slate-500 rounded-xl hover:bg-slate-100 transition-all border border-slate-100 flex items-center gap-2" title="จัดการห้องเรียน">
+                                                <LayoutGrid size={18}/>
+                                                <span className="text-[10px] font-black uppercase hidden md:inline">ห้องเรียน</span>
+                                            </button>
+                                            <button onClick={() => setIsManageYearsOpen(true)} className={`px-4 py-3 rounded-xl transition-all border flex items-center gap-2 ${!currentAcademicYear ? 'bg-amber-50 text-amber-600 border-amber-200 animate-pulse' : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'}`} title="จัดการปีการศึกษา">
+                                                <Calendar size={18}/>
+                                                <span className="text-[10px] font-black uppercase hidden md:inline">ปีการศึกษา {currentAcademicYear ? `(${currentAcademicYear})` : '(ยังไม่ได้ตั้งค่า)'}</span>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
-                                <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="px-4 py-2 bg-slate-50 border rounded-xl font-bold text-sm outline-none focus:border-indigo-500 shadow-inner">
-                                    <option value="All">ทุกชั้นเรียน</option>
-                                    {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                </select>
-                                <button onClick={() => setIsAddStudentOpen(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md hover:bg-indigo-700 transition-all text-xs"><Plus size={16}/> เพิ่มนักเรียน</button>
-                                <button onClick={() => setIsManageClassesOpen(true)} className="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all text-xs"><LayoutGrid size={16}/> จัดการห้องเรียน</button>
-                                <button onClick={() => setIsManageYearsOpen(true)} className="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all text-xs"><Calendar size={16}/> ปีการศึกษา</button>
-                                <button onClick={() => setIsPromoteOpen(true)} className="bg-amber-50 text-amber-700 px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-amber-100 transition-all text-xs border border-amber-100"><ArrowUpRight size={16}/> เลื่อนชั้น</button>
-                                <button onClick={() => setIsAlumniOpen(true)} className="bg-rose-50 text-rose-700 px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-rose-100 transition-all text-xs border border-rose-100"><GraduationCap size={16}/> บันทึกศิษย์เก่า</button>
-                            </div>
-                        </div>
 
-                        <div className="overflow-x-auto rounded-xl border border-slate-100">
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-slate-50 text-slate-500 font-bold text-[10px] uppercase tracking-wider border-b">
-                                    <tr><th className="px-6 py-4">ชื่อ-นามสกุล</th><th className="px-6 py-4">ชั้นเรียน</th><th className="px-6 py-4">ปีการศึกษา</th><th className="px-6 py-4 text-right">ดำเนินการ</th></tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {isLoadingStudents ? (
-                                        <tr><td colSpan={4} className="px-6 py-10 text-center animate-pulse text-slate-400 font-bold">กำลังโหลดข้อมูล...</td></tr>
-                                    ) : filteredStudents.length === 0 ? (
-                                        <tr><td colSpan={4} className="px-6 py-10 text-center text-slate-300 italic">ไม่พบข้อมูลนักเรียน</td></tr>
-                                    ) : filteredStudents.map(s => (
-                                        <tr key={s.id} className="hover:bg-slate-50/50 transition-all group">
-                                            <td className="px-6 py-3 font-bold text-slate-800">{s.name}</td>
-                                            <td className="px-6 py-3 font-bold text-slate-600">{s.currentClass}</td>
-                                            <td className="px-6 py-3 text-slate-400">{s.academicYear}</td>
-                                            <td className="px-6 py-3 text-right">
-                                                <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                                                    <button onClick={() => { setSelectedStudent(s); setIsEditStudentOpen(true); }} className="p-1.5 text-blue-600 bg-white rounded-lg hover:bg-blue-600 hover:text-white border shadow-sm transition-all"><Edit2 size={14}/></button>
-                                                    <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-red-400 bg-white rounded-lg hover:bg-red-600 hover:text-white border shadow-sm transition-all"><Trash2 size={14}/></button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                                    <div className="p-6 border-b border-slate-50 flex flex-col md:flex-row gap-4 items-center justify-between bg-slate-50/50">
+                                        <div className="relative w-full md:w-72">
+                                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/>
+                                            <input type="text" placeholder="ค้นหาชื่อนักเรียน..." value={studentSearch} onChange={e => setStudentSearch(e.target.value)} className="w-full pl-12 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm outline-none focus:ring-2 ring-indigo-500/10 transition-all shadow-inner"/>
+                                        </div>
+                                        <div className="flex items-center gap-3 w-full md:w-auto">
+                                            <Filter className="text-slate-400" size={18}/>
+                                            <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="flex-1 md:w-40 px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm outline-none focus:ring-2 ring-indigo-500/10 shadow-inner">
+                                                <option value="All">ทุกชั้นเรียน</option>
+                                                {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead>
+                                                <tr className="bg-slate-50/50">
+                                                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">รูปภาพ</th>
+                                                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">ชื่อ-นามสกุล</th>
+                                                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">ชั้นเรียน</th>
+                                                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">จัดการ</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-50">
+                                                {isLoadingStudents ? (
+                                                    <tr><td colSpan={4} className="px-6 py-20 text-center text-slate-300 font-bold italic animate-pulse">กำลังโหลดข้อมูล...</td></tr>
+                                                ) : filteredStudents.length === 0 ? (
+                                                    <tr><td colSpan={4} className="px-6 py-20 text-center text-slate-300 font-bold italic">ไม่พบข้อมูลนักเรียน</td></tr>
+                                                ) : filteredStudents.map(s => (
+                                                    <tr key={s.id} className="hover:bg-slate-50/50 transition-colors group">
+                                                        <td className="px-6 py-4">
+                                                            <div className="w-10 h-12 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-inner">
+                                                                {s.photoUrl ? (
+                                                                    <img src={getDirectDriveUrl(s.photoUrl)} className="w-full h-full object-cover" alt={s.name} referrerPolicy="no-referrer" />
+                                                                ) : (
+                                                                    <div className="w-full h-full flex items-center justify-center text-slate-300"><User size={20}/></div>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <p className="font-bold text-slate-700 leading-none mb-1">{s.name}</p>
+                                                            <p className="text-[9px] font-mono text-slate-300">ID: {s.id}</p>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-indigo-100">{s.currentClass}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-right">
+                                                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <button onClick={() => { setSelectedStudent(s); setIsEditStudentOpen(true); }} className="p-2 bg-white text-blue-500 border border-blue-100 rounded-xl hover:bg-blue-50 transition-all shadow-sm"><Edit2 size={16}/></button>
+                                                                <button onClick={() => handleDeleteStudent(s.id)} className="p-2 bg-white text-red-500 border border-red-100 rounded-xl hover:bg-red-50 transition-all shadow-sm"><Trash2 size={16}/></button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-6">
+                                <div className="bg-indigo-900 p-6 rounded-3xl border border-indigo-700 shadow-lg text-white relative overflow-hidden group">
+                                    <div className="relative z-10">
+                                        <h4 className="font-black text-lg mb-2">ระบบดูแลช่วยเหลือนักเรียน</h4>
+                                        <p className="text-xs text-indigo-200 font-bold leading-relaxed mb-6 opacity-80">จัดการข้อมูลพื้นฐาน พิกัดบ้าน และสถิติการมาเรียนเพื่อการติดตามช่วยเหลืออย่างใกล้ชิด</p>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button onClick={() => setIsPromoteOpen(true)} className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all flex flex-col items-center gap-2">
+                                                <ArrowUpRight size={20} className="text-amber-400"/>
+                                                <span className="text-[9px] font-black uppercase tracking-widest">เลื่อนชั้นเรียน</span>
+                                            </button>
+                                            <button onClick={() => setIsAlumniOpen(true)} className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all flex flex-col items-center gap-2">
+                                                <GraduationCap size={20} className="text-rose-400"/>
+                                                <span className="text-[9px] font-black uppercase tracking-widest">บันทึกศิษย์เก่า</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="absolute -right-10 -bottom-10 text-white/5 group-hover:scale-110 transition-transform duration-700"><Users size={180}/></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -964,36 +1151,69 @@ function setTelegramWebhook() {
             {/* Modals for Student Management */}
             {isAddStudentOpen && (
                 <div className="fixed inset-0 bg-slate-950/80 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 overflow-y-auto max-h-[90vh] no-scrollbar">
                         <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><Plus className="text-indigo-600"/> เพิ่มนักเรียนใหม่</h3>
+                        
+                        <div className="flex flex-col items-center gap-4 mb-6">
+                            <div className="relative group">
+                                <div className="w-24 h-32 bg-slate-100 rounded-2xl overflow-hidden border-2 border-white shadow-md ring-1 ring-slate-100 flex items-center justify-center">
+                                    {newStudentForm.photoUrl ? (
+                                        <img src={getDirectDriveUrl(newStudentForm.photoUrl)} className="w-full h-full object-cover" alt="Student" referrerPolicy="no-referrer" />
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center text-slate-300 gap-1">
+                                            <User size={32} />
+                                            <span className="text-[8px] font-black uppercase tracking-widest">No Photo</span>
+                                        </div>
+                                    )}
+                                    {isUploadingPhoto && (
+                                        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+                                            <RefreshCw className="text-white animate-spin" size={24} />
+                                        </div>
+                                    )}
+                                </div>
+                                <label className="absolute -bottom-2 -right-2 w-8 h-8 bg-indigo-600 text-white rounded-xl shadow-lg flex items-center justify-center cursor-pointer hover:bg-indigo-700 transition-all border-2 border-white">
+                                    <Image size={14} />
+                                    <input 
+                                        type="file" 
+                                        className="hidden" 
+                                        accept="image/*"
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handlePhotoUpload(file, false);
+                                        }}
+                                    />
+                                </label>
+                            </div>
+                        </div>
+
                         <div className="space-y-4">
                             <div>
-                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อ-นามสกุล</label>
-                                <input type="text" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-inner"/>
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อ-นามสกุล</label>
+                                <input type="text" value={newStudentForm.name} onChange={e => setNewStudentForm({...newStudentForm, name: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-inner"/>
                             </div>
                             <div>
-                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ชั้นเรียน</label>
-                                <select value={newStudentClass} onChange={e => setNewStudentClass(e.target.value)} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-inner">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ชั้นเรียน</label>
+                                <select value={newStudentForm.currentClass} onChange={e => setNewStudentForm({...newStudentForm, currentClass: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-indigo-500 shadow-inner">
                                     <option value="">-- เลือกชั้นเรียน --</option>
                                     {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                 </select>
                             </div>
                             <div className="pt-4 border-t border-slate-50">
-                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">หรือนำเข้าจาก Excel</label>
-                                <div className="flex flex-col gap-2 mt-2">
-                                    <button onClick={downloadTemplate} className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 p-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-emerald-100 transition-all">
-                                        <Download size={16}/> ดาวน์โหลดเทมเพลต Excel
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">หรือนำเข้าจาก Excel</label>
+                                <div className="flex flex-col md:flex-row gap-2 mt-2">
+                                    <button onClick={downloadTemplate} className="flex-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 p-3 rounded-xl font-bold text-[10px] flex items-center justify-center gap-2 border border-emerald-100 transition-all uppercase tracking-widest">
+                                        <Download size={16}/> Template
                                     </button>
-                                    <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-600 p-3 rounded-xl font-bold text-center text-xs flex items-center justify-center gap-2 transition-all">
-                                        <FileSpreadsheet size={16}/> เลือกไฟล์ Excel เพื่อนำเข้า
+                                    <label className="flex-1 cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-600 p-3 rounded-xl font-bold text-center text-[10px] flex items-center justify-center gap-2 transition-all uppercase tracking-widest">
+                                        <FileSpreadsheet size={16}/> Import Excel
                                         <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleImportExcel}/>
                                     </label>
                                 </div>
                             </div>
-                            <div className="flex gap-3 pt-6">
-                                <button onClick={() => setIsAddStudentOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-[10px]">ยกเลิก</button>
-                                <button onClick={handleAddStudent} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl font-black shadow-lg hover:bg-indigo-700 transition-all">บันทึกข้อมูล</button>
-                            </div>
+                        </div>
+                        <div className="flex gap-3 pt-8 mt-8 border-t border-slate-100">
+                            <button onClick={() => setIsAddStudentOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-xs hover:bg-slate-200 transition-all">ยกเลิก</button>
+                            <button onClick={handleAddStudent} className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition-all uppercase tracking-widest">บันทึกข้อมูลนักเรียน</button>
                         </div>
                     </div>
                 </div>
@@ -1001,23 +1221,56 @@ function setTelegramWebhook() {
 
             {isEditStudentOpen && selectedStudent && (
                 <div className="fixed inset-0 bg-slate-950/80 z-[80] flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 overflow-y-auto max-h-[90vh] no-scrollbar">
                         <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><Edit2 className="text-blue-600"/> แก้ไขข้อมูลนักเรียน</h3>
+                        
+                        <div className="flex flex-col items-center gap-4 mb-6">
+                            <div className="relative group">
+                                <div className="w-24 h-32 bg-slate-100 rounded-2xl overflow-hidden border-2 border-white shadow-md ring-1 ring-slate-100 flex items-center justify-center">
+                                    {selectedStudent.photoUrl ? (
+                                        <img src={getDirectDriveUrl(selectedStudent.photoUrl)} className="w-full h-full object-cover" alt="Student" referrerPolicy="no-referrer" />
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center text-slate-300 gap-1">
+                                            <User size={32} />
+                                            <span className="text-[8px] font-black uppercase tracking-widest">No Photo</span>
+                                        </div>
+                                    )}
+                                    {isUploadingPhoto && (
+                                        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center">
+                                            <RefreshCw className="text-white animate-spin" size={24} />
+                                        </div>
+                                    )}
+                                </div>
+                                <label className="absolute -bottom-2 -right-2 w-8 h-8 bg-blue-600 text-white rounded-xl shadow-lg flex items-center justify-center cursor-pointer hover:bg-blue-700 transition-all border-2 border-white">
+                                    <Image size={14} />
+                                    <input 
+                                        type="file" 
+                                        className="hidden" 
+                                        accept="image/*"
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handlePhotoUpload(file, true);
+                                        }}
+                                    />
+                                </label>
+                            </div>
+                        </div>
+
                         <div className="space-y-4">
                             <div>
-                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อ-นามสกุล</label>
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ชื่อ-นามสกุล</label>
                                 <input type="text" value={selectedStudent.name} onChange={e => setSelectedStudent({...selectedStudent, name: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-blue-500 shadow-inner"/>
                             </div>
                             <div>
-                                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">ชั้นเรียน</label>
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ชั้นเรียน</label>
                                 <select value={selectedStudent.currentClass} onChange={e => setSelectedStudent({...selectedStudent, currentClass: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none focus:border-blue-500 shadow-inner">
                                     {classRooms.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                 </select>
                             </div>
-                            <div className="flex gap-3 pt-6">
-                                <button onClick={() => setIsEditStudentOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-black uppercase text-[10px]">ยกเลิก</button>
-                                <button onClick={handleEditStudent} className="flex-[2] py-3 bg-blue-600 text-white rounded-xl font-black shadow-lg hover:bg-blue-700 transition-all">บันทึกการแก้ไข</button>
-                            </div>
+                        </div>
+                        <div className="flex gap-3 pt-8 mt-8 border-t border-slate-100">
+                            <button onClick={() => setIsEditStudentOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-xs hover:bg-slate-200 transition-all">ยกเลิก</button>
+                            <button onClick={handleEditStudent} className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black shadow-xl hover:bg-blue-700 transition-all uppercase tracking-widest">บันทึกการแก้ไข</button>
                         </div>
                     </div>
                 </div>

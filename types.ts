@@ -19,6 +19,7 @@ export enum SystemView {
 // Fix: Added VICE_DIRECTOR and FINANCE_COOP to TeacherRole to resolve type assignment errors
 export type TeacherRole = 
   | 'SYSTEM_ADMIN'      // ผู้ดูแลระบบ (จัดการข้อมูลครู)
+  | 'ADMIN'             // ผู้ดูแลระบบทั่วไป
   | 'DIRECTOR'          // ผู้อำนวยการ
   | 'VICE_DIRECTOR'     // รองผู้อำนวยการ
   | 'DOCUMENT_OFFICER'  // ธุรการ (รับหนังสือ)
