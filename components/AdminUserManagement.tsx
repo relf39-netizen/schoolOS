@@ -217,6 +217,10 @@ function doPost(e) {
     if (data.message) return handleTelegramWebhook(data.message);
     if (data.action === 'fetchRemote') return fetchRemoteFile(data.url);
     if (data.action === 'setup') return setTelegramWebhook();
+    if (data.action === 'sendTelegram') {
+      sendMessage(data.token, data.chatId, data.text);
+      return createJsonResponse({'status': 'success'});
+    }
     
     if (data.folderId && data.fileData) {
       var folder = DriveApp.getFolderById(data.folderId);
@@ -1020,6 +1024,24 @@ function setTelegramWebhook() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-2">
                                 <div className="space-y-1"><label className="block text-[10px] font-bold text-slate-400 ml-1">รัศมีที่อนุญาต (เมตร)</label><input type="number" value={schoolForm.radius || 500} onChange={e => setSchoolForm({...schoolForm, radius: parseInt(e.target.value)})} className="w-full px-4 py-2 border rounded-lg font-bold bg-white text-lg outline-none focus:ring-2 ring-orange-500/10"/></div>
                                 <div className="space-y-1"><label className="block text-[10px] font-bold text-slate-400 ml-1">เวลาเริ่มเข้าสาย</label><input type="time" value={schoolForm.lateTimeThreshold || '08:30'} onChange={e => setSchoolForm({...schoolForm, lateTimeThreshold: e.target.value})} className="w-full px-4 py-2 border rounded-lg font-bold bg-white text-lg outline-none focus:ring-2 ring-orange-500/10"/></div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-orange-100">
+                                <div className="flex items-center gap-4 p-4 bg-white rounded-xl border border-orange-100 shadow-sm">
+                                    <div 
+                                        onClick={() => setSchoolForm({ ...schoolForm, autoCheckOutEnabled: !schoolForm.autoCheckOutEnabled })}
+                                        className={`w-12 h-6 rounded-full relative transition-all cursor-pointer ${schoolForm.autoCheckOutEnabled ? 'bg-orange-500' : 'bg-slate-200'}`}
+                                    >
+                                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${schoolForm.autoCheckOutEnabled ? 'left-7' : 'left-1'}`}></div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-800 uppercase tracking-tight">ลงเวลากลับอัตโนมัติ</label>
+                                        <p className="text-[9px] text-slate-400 font-bold">กรณีลืมลงเวลากลับในวันถัดไป</p>
+                                    </div>
+                                </div>
+                                <div className={`space-y-1 transition-all ${schoolForm.autoCheckOutEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                                    <label className="block text-[10px] font-bold text-slate-400 ml-1">เวลากลับอัตโนมัติ</label>
+                                    <input type="time" value={schoolForm.autoCheckOutTime || '16:30'} onChange={e => setSchoolForm({...schoolForm, autoCheckOutTime: e.target.value})} className="w-full px-4 py-2 border rounded-lg font-bold bg-white text-lg outline-none focus:ring-2 ring-orange-500/10"/>
+                                </div>
                             </div>
                         </div>
                         <div className="flex justify-end pt-4"><button type="submit" className="bg-slate-900 text-white px-10 py-3 rounded-xl font-bold shadow-lg hover:bg-black transition-all flex items-center gap-2 text-sm active:scale-95"><Save size={20}/> บันทึกการตั้งค่าทั้งหมด</button></div>

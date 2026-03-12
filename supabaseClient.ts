@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   signature_base_64 TEXT,
   telegram_chat_id TEXT,
   is_suspended BOOLEAN DEFAULT FALSE,
-  is_approved BOOLEAN DEFAULT FALSE
+  is_approved BOOLEAN DEFAULT FALSE,
+  assigned_classes TEXT[] DEFAULT '{}'
 );
 
 -- 3. ตารางการตั้งค่าโรงเรียน (API Keys / Config)
@@ -53,6 +54,15 @@ CREATE TABLE IF NOT EXISTS school_configs (
   director_signature_base_64 TEXT,
   director_signature_scale FLOAT DEFAULT 1.0,
   director_signature_y_offset FLOAT DEFAULT 0
+);
+
+-- 3.1 ตารางห้องเรียน
+CREATE TABLE IF NOT EXISTS class_rooms (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  academic_year TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- 4. ตารางงานวิชาการ: จำนวนนักเรียน
@@ -116,20 +126,6 @@ CREATE TABLE IF NOT EXISTS plan_projects (
   fiscal_year TEXT
 );
 
--- 9. ตารางโครงการในแผนปฏิบัติการ
-CREATE TABLE IF NOT EXISTS plan_projects (
-  id TEXT PRIMARY KEY,
-  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
-  department_name TEXT NOT NULL,
-  name TEXT NOT NULL,
-  subsidy_budget FLOAT DEFAULT 0,
-  learner_dev_budget FLOAT DEFAULT 0,
-  actual_expense FLOAT DEFAULT 0,
-  status TEXT DEFAULT 'Draft',
-  fiscal_year TEXT
-);
-
-
 -- 10. ตารางนักเรียน
 CREATE TABLE IF NOT EXISTS students (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -164,4 +160,25 @@ CREATE TABLE IF NOT EXISTS academic_years (
   is_current BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- เพิ่มคอลัมน์สำหรับการลงเวลากลับอัตโนมัติ
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='schools' AND column_name='auto_check_out_enabled') THEN
+        ALTER TABLE schools ADD COLUMN auto_check_out_enabled BOOLEAN DEFAULT FALSE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='schools' AND column_name='auto_check_out_time') THEN
+        ALTER TABLE schools ADD COLUMN auto_check_out_time TEXT DEFAULT '16:30';
+    END IF;
+    
+    -- สำหรับตาราง attendance (ถ้ามี)
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='attendance') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='attendance' AND column_name='leave_type') THEN
+            ALTER TABLE attendance ADD COLUMN leave_type TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='attendance' AND column_name='is_auto_checkout') THEN
+            ALTER TABLE attendance ADD COLUMN is_auto_checkout BOOLEAN DEFAULT FALSE;
+        END IF;
+    END IF;
+END $$;
 `;

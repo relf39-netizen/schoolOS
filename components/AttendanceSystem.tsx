@@ -31,6 +31,18 @@ const getThaiMonthYear = (dateStr: string) => {
 
 const getTodayDateStr = () => new Date().toISOString().split('T')[0];
 
+const countWeekdays = (start: string, end: string) => {
+    let count = 0;
+    const cur = new Date(start);
+    const last = new Date(end);
+    while (cur <= last) {
+        const day = cur.getDay();
+        if (day !== 0 && day !== 6) count++;
+        cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+};
+
 interface AttendanceSystemProps {
     currentUser: Teacher;
     allTeachers: Teacher[];
@@ -45,13 +57,109 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
     const [gpsStatus, setGpsStatus] = useState<{ lat: number, lng: number, dist: number } | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     
-    const [viewMode, setViewMode] = useState<'MAIN' | 'PRINT_DAILY'>('MAIN');
+    const [viewMode, setViewMode] = useState<'MAIN' | 'PRINT_DAILY' | 'SUMMARY_REPORT'>('MAIN');
     const [selectedDate, setSelectedDate] = useState(getTodayDateStr());
+    const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
+    const [endDate, setEndDate] = useState(getTodayDateStr());
+    const [summaryData, setSummaryData] = useState<any[]>([]);
+    const [isFetchingSummary, setIsFetchingSummary] = useState(false);
+    const [summarySortOrder, setSummarySortOrder] = useState<'EARLIEST' | 'NAME'>('NAME');
     const [approvedLeaves, setApprovedLeaves] = useState<LeaveRequest[]>([]);
+    const [schoolConfig, setSchoolConfig] = useState<any>(null);
 
     const isAdminView = currentUser.roles.some(role => 
         ['SYSTEM_ADMIN', 'DIRECTOR', 'VICE_DIRECTOR', 'DOCUMENT_OFFICER'].includes(role)
     ) || currentUser.isActingDirector;
+
+    const isSummaryAuthorized = currentUser.roles.some(role => 
+        ['DIRECTOR', 'DOCUMENT_OFFICER', 'SYSTEM_ADMIN'].includes(role)
+    ) || currentUser.isActingDirector;
+
+    const fetchSummaryData = async () => {
+        if (!supabase) return;
+        setIsFetchingSummary(true);
+        try {
+            // Fetch all attendance records in range
+            const { data: attendance, error: attError } = await supabase
+                .from('attendance')
+                .select('*')
+                .eq('school_id', currentUser.schoolId)
+                .gte('date', startDate)
+                .lte('date', endDate);
+            
+            if (attError) throw attError;
+
+            // Fetch all leave requests in range
+            const { data: leaves, error: leaveError } = await supabase
+                .from('leave_requests')
+                .select('*')
+                .eq('school_id', currentUser.schoolId)
+                .eq('status', 'Approved')
+                .lte('start_date', endDate)
+                .gte('end_date', startDate);
+
+            if (leaveError) throw leaveError;
+
+            const teachers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && !t.isSuspended && !t.roles.includes('DIRECTOR'));
+
+            const summary = teachers.map(teacher => {
+                const teacherAtt = (attendance || []).filter(a => a.teacher_id === teacher.id);
+                const teacherLeaves = (leaves || []).filter(l => l.teacher_id === teacher.id);
+
+                const presentDays = teacherAtt.filter(a => a.status === 'OnTime' || a.status === 'Late').length;
+                const lateDays = teacherAtt.filter(a => a.status === 'Late').length;
+                
+                // Count unique leave days in range
+                const leaveDaysCount = teacherLeaves.reduce((acc, leave) => {
+                    const start = new Date(leave.start_date > startDate ? leave.start_date : startDate);
+                    const end = new Date(leave.end_date < endDate ? leave.end_date : endDate);
+                    let count = 0;
+                    const cur = new Date(start);
+                    while (cur <= end) {
+                        const day = cur.getDay();
+                        if (day !== 0 && day !== 6) count++;
+                        cur.setDate(cur.getDate() + 1);
+                    }
+                    return acc + count;
+                }, 0);
+
+                // Earliest check-in
+                const checkInTimes = teacherAtt
+                    .filter(a => a.check_in_time && a.check_in_time !== 'Leave')
+                    .map(a => a.check_in_time);
+                const earliestCheckIn = checkInTimes.length > 0 ? checkInTimes.sort()[0] : null;
+
+                return {
+                    id: teacher.id,
+                    name: teacher.name,
+                    position: teacher.position,
+                    presentDays,
+                    lateDays,
+                    leaveDays: leaveDaysCount,
+                    earliestCheckIn,
+                };
+            });
+
+            setSummaryData(summary);
+        } catch (err: any) {
+            console.error("Summary Fetch Error:", err.message);
+            alert("ไม่สามารถดึงข้อมูลสรุปได้");
+        } finally {
+            setIsFetchingSummary(false);
+        }
+    };
+
+    const sortedSummaryData = useMemo(() => {
+        const data = [...summaryData];
+        if (summarySortOrder === 'EARLIEST') {
+            return data.sort((a, b) => {
+                if (!a.earliestCheckIn) return 1;
+                if (!b.earliestCheckIn) return -1;
+                return a.earliestCheckIn.localeCompare(b.earliestCheckIn);
+            });
+        }
+        return data.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+    }, [summaryData, summarySortOrder]);
 
     const fetchData = async () => {
         if (!isConfigured || !supabase) return;
@@ -76,6 +184,8 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 checkInTime: r.check_in_time,
                 checkOutTime: r.check_out_time,
                 status: r.status,
+                leaveType: r.leave_type,
+                isAutoCheckout: r.is_auto_checkout,
                 coordinate: r.coordinate
             }));
             setHistory(mappedData);
@@ -86,20 +196,71 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 .eq('status', 'Approved')
                 .lte('start_date', selectedDate)
                 .gte('end_date', selectedDate);
-            if (leaves) {
-                setApprovedLeaves(leaves.map(l => ({
-                    id: l.id.toString(),
-                    teacherId: l.teacher_id,
-                    teacherName: l.teacher_name,
-                    type: l.type,
-                    startDate: l.start_date,
-                    endDate: l.end_date,
-                    status: l.status,
-                    reason: l.reason
-                } as any)));
+            
+            const mappedLeaves: LeaveRequest[] = (leaves || []).map(l => ({
+                id: l.id.toString(),
+                teacherId: l.teacher_id,
+                teacherName: l.teacher_name,
+                type: l.type,
+                startDate: l.start_date,
+                endDate: l.end_date,
+                status: l.status,
+                reason: l.reason
+            } as any));
+            setApprovedLeaves(mappedLeaves);
+
+            // Auto Process Attendance for past dates
+            const today = getTodayDateStr();
+            if (isAdminView && selectedDate < today && currentSchool.autoCheckOutEnabled) {
+                let hasChanges = false;
+
+                // 1. Auto Check-out
+                const missedCheckOuts = mappedData.filter(r => r.checkInTime && !r.checkOutTime && r.status !== 'Leave');
+                for (const record of missedCheckOuts) {
+                    const { error } = await supabase!.from('attendance')
+                        .update({ 
+                            check_out_time: currentSchool.autoCheckOutTime || '16:30',
+                            is_auto_checkout: true
+                        })
+                        .eq('id', record.id);
+                    if (!error) hasChanges = true;
+                }
+
+                // 2. Auto Leave
+                const { data: teachers } = await supabase!.from('profiles')
+                    .select('id, name')
+                    .eq('school_id', currentUser.schoolId)
+                    .eq('is_approved', true);
+                    
+                if (teachers) {
+                    for (const teacher of teachers) {
+                        const hasRecord = mappedData.find(r => r.teacherId === teacher.id);
+                        if (!hasRecord) {
+                            const leave = mappedLeaves.find(l => l.teacherId === teacher.id && l.type !== 'OffCampus');
+                            if (leave) {
+                                const { error } = await supabase!.from('attendance').insert([{
+                                    school_id: currentUser.schoolId,
+                                    teacher_id: teacher.id,
+                                    teacher_name: teacher.name,
+                                    date: selectedDate,
+                                    check_in_time: 'Leave',
+                                    check_out_time: 'Leave',
+                                    status: 'Leave',
+                                    leave_type: leave.type
+                                }]);
+                                if (!error) hasChanges = true;
+                            }
+                        }
+                    }
+                }
+
+                if (hasChanges) {
+                    // Re-run fetch to show updated data
+                    fetchData();
+                    return;
+                }
             }
 
-            const today = getTodayDateStr();
             const { data: todayData } = await supabase!.from('attendance')
                 .select('*')
                 .eq('teacher_id', currentUser.id)
@@ -116,6 +277,9 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 status: todayData.status
             } as any);
             else setTodayRecord(null);
+
+            const { data: config } = await supabase!.from('school_configs').select('*').eq('school_id', currentUser.schoolId).maybeSingle();
+            if (config) setSchoolConfig(config);
         } catch (e: any) {
             console.error("Fetch Error:", e.message);
             setErrorMsg("ไม่สามารถเชื่อมต่อฐานข้อมูลได้");
@@ -144,10 +308,11 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
             const schoolLat = currentSchool.lat || 13.7563;
             const schoolLng = currentSchool.lng || 100.5018;
             const radius = currentSchool.radius || 500;
+            const buffer = 25; // เพิ่มระยะเผื่อ 25 เมตรสำหรับความคลาดเคลื่อนของ GPS
             const dist = calculateDistance(lat, lng, schoolLat, schoolLng);
             setGpsStatus({ lat, lng, dist });
-            if (dist > radius) {
-                throw new Error(`ไม่อนุญาตให้ลงเวลา: ท่านอยู่นอกพื้นที่โรงเรียน (${Math.round(dist)} ม.)`);
+            if (dist > (radius + buffer)) {
+                throw new Error(`ไม่อนุญาตให้ลงเวลา: ท่านอยู่นอกพื้นที่โรงเรียน (${Math.round(dist)} ม.)\nพิกัดโรงเรียน: ${schoolLat.toFixed(6)}, ${schoolLng.toFixed(6)}\nพิกัดของท่าน: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
             }
             const now = new Date();
             const dateStr = getTodayDateStr();
@@ -165,6 +330,41 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 }]);
                 if (error) throw error;
                 alert(`ลงเวลาเข้างานสำเร็จ: ${timeStr} น.`);
+
+                // ส่งการแจ้งเตือน Telegram ถึงผู้อำนวยการ
+                if (schoolConfig?.script_url && schoolConfig?.telegram_bot_token) {
+                    const directors = allTeachers.filter(t => 
+                        (t.roles || []).includes('DIRECTOR') || 
+                        t.isActingDirector || 
+                        (t.roles || []).includes('SYSTEM_ADMIN')
+                    );
+                    
+                    for (const director of directors) {
+                        if (director.telegramChatId) {
+                            const message = `🔔 <b>แจ้งเตือนการลงเวลาเข้างาน</b>\n\n` +
+                                            `👤 <b>ชื่อ:</b> ${currentUser.name}\n` +
+                                            `⏰ <b>เวลา:</b> ${timeStr} น.\n` +
+                                            `📍 <b>สถานะ:</b> ${status === 'OnTime' ? '✅ มาปกติ' : '⚠️ มาสาย'}\n` +
+                                            `📅 <b>วันที่:</b> ${getThaiDate(dateStr)}`;
+                            
+                            try {
+                                fetch(schoolConfig.script_url, {
+                                    method: 'POST',
+                                    mode: 'no-cors',
+                                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                                    body: JSON.stringify({
+                                        action: 'sendTelegram',
+                                        token: schoolConfig.telegram_bot_token,
+                                        chatId: director.telegramChatId,
+                                        text: message
+                                    })
+                                });
+                            } catch (err) {
+                                console.error("Telegram Notification Error:", err);
+                            }
+                        }
+                    }
+                }
             } else {
                 const { error } = await supabase!.from('attendance')
                     .update({ check_out_time: timeStr })
@@ -172,6 +372,40 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     .eq('date', dateStr);
                 if (error) throw error;
                 alert(`ลงเวลากลับสำเร็จ: ${timeStr} น.`);
+
+                // ส่งการแจ้งเตือน Telegram ถึงผู้อำนวยการ (ขาออก)
+                if (schoolConfig?.script_url && schoolConfig?.telegram_bot_token) {
+                    const directors = allTeachers.filter(t => 
+                        (t.roles || []).includes('DIRECTOR') || 
+                        t.isActingDirector || 
+                        (t.roles || []).includes('SYSTEM_ADMIN')
+                    );
+                    
+                    for (const director of directors) {
+                        if (director.telegramChatId) {
+                            const message = `🚪 <b>แจ้งเตือนการลงเวลากลับ</b>\n\n` +
+                                            `👤 <b>ชื่อ:</b> ${currentUser.name}\n` +
+                                            `⏰ <b>เวลา:</b> ${timeStr} น.\n` +
+                                            `📅 <b>วันที่:</b> ${getThaiDate(dateStr)}`;
+                            
+                            try {
+                                fetch(schoolConfig.script_url, {
+                                    method: 'POST',
+                                    mode: 'no-cors',
+                                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                                    body: JSON.stringify({
+                                        action: 'sendTelegram',
+                                        token: schoolConfig.telegram_bot_token,
+                                        chatId: director.telegramChatId,
+                                        text: message
+                                    })
+                                });
+                            } catch (err) {
+                                console.error("Telegram Notification Error:", err);
+                            }
+                        }
+                    }
+                }
             }
             fetchData(); 
         } catch (e: any) {
@@ -222,6 +456,137 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
             <p className="font-black uppercase tracking-widest text-xs">Synchronizing Records...</p>
         </div>
     );
+
+    if (viewMode === 'SUMMARY_REPORT') {
+        const totalWorkDays = countWeekdays(startDate, endDate);
+
+        return (
+            <div className="absolute inset-0 z-50 bg-[#f8fafc] min-h-screen font-sarabun text-slate-900 print:bg-white overflow-y-auto">
+                {/* Control Header */}
+                <div className="bg-slate-900/95 backdrop-blur-md p-4 shadow-xl print:hidden sticky top-0 z-50 flex flex-col md:flex-row justify-between items-center gap-4 px-10 border-b border-white/10">
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => setViewMode('MAIN')} className="flex items-center gap-2 text-white font-bold bg-white/10 px-4 py-2 rounded-xl hover:bg-white/20 transition-all active:scale-95">
+                            <ArrowLeft size={20}/> ย้อนกลับ
+                        </button>
+                        <h2 className="text-white font-black text-lg">สรุปรายงานการมาปฏิบัติราชการ</h2>
+                    </div>
+                    
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2 bg-white/10 px-3 py-2 rounded-xl border border-white/10">
+                            <span className="text-white/60 text-[10px] font-black uppercase">เริ่ม:</span>
+                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-white font-bold text-xs outline-none cursor-pointer"/>
+                        </div>
+                        <div className="flex items-center gap-2 bg-white/10 px-3 py-2 rounded-xl border border-white/10">
+                            <span className="text-white/60 text-[10px] font-black uppercase">สิ้นสุด:</span>
+                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-white font-bold text-xs outline-none cursor-pointer"/>
+                        </div>
+                        <button onClick={fetchSummaryData} className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all">
+                            <RefreshCw size={20} className={isFetchingSummary ? 'animate-spin' : ''}/>
+                        </button>
+                        <div className="h-8 w-px bg-white/20 mx-2 hidden md:block"></div>
+                        <select 
+                            value={summarySortOrder} 
+                            onChange={(e: any) => setSummarySortOrder(e.target.value)}
+                            className="bg-white/10 text-white font-bold text-xs px-3 py-2 rounded-xl border border-white/10 outline-none cursor-pointer"
+                        >
+                            <option value="NAME" className="text-slate-900">เรียงตามชื่อ</option>
+                        </select>
+                        <button onClick={() => window.print()} className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-black shadow-lg hover:bg-emerald-700 transition-all flex items-center gap-2 active:scale-95">
+                            <Printer size={18}/> พิมพ์รายงาน
+                        </button>
+                    </div>
+                </div>
+
+                {/* Report Content */}
+                <div className="max-w-[210mm] mx-auto bg-white my-8 p-[2cm] shadow-2xl print:shadow-none print:my-0 print:p-0">
+                    <div className="text-center mb-8">
+                        {currentSchool.logoBase64 && <img src={currentSchool.logoBase64} className="h-20 mx-auto mb-4 object-contain"/>}
+                        <h1 className="text-2xl font-black text-slate-900">สรุปรายงานการมาปฏิบัติราชการ</h1>
+                        <h2 className="text-lg font-bold text-slate-700">{currentSchool.name}</h2>
+                        <p className="text-sm font-bold text-blue-600 mt-2">
+                            ช่วงวันที่ {getThaiDate(startDate)} ถึง {getThaiDate(endDate)}
+                        </p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
+                            จำนวนวันทำการทั้งหมด: {totalWorkDays} วัน
+                        </p>
+                    </div>
+
+                    <table className="w-full border-collapse border border-slate-900 text-sm">
+                        <thead>
+                            <tr className="bg-slate-50 font-black text-center">
+                                <th className="border border-slate-900 p-3 w-10">ที่</th>
+                                <th className="border border-slate-900 p-3 text-left">ชื่อ-นามสกุล</th>
+                                <th className="border border-slate-900 p-3 w-14">มา</th>
+                                <th className="border border-slate-900 p-3 w-14">สาย</th>
+                                <th className="border border-slate-900 p-3 w-14">ลา</th>
+                                <th className="border border-slate-900 p-3 w-14">ขาด</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sortedSummaryData.map((item, idx) => {
+                                // Absent calculation: totalWorkDays - presentDays - leaveDays
+                                const absentDays = Math.max(0, totalWorkDays - item.presentDays - item.leaveDays);
+                                
+                                return (
+                                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="border border-slate-900 p-3 text-center font-mono">{idx + 1}</td>
+                                        <td className="border border-slate-900 p-3">
+                                            <div className="font-bold text-slate-800">{item.name}</div>
+                                            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{item.position}</div>
+                                        </td>
+                                        <td className="border border-slate-900 p-3 text-center font-black text-green-700">{item.presentDays}</td>
+                                        <td className="border border-slate-900 p-3 text-center font-black text-orange-600">{item.lateDays}</td>
+                                        <td className="border border-slate-900 p-3 text-center font-black text-blue-600">{item.leaveDays}</td>
+                                        <td className="border border-slate-900 p-3 text-center font-black text-red-600">{absentDays}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+
+                    {/* Footer / Signatures */}
+                    <div className="mt-16 grid grid-cols-2 gap-10">
+                        <div className="text-center space-y-16">
+                            <div className="space-y-2">
+                                <p className="text-sm">ลงชื่อ..........................................................ผู้จัดทำรายงาน</p>
+                                <p className="font-bold text-sm">({currentUser.name})</p>
+                                <p className="text-xs text-slate-500">ตำแหน่ง {currentUser.position}</p>
+                            </div>
+                        </div>
+                        <div className="text-center space-y-16">
+                            <div className="space-y-2">
+                                {(() => {
+                                    const director = allTeachers.find(t => t.roles.includes('DIRECTOR')) || allTeachers.find(t => t.isActingDirector);
+                                    const directorPosition = director?.isActingDirector ? 'รักษาการในตำแหน่งผู้อำนวยการโรงเรียน' : 'ผู้อำนวยการโรงเรียน';
+                                    return (
+                                        <>
+                                            <p className="text-sm">ลงชื่อ..........................................................ผู้อนุมัติ</p>
+                                            <p className="font-bold text-sm">( {director?.name || '......................................................'} )</p>
+                                            <p className="text-xs text-slate-500">{directorPosition}</p>
+                                        </>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-20 text-[10px] text-slate-400 text-center italic border-t border-slate-100 pt-4">
+                        รายงานนี้สร้างขึ้นโดยระบบอัตโนมัติ เมื่อวันที่ {getThaiDate(getTodayDateStr())} เวลา {new Date().toLocaleTimeString('th-TH')} น.
+                    </div>
+                </div>
+
+                <style>{`
+                    @media print {
+                        @page { size: A4 portrait; margin: 1.5cm; }
+                        body { background: white !important; -webkit-print-color-adjust: exact; }
+                        .print-hidden { display: none !important; }
+                        div.absolute { position: static !important; background: white !important; }
+                        div.max-w-\\[210mm\\] { width: 100% !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
+                    }
+                `}</style>
+            </div>
+        );
+    }
 
     // --- FORMAL DAILY PRINT VIEW (A4 CLEAN LOOK) ---
     if (viewMode === 'PRINT_DAILY') {
@@ -453,6 +818,17 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                         )}
                     </div>
                     <div className="flex items-center gap-3 w-full sm:w-auto">
+                        {isSummaryAuthorized && (
+                            <button 
+                                onClick={() => {
+                                    setViewMode('SUMMARY_REPORT');
+                                    fetchSummaryData();
+                                }} 
+                                className="flex-1 sm:flex-none p-3 px-6 bg-blue-600 text-white rounded-2xl hover:bg-blue-700 transition-all flex items-center justify-center gap-2 font-black text-xs shadow-lg active:scale-95"
+                            >
+                                <FileSpreadsheet size={16}/> สรุปการมาทำงาน
+                            </button>
+                        )}
                         {isAdminView && (
                             <button onClick={() => setViewMode('PRINT_DAILY')} className="flex-1 sm:flex-none p-3 px-6 bg-slate-800 text-white rounded-2xl hover:bg-black transition-all flex items-center justify-center gap-2 font-black text-xs shadow-lg active:scale-95">
                                 <Printer size={16}/> พิมพ์ใบสรุปประจำวัน

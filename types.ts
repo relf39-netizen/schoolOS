@@ -45,6 +45,8 @@ export interface School {
   lng?: number;        // Longitude for Attendance
   radius?: number;     // Allowed radius in meters
   lateTimeThreshold?: string; // Time string e.g., "08:15"
+  autoCheckOutEnabled?: boolean;
+  autoCheckOutTime?: string;
   
   // Academic Year Settings (MM-DD)
   academicYearStart?: string; // e.g. "05-16"

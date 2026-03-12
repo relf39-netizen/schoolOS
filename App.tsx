@@ -68,6 +68,8 @@ const App: React.FC = () => {
                     lng: s.lng, 
                     radius: s.radius, 
                     lateTimeThreshold: s.late_time_threshold, 
+                    autoCheckOutEnabled: s.auto_check_out_enabled,
+                    autoCheckOutTime: s.auto_check_out_time,
                     logoBase64: s.logo_base_64, 
                     isSuspended: s.is_suspended
                 })));
@@ -226,7 +228,10 @@ const App: React.FC = () => {
         const { error } = await client.from('schools').upsert([{
             id: s.id, name: s.name, district: s.district, province: s.province,
             logo_base_64: s.logoBase64, lat: s.lat, lng: s.lng, radius: s.radius,
-            late_time_threshold: s.lateTimeThreshold, is_suspended: s.isSuspended || false
+            late_time_threshold: s.lateTimeThreshold, 
+            auto_check_out_enabled: s.autoCheckOutEnabled,
+            auto_check_out_time: s.autoCheckOutTime,
+            is_suspended: s.isSuspended || false
         }]);
         if (!error) setAllSchools(prev => prev.map(sch => sch.id === s.id ? s : sch));
     };
