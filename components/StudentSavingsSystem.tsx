@@ -49,6 +49,12 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
     const [isManageTeachersOpen, setIsManageTeachersOpen] = useState(false);
     const [selectedTeacherForEdit, setSelectedTeacherForEdit] = useState<Teacher | null>(null);
 
+    // Date range for individual reports
+    const [reportStartDate, setReportStartDate] = useState<string>('');
+    const [reportEndDate, setReportEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
+    const [transactionDate, setTransactionDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
     const isAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR') || (currentUser.roles || []).includes('ACTING_DIRECTOR');
     const isDirector = (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR') || (currentUser.roles || []).includes('ACTING_DIRECTOR');
 
@@ -184,22 +190,76 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
             return next;
         });
     };
-    const printIndividualReport = (student: Student) => {
-        const studentTransactions = savings
-            .filter(s => s.studentId === student.id)
-            .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+    const generateIndividualReportHTML = (student: Student, startDate?: string, endDate?: string) => {
+        let studentTransactions = savings
+            .filter(s => s.studentId === student.id);
         
+        if (startDate) {
+            studentTransactions = studentTransactions.filter(t => t.createdAt && t.createdAt.split('T')[0] >= startDate);
+        }
+        if (endDate) {
+            studentTransactions = studentTransactions.filter(t => t.createdAt && t.createdAt.split('T')[0] <= endDate);
+        }
+
+        studentTransactions = studentTransactions.sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+        
+        const periodText = startDate && endDate 
+            ? `<p style="margin: 5px 0;">ช่วงวันที่: ${formatThaiDate(startDate)} ถึง ${formatThaiDate(endDate)}</p>`
+            : '';
+
+        return `
+            <div class="report-page" style="page-break-after: always; padding: 20px;">
+                <div class="header" style="text-align: center; margin-bottom: 30px;">
+                    <h2 style="margin: 0;">รายงานสรุปการออมทรัพย์รายบุคคล</h2>
+                    <p style="margin: 5px 0;">นักเรียน: ${student.name} | ชั้น: ${student.currentClass}</p>
+                    ${periodText}
+                    <p style="margin: 5px 0;">ปีการศึกษา: ${currentAcademicYear}</p>
+                </div>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                    <thead>
+                        <tr>
+                            <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px; background-color: #f2f2f2; width: 25%;">วันที่</th>
+                            <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px; background-color: #f2f2f2; width: 15%;">ประเภท</th>
+                            <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px; background-color: #f2f2f2; width: 20%;">จำนวนเงิน (บาท)</th>
+                            <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px; background-color: #f2f2f2; width: 40%;">หมายเหตุ/ผู้บันทึก</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${studentTransactions.length > 0 ? studentTransactions.map(t => `
+                            <tr>
+                                <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px;">${formatThaiDate(t.createdAt!)}</td>
+                                <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px;">${t.type === 'DEPOSIT' ? 'ฝาก' : 'ถอน'}</td>
+                                <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px;">${t.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px;">
+                                    <div>บันทึกโดย: ${teachers[t.createdBy!] || 'ไม่ระบุ'}</div>
+                                    ${t.editReason ? `
+                                        <div style="font-size: 11px; color: #666; font-style: italic; margin-top: 4px; display: block;">
+                                            * แก้ไขเมื่อ: ${formatThaiDate(t.editedAt!)} <br/>
+                                            เหตุผล: ${t.editReason} <br/>
+                                            โดย: ${teachers[t.editedBy!] || 'ไม่ระบุ'}
+                                        </div>
+                                    ` : ''}
+                                </td>
+                            </tr>
+                        `).join('') : '<tr><td colspan="4" style="text-align: center; border: 1px solid #000; padding: 20px;">ไม่พบข้อมูลการทำรายการ</td></tr>'}
+                    </tbody>
+                </table>
+                <div style="margin-top: 20px; text-align: right; font-size: 1.2em; font-weight: bold;">ยอดเงินออมคงเหลือ: ฿${student.totalSavings?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                
+                <div style="margin-top: 50px; display: flex; justify-content: flex-end;">
+                    <div style="text-align: center; width: 250px;">
+                        <p>(ลงชื่อ)............................................................</p>
+                        <p>(${currentUser.name})</p>
+                        <p>ครูประจำชั้น</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const printIndividualReport = (student: Student, startDate?: string, endDate?: string) => {
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
-
-        const formatThaiDate = (dateStr: string) => {
-            const date = new Date(dateStr);
-            const months = [
-                'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
-            ];
-            return `วันที่ ${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear() + 543}`;
-        };
 
         const html = `
             <html>
@@ -207,55 +267,136 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                     <title>รายงานการออมทรัพย์ - ${student.name}</title>
                     <style>
                         @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap');
-                        body { font-family: 'Sarabun', sans-serif; padding: 40px; color: #333; }
-                        .header { text-align: center; margin-bottom: 30px; }
-                        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                        th, td { border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px; }
-                        th { background-color: #f2f2f2; }
-                        .total { margin-top: 20px; text-align: right; font-size: 1.2em; font-weight: bold; }
-                        .edit-note { font-size: 11px; color: #666; font-style: italic; margin-top: 4px; display: block; }
-                        .signature-section { margin-top: 50px; display: flex; justify-content: flex-end; }
-                        .signature-box { text-align: center; width: 250px; }
-                        .sig-line { border-bottom: 1px solid #000; margin-bottom: 10px; height: 40px; }
+                        body { font-family: 'Sarabun', sans-serif; padding: 0; color: #333; }
                         @media print { .no-print { display: none; } }
                     </style>
                 </head>
                 <body>
+                    ${generateIndividualReportHTML(student, startDate, endDate)}
+                    <div class="no-print" style="margin-top: 30px; text-align: center;">
+                        <button onclick="window.print()" style="padding: 10px 20px; cursor: pointer; font-family: 'Sarabun', sans-serif; font-weight: bold; border-radius: 8px; border: 1px solid #ccc; background: #fff;">พิมพ์รายงาน</button>
+                    </div>
+                    <script>
+                        window.onload = function() {
+                            setTimeout(function() {
+                                window.print();
+                            }, 500);
+                        };
+                    </script>
+                </body>
+            </html>
+        `;
+        printWindow.document.write(html);
+        printWindow.document.close();
+    };
+
+    const printAllIndividualReports = () => {
+        const classStudents = students.filter(s => s.currentClass === selectedClass || selectedClass === 'All');
+        if (classStudents.length === 0) {
+            alert('ไม่พบนักเรียนในชั้นเรียนที่เลือก');
+            return;
+        }
+
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const html = `
+            <html>
+                <head>
+                    <title>รายงานการออมทรัพย์รายบุคคล - ${selectedClass === 'All' ? 'ทุกชั้นเรียน' : selectedClass}</title>
+                    <style>
+                        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap');
+                        body { font-family: 'Sarabun', sans-serif; padding: 0; color: #333; }
+                        @media print { .no-print { display: none; } }
+                    </style>
+                </head>
+                <body>
+                    ${classStudents.map(s => generateIndividualReportHTML(s)).join('')}
+                    <div class="no-print" style="margin-top: 30px; text-align: center; padding-bottom: 50px;">
+                        <button onclick="window.print()" style="padding: 10px 20px; cursor: pointer; font-family: 'Sarabun', sans-serif; font-weight: bold; border-radius: 8px; border: 1px solid #ccc; background: #fff;">พิมพ์รายงานทั้งหมด</button>
+                    </div>
+                </body>
+            </html>
+        `;
+        printWindow.document.write(html);
+        printWindow.document.close();
+    };
+
+    const printClassTransactionSummary = () => {
+        const classStudents = students.filter(s => s.currentClass === selectedClass || selectedClass === 'All');
+        const reportData = classStudents.map(student => {
+            const studentTransactions = savings.filter(s => s.studentId === student.id);
+            const deposits = studentTransactions.filter(t => t.type === 'DEPOSIT').reduce((sum, t) => sum + t.amount, 0);
+            const withdrawals = studentTransactions.filter(t => t.type === 'WITHDRAWAL').reduce((sum, t) => sum + t.amount, 0);
+            return {
+                ...student,
+                deposits,
+                withdrawals,
+                balance: deposits - withdrawals
+            };
+        });
+
+        const totalDeposits = reportData.reduce((sum, s) => sum + s.deposits, 0);
+        const totalWithdrawals = reportData.reduce((sum, s) => sum + s.withdrawals, 0);
+        const totalBalance = reportData.reduce((sum, s) => sum + s.balance, 0);
+
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const html = `
+            <html>
+                <head>
+                    <title>รายงานสรุปการฝาก-ถอน - ${selectedClass === 'All' ? 'ทุกชั้นเรียน' : selectedClass}</title>
+                    <style>
+                        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap');
+                        body { font-family: 'Sarabun', sans-serif; padding: 40px; color: #333; }
+                        .header { text-align: center; margin-bottom: 30px; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px; }
+                        th { background-color: #f2f2f2; text-align: center; }
+                        .text-right { text-align: right; }
+                        .text-center { text-align: center; }
+                        .summary { margin-top: 30px; border-top: 2px solid #000; padding-top: 10px; }
+                        .signature-section { margin-top: 50px; display: flex; justify-content: flex-end; }
+                        .signature-box { text-align: center; width: 250px; }
+                    </style>
+                </head>
+                <body>
                     <div class="header">
-                        <h2 style="margin: 0;">รายงานสรุปการออมทรัพย์รายบุคคล</h2>
-                        <p style="margin: 5px 0;">นักเรียน: ${student.name} | ชั้น: ${student.currentClass}</p>
+                        <h2 style="margin: 0;">รายงานสรุปการฝาก-ถอนเงินออมทรัพย์</h2>
+                        <p style="margin: 5px 0;">ชั้นเรียน: ${selectedClass === 'All' ? 'ทุกชั้นเรียน' : selectedClass}</p>
                         <p style="margin: 5px 0;">ปีการศึกษา: ${currentAcademicYear}</p>
                     </div>
                     <table>
                         <thead>
                             <tr>
-                                <th style="width: 25%;">วันที่</th>
-                                <th style="width: 15%;">ประเภท</th>
-                                <th style="width: 20%;">จำนวนเงิน (บาท)</th>
-                                <th style="width: 40%;">หมายเหตุ/ผู้บันทึก</th>
+                                <th>ลำดับ</th>
+                                <th>ชื่อ-นามสกุล</th>
+                                <th>ชั้นเรียน</th>
+                                <th>ยอดฝากรวม</th>
+                                <th>ยอดถอนรวม</th>
+                                <th>ยอดคงเหลือ</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${studentTransactions.map(t => `
+                            ${reportData.map((s, i) => `
                                 <tr>
-                                    <td>${formatThaiDate(t.createdAt!)}</td>
-                                    <td>${t.type === 'DEPOSIT' ? 'ฝาก' : 'ถอน'}</td>
-                                    <td>${t.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                    <td>
-                                        <div>บันทึกโดย: ${teachers[t.createdBy!] || 'ไม่ระบุ'}</div>
-                                        ${t.editReason ? `
-                                            <div class="edit-note">
-                                                * แก้ไขเมื่อ: ${formatThaiDate(t.editedAt!)} <br/>
-                                                เหตุผล: ${t.editReason} <br/>
-                                                โดย: ${teachers[t.editedBy!] || 'ไม่ระบุ'}
-                                            </div>
-                                        ` : ''}
-                                    </td>
+                                    <td class="text-center">${i + 1}</td>
+                                    <td>${s.name}</td>
+                                    <td class="text-center">${s.currentClass}</td>
+                                    <td class="text-right">${s.deposits.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                    <td class="text-right">${s.withdrawals.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                    <td class="text-right">${s.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                 </tr>
                             `).join('')}
+                            <tr style="font-weight: bold; background-color: #f9f9f9;">
+                                <td colspan="3" class="text-center">รวมทั้งสิ้น</td>
+                                <td class="text-right">${totalDeposits.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                <td class="text-right">${totalWithdrawals.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                <td class="text-right">${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            </tr>
                         </tbody>
                     </table>
-                    <div class="total">ยอดเงินออมคงเหลือ: ฿${student.totalSavings?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
                     
                     <div class="signature-section">
                         <div class="signature-box">
@@ -264,10 +405,99 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                             <p>ครูประจำชั้น</p>
                         </div>
                     </div>
+                    <script>window.onload = () => window.print();</script>
+                </body>
+            </html>
+        `;
+        printWindow.document.write(html);
+        printWindow.document.close();
+    };
 
-                    <div class="no-print" style="margin-top: 30px; text-align: center;">
-                        <button onclick="window.print()" style="padding: 10px 20px; cursor: pointer;">พิมพ์รายงาน</button>
+    const printGradeOverviewReport = () => {
+        const gradeGroups: Record<string, any> = {};
+        students.forEach(s => {
+            const grade = s.currentClass.split('/')[0];
+            if (!gradeGroups[grade]) {
+                gradeGroups[grade] = { grade, studentCount: 0, deposits: 0, withdrawals: 0, balance: 0 };
+            }
+            const studentTransactions = savings.filter(sv => sv.studentId === s.id);
+            const deposits = studentTransactions.filter(t => t.type === 'DEPOSIT').reduce((sum, t) => sum + t.amount, 0);
+            const withdrawals = studentTransactions.filter(t => t.type === 'WITHDRAWAL').reduce((sum, t) => sum + t.amount, 0);
+            
+            gradeGroups[grade].studentCount += 1;
+            gradeGroups[grade].deposits += deposits;
+            gradeGroups[grade].withdrawals += withdrawals;
+            gradeGroups[grade].balance += (deposits - withdrawals);
+        });
+
+        const sortedGrades = Object.values(gradeGroups).sort((a: any, b: any) => a.grade.localeCompare(b.grade));
+        const totalDeposits = sortedGrades.reduce((sum, g) => sum + g.deposits, 0);
+        const totalWithdrawals = sortedGrades.reduce((sum, g) => sum + g.withdrawals, 0);
+        const totalBalance = sortedGrades.reduce((sum, g) => sum + g.balance, 0);
+
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const html = `
+            <html>
+                <head>
+                    <title>รายงานสรุปภาพรวมรายระดับชั้น</title>
+                    <style>
+                        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap');
+                        body { font-family: 'Sarabun', sans-serif; padding: 40px; color: #333; }
+                        .header { text-align: center; margin-bottom: 30px; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { border: 1px solid #000; padding: 10px; text-align: left; font-size: 14px; }
+                        th { background-color: #f2f2f2; text-align: center; }
+                        .text-right { text-align: right; }
+                        .text-center { text-align: center; }
+                        .signature-section { margin-top: 50px; display: flex; justify-content: flex-end; }
+                        .signature-box { text-align: center; width: 250px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h2 style="margin: 0;">รายงานสรุปการออมทรัพย์ภาพรวมรายระดับชั้น</h2>
+                        <p style="margin: 5px 0;">ปีการศึกษา: ${currentAcademicYear}</p>
                     </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ระดับชั้น</th>
+                                <th>จำนวนนักเรียน</th>
+                                <th>ยอดฝากรวม</th>
+                                <th>ยอดถอนรวม</th>
+                                <th>ยอดคงเหลือ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sortedGrades.map((g: any) => `
+                                <tr>
+                                    <td class="text-center">${g.grade}</td>
+                                    <td class="text-center">${g.studentCount}</td>
+                                    <td class="text-right">${g.deposits.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                    <td class="text-right">${g.withdrawals.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                    <td class="text-right">${g.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                </tr>
+                            `).join('')}
+                            <tr style="font-weight: bold; background-color: #f9f9f9;">
+                                <td class="text-center">รวมทั้งสิ้น</td>
+                                <td class="text-center">${students.length}</td>
+                                <td class="text-right">${totalDeposits.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                <td class="text-right">${totalWithdrawals.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                <td class="text-right">${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <div class="signature-section">
+                        <div class="signature-box">
+                            <p>(ลงชื่อ)............................................................</p>
+                            <p>(${currentUser.name})</p>
+                            <p>ผู้รายงาน</p>
+                        </div>
+                    </div>
+                    <script>window.onload = () => window.print();</script>
                 </body>
             </html>
         `;
@@ -284,7 +514,7 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
         const html = `
             <html>
                 <head>
-                    <title>รายงานสรุปชั้นเรียน - ${selectedClass === 'All' ? 'ทุกชั้นเรียน' : selectedClass}</title>
+                    <title>รายงานสรุปยอดเงินออม - ${selectedClass === 'All' ? 'ทุกชั้นเรียน' : selectedClass}</title>
                     <style>
                         @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap');
                         body { font-family: 'Sarabun', sans-serif; padding: 40px; color: #333; }
@@ -299,7 +529,7 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                 </head>
                 <body>
                     <div class="header">
-                        <h2 style="margin: 0;">รายงานสรุปการออมทรัพย์รายชั้นเรียน</h2>
+                        <h2 style="margin: 0;">รายงานสรุปยอดเงินออมทรัพย์รายชั้นเรียน</h2>
                         <p style="margin: 5px 0;">ชั้นเรียน: ${selectedClass === 'All' ? 'ทุกชั้นเรียน' : selectedClass}</p>
                         <p style="margin: 5px 0;">ปีการศึกษา: ${currentAcademicYear}</p>
                     </div>
@@ -357,6 +587,10 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
         if (!selectedStudent || !amount || parseFloat(amount) <= 0 || !supabase) return;
 
         try {
+            const selectedDate = new Date(transactionDate);
+            const now = new Date();
+            selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+
             const { data, error } = await supabase
                 .from('student_savings')
                 .insert([{
@@ -365,7 +599,8 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                     amount: parseFloat(amount),
                     type: transactionType,
                     academic_year: currentAcademicYear,
-                    created_by: currentUser.id
+                    created_by: currentUser.id,
+                    created_at: selectedDate.toISOString()
                 }])
                 .select();
 
@@ -614,9 +849,9 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                             </button>
                         )}
                         <button 
-                            onClick={printClassReport}
+                            onClick={() => setIsPrintReportOpen(true)}
                             className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-3 rounded-2xl font-bold transition-all"
-                            title="พิมพ์รายงานสรุปชั้นเรียน"
+                            title="พิมพ์รายงาน"
                         >
                             <Printer size={20} />
                             <span className="hidden md:inline">พิมพ์รายงาน</span>
@@ -636,7 +871,7 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                             key={student.id}
                             className={`p-6 rounded-[2.5rem] shadow-sm border transition-all group relative overflow-hidden ${isSelectionMode && selectedIds.has(student.id) ? 'bg-pink-50 border-pink-500 ring-2 ring-pink-200' : 'bg-white border-slate-100 hover:shadow-xl hover:bg-gradient-to-br hover:from-white hover:to-slate-50'}`}
                         >
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-pink-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-700"></div>
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-pink-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-700 pointer-events-none"></div>
                             {isSelectionMode && (
                                 <div 
                                     className="absolute top-4 right-4 z-10"
@@ -666,14 +901,18 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{student.currentClass}</p>
                                     </div>
                                 </div>
-                                <div className="flex flex-col items-end">
+                                <div className="flex flex-col items-end relative z-10">
                                     <div className="flex items-center gap-1">
                                         <button 
-                                            onClick={() => printIndividualReport(student)}
-                                            className="p-2 text-slate-300 hover:text-slate-600 transition-colors"
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                printIndividualReport(student);
+                                            }}
+                                            className="p-2 text-slate-400 hover:text-pink-600 hover:bg-pink-50 rounded-xl transition-all"
                                             title="พิมพ์รายงานรายบุคคล"
                                         >
-                                            <Printer size={16} />
+                                            <Printer size={18} />
                                         </button>
                                     </div>
                                     <div className="text-right mt-1">
@@ -688,6 +927,7 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                                     onClick={() => {
                                         setSelectedStudent(student);
                                         setTransactionType('DEPOSIT');
+                                        setTransactionDate(new Date().toISOString().split('T')[0]);
                                         setIsTransactionOpen(true);
                                     }}
                                     className="flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 py-3 rounded-2xl font-bold text-sm transition-all"
@@ -699,6 +939,7 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                                     onClick={() => {
                                         setSelectedStudent(student);
                                         setTransactionType('WITHDRAWAL');
+                                        setTransactionDate(new Date().toISOString().split('T')[0]);
                                         setIsTransactionOpen(true);
                                     }}
                                     className="flex items-center justify-center gap-2 bg-rose-50 hover:bg-rose-100 text-rose-600 py-3 rounded-2xl font-bold text-sm transition-all"
@@ -744,25 +985,39 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                         </div>
                         
                         <div className="p-8 space-y-6">
-                            <div>
-                                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">จำนวนเงิน (บาท)</label>
-                                <div className="relative">
-                                    <span className="absolute left-5 top-1/2 -translate-y-1/2 font-black text-2xl text-slate-300">฿</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1">
+                                        <Calendar size={14} /> วันที่ทำรายการ
+                                    </label>
                                     <input 
-                                        type="number" 
-                                        className="w-full pl-12 pr-5 py-5 bg-slate-50 border-none rounded-2xl font-black text-3xl text-slate-800 focus:ring-2 focus:ring-pink-500"
-                                        placeholder="0.00"
-                                        autoFocus
-                                        value={amount}
-                                        onChange={(e) => setAmount(e.target.value)}
+                                        type="date" 
+                                        className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
+                                        value={transactionDate}
+                                        onChange={(e) => setTransactionDate(e.target.value)}
                                     />
                                 </div>
-                                {transactionType === 'WITHDRAWAL' && (selectedStudent.totalSavings || 0) < parseFloat(amount || '0') && (
-                                    <p className="text-rose-500 text-xs font-bold mt-2 flex items-center gap-1">
-                                        <AlertCircle size={14} /> ยอดเงินไม่เพียงพอ (คงเหลือ ฿{selectedStudent.totalSavings})
-                                    </p>
-                                )}
+                                <div>
+                                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">จำนวนเงิน (บาท)</label>
+                                    <div className="relative">
+                                        <span className="absolute left-5 top-1/2 -translate-y-1/2 font-black text-2xl text-slate-300">฿</span>
+                                        <input 
+                                            type="number" 
+                                            className="w-full pl-12 pr-5 py-4 bg-slate-50 border-none rounded-2xl font-black text-2xl text-slate-800 focus:ring-2 focus:ring-pink-500"
+                                            placeholder="0.00"
+                                            autoFocus
+                                            value={amount}
+                                            onChange={(e) => setAmount(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
                             </div>
+                            
+                            {transactionType === 'WITHDRAWAL' && (selectedStudent.totalSavings || 0) < parseFloat(amount || '0') && (
+                                <p className="text-rose-500 text-xs font-bold mt-2 flex items-center gap-1">
+                                    <AlertCircle size={14} /> ยอดเงินไม่เพียงพอ (คงเหลือ ฿{selectedStudent.totalSavings})
+                                </p>
+                            )}
                             
                             <button 
                                 onClick={handleAddTransaction}
@@ -800,19 +1055,51 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                             </div>
                             <div className="flex items-center gap-2">
                                 <button 
-                                    onClick={() => printIndividualReport(selectedStudent)}
-                                    className="p-3 bg-white hover:bg-slate-50 text-slate-600 rounded-2xl transition-all shadow-sm"
+                                    onClick={() => printIndividualReport(selectedStudent, reportStartDate, reportEndDate)}
+                                    className="p-3 bg-white hover:bg-slate-50 text-slate-600 rounded-2xl transition-all shadow-sm flex items-center gap-2 font-bold"
                                     title="พิมพ์รายงาน"
                                 >
                                     <Printer size={20} />
+                                    <span className="hidden sm:inline text-sm">พิมพ์รายงาน</span>
                                 </button>
-                                <button onClick={() => setIsDetailViewOpen(false)} className="p-3 bg-white hover:bg-slate-50 text-slate-400 rounded-2xl transition-all shadow-sm">
+                                <button onClick={() => {
+                                    setIsDetailViewOpen(false);
+                                    setReportStartDate('');
+                                    setReportEndDate(new Date().toISOString().split('T')[0]);
+                                }} className="p-3 bg-white hover:bg-slate-50 text-slate-400 rounded-2xl transition-all shadow-sm">
                                     <X size={20} />
                                 </button>
                             </div>
                         </div>
 
                         <div className="p-8 flex-1 overflow-y-auto">
+                            {/* Date Filter Section */}
+                            <div className="bg-white p-4 rounded-2xl border border-slate-100 mb-6 shadow-sm">
+                                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                    <Calendar size={14} /> กรองตามวันที่
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-400 mb-1">วันที่เริ่มต้น</label>
+                                        <input 
+                                            type="date" 
+                                            value={reportStartDate}
+                                            onChange={(e) => setReportStartDate(e.target.value)}
+                                            className="w-full p-2 bg-slate-50 border-none rounded-xl text-sm font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-slate-400 mb-1">วันที่สิ้นสุด</label>
+                                        <input 
+                                            type="date" 
+                                            value={reportEndDate}
+                                            onChange={(e) => setReportEndDate(e.target.value)}
+                                            className="w-full p-2 bg-slate-50 border-none rounded-xl text-sm font-bold text-slate-700 focus:ring-2 focus:ring-pink-500"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
                             <div className="flex justify-between items-center mb-6">
                                 <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                                     <History size={20} className="text-pink-500" />
@@ -827,6 +1114,8 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                             <div className="space-y-4">
                                 {savings
                                     .filter(s => s.studentId === selectedStudent.id)
+                                    .filter(s => !reportStartDate || (s.createdAt && s.createdAt.split('T')[0] >= reportStartDate))
+                                    .filter(s => !reportEndDate || (s.createdAt && s.createdAt.split('T')[0] <= reportEndDate))
                                     .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())
                                     .map((t) => (
                                         <div key={t.id} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 group">
@@ -933,6 +1222,102 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                             >
                                 ยืนยันการแก้ไข
                             </button>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
+
+            {/* Print Report Modal */}
+            {isPrintReportOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden"
+                    >
+                        <div className="p-8 bg-pink-50">
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-3 rounded-2xl bg-pink-500 text-white">
+                                        <Printer size={24} />
+                                    </div>
+                                    <h2 className="text-2xl font-black text-slate-800">ตัวเลือกการพิมพ์รายงาน</h2>
+                                </div>
+                                <button onClick={() => setIsPrintReportOpen(false)} className="p-2 hover:bg-white/50 rounded-xl transition-colors">
+                                    <X size={24} className="text-slate-400" />
+                                </button>
+                            </div>
+                            <p className="text-sm font-bold text-slate-500">
+                                เลือกรูปแบบรายงานที่ต้องการพิมพ์สำหรับ {selectedClass === 'All' ? 'ทุกชั้นเรียน' : `ชั้น ${selectedClass}`}
+                            </p>
+                        </div>
+
+                        <div className="p-8 space-y-4">
+                            <button 
+                                onClick={() => {
+                                    printClassReport();
+                                    setIsPrintReportOpen(false);
+                                }}
+                                className="w-full p-4 bg-slate-50 hover:bg-pink-50 border border-slate-100 hover:border-pink-200 rounded-2xl flex items-center gap-4 transition-all group"
+                            >
+                                <div className="p-3 bg-white rounded-xl text-slate-400 group-hover:text-pink-500 transition-colors">
+                                    <FileSpreadsheet size={20} />
+                                </div>
+                                <div className="text-left">
+                                    <p className="font-black text-slate-800">รายงานสรุปยอดเงินออม</p>
+                                    <p className="text-xs font-bold text-slate-400">แสดงรายชื่อนักเรียนและยอดเงินออมคงเหลือ</p>
+                                </div>
+                            </button>
+
+                            <button 
+                                onClick={() => {
+                                    printClassTransactionSummary();
+                                    setIsPrintReportOpen(false);
+                                }}
+                                className="w-full p-4 bg-slate-50 hover:bg-pink-50 border border-slate-100 hover:border-pink-200 rounded-2xl flex items-center gap-4 transition-all group"
+                            >
+                                <div className="p-3 bg-white rounded-xl text-slate-400 group-hover:text-pink-500 transition-colors">
+                                    <History size={20} />
+                                </div>
+                                <div className="text-left">
+                                    <p className="font-black text-slate-800">รายงานสรุปการฝาก-ถอน</p>
+                                    <p className="text-xs font-bold text-slate-400">แสดงยอดฝากรวม ยอดถอนรวม และยอดคงเหลือ</p>
+                                </div>
+                            </button>
+
+                            <button 
+                                onClick={() => {
+                                    printAllIndividualReports();
+                                    setIsPrintReportOpen(false);
+                                }}
+                                className="w-full p-4 bg-slate-50 hover:bg-pink-50 border border-slate-100 hover:border-pink-200 rounded-2xl flex items-center gap-4 transition-all group"
+                            >
+                                <div className="p-3 bg-white rounded-xl text-slate-400 group-hover:text-pink-500 transition-colors">
+                                    <UserPlus size={20} />
+                                </div>
+                                <div className="text-left">
+                                    <p className="font-black text-slate-800">รายงานประวัติรายบุคคล (ทั้งหมด)</p>
+                                    <p className="text-xs font-bold text-slate-400">พิมพ์ประวัติการฝาก-ถอนของนักเรียนทุกคน (แยกหน้า)</p>
+                                </div>
+                            </button>
+
+                            {isDirector && (
+                                <button 
+                                    onClick={() => {
+                                        printGradeOverviewReport();
+                                        setIsPrintReportOpen(false);
+                                    }}
+                                    className="w-full p-4 bg-slate-50 hover:bg-pink-50 border border-slate-100 hover:border-pink-200 rounded-2xl flex items-center gap-4 transition-all group"
+                                >
+                                    <div className="p-3 bg-white rounded-xl text-slate-400 group-hover:text-pink-500 transition-colors">
+                                        <LayoutGrid size={20} />
+                                    </div>
+                                    <div className="text-left">
+                                        <p className="font-black text-slate-800">รายงานสรุปภาพรวมรายระดับชั้น</p>
+                                        <p className="text-xs font-bold text-slate-400">แสดงยอดรวมแยกตามระดับชั้น (ป.1, ป.2, ...)</p>
+                                    </div>
+                                </button>
+                            )}
                         </div>
                     </motion.div>
                 </div>
