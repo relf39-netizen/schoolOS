@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceRecord, Teacher, School, LeaveRequest } from '../types';
+import { sendTelegramMessage } from '../utils/telegram';
 import { 
     MapPin, Navigation, CheckCircle, LogOut, History, Loader, 
     RefreshCw, AlertTriangle, Clock, Calendar, ShieldCheck, 
@@ -66,6 +67,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
     const [summarySortOrder, setSummarySortOrder] = useState<'EARLIEST' | 'NAME'>('NAME');
     const [approvedLeaves, setApprovedLeaves] = useState<LeaveRequest[]>([]);
     const [schoolConfig, setSchoolConfig] = useState<any>(null);
+    const [selectedTeacherDetails, setSelectedTeacherDetails] = useState<any | null>(null);
 
     const isAdminView = currentUser.roles.some(role => 
         ['SYSTEM_ADMIN', 'DIRECTOR', 'VICE_DIRECTOR', 'DOCUMENT_OFFICER'].includes(role)
@@ -102,26 +104,60 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
 
             const teachers = allTeachers.filter(t => t.schoolId === currentUser.schoolId && !t.isSuspended && !t.roles.includes('DIRECTOR'));
 
+            // Pre-calculate all workdays in range for absent calculation
+            const allWorkDays: string[] = [];
+            const startRange = new Date(startDate);
+            const endRange = new Date(endDate);
+            const curRange = new Date(startRange);
+            while (curRange <= endRange) {
+                const day = curRange.getDay();
+                if (day !== 0 && day !== 6) {
+                    allWorkDays.push(curRange.toISOString().split('T')[0]);
+                }
+                curRange.setDate(curRange.getDate() + 1);
+            }
+
             const summary = teachers.map(teacher => {
                 const teacherAtt = (attendance || []).filter(a => a.teacher_id === teacher.id);
                 const teacherLeaves = (leaves || []).filter(l => l.teacher_id === teacher.id);
 
-                const presentDays = teacherAtt.filter(a => a.status === 'OnTime' || a.status === 'Late').length;
-                const lateDays = teacherAtt.filter(a => a.status === 'Late').length;
+                // Count unique present days
+                const presentDates = new Set(
+                    teacherAtt
+                        .filter(a => a.status === 'OnTime' || a.status === 'Late')
+                        .map(a => a.date)
+                );
+                const presentDays = presentDates.size;
+                const presentDatesList = Array.from(presentDates).sort();
+
+                // Count unique late days
+                const lateDates = new Set(
+                    teacherAtt
+                        .filter(a => a.status === 'Late')
+                        .map(a => a.date)
+                );
+                const lateDays = lateDates.size;
+                const lateDatesList = Array.from(lateDates).sort();
                 
                 // Count unique leave days in range
-                const leaveDaysCount = teacherLeaves.reduce((acc, leave) => {
+                const leaveDates = new Set<string>();
+                teacherLeaves.forEach(leave => {
                     const start = new Date(leave.start_date > startDate ? leave.start_date : startDate);
                     const end = new Date(leave.end_date < endDate ? leave.end_date : endDate);
-                    let count = 0;
                     const cur = new Date(start);
                     while (cur <= end) {
                         const day = cur.getDay();
-                        if (day !== 0 && day !== 6) count++;
+                        if (day !== 0 && day !== 6) {
+                            leaveDates.add(cur.toISOString().split('T')[0]);
+                        }
                         cur.setDate(cur.getDate() + 1);
                     }
-                    return acc + count;
-                }, 0);
+                });
+                const leaveDaysCount = leaveDates.size;
+                const leaveDatesList = Array.from(leaveDates).sort();
+
+                // Calculate absent dates
+                const absentDatesList = allWorkDays.filter(date => !presentDates.has(date) && !leaveDates.has(date));
 
                 // Earliest check-in
                 const checkInTimes = teacherAtt
@@ -134,8 +170,13 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     name: teacher.name,
                     position: teacher.position,
                     presentDays,
+                    presentDatesList,
                     lateDays,
+                    lateDatesList,
                     leaveDays: leaveDaysCount,
+                    leaveDatesList,
+                    absentDays: absentDatesList.length,
+                    absentDatesList,
                     earliestCheckIn,
                 };
             });
@@ -332,7 +373,21 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 alert(`ลงเวลาเข้างานสำเร็จ: ${timeStr} น.`);
 
                 // ส่งการแจ้งเตือน Telegram ถึงผู้อำนวยการ
-                if (schoolConfig?.script_url && schoolConfig?.telegram_bot_token) {
+                if (schoolConfig?.telegram_bot_token) {
+                    const googleMapsLink = `https://www.google.com/maps?q=${lat},${lng}`;
+                    const message = `🔔 <b>แจ้งเตือนการลงเวลาเข้างาน</b>\n\n` +
+                                    `👤 <b>ชื่อ:</b> ${currentUser.name}\n` +
+                                    `⏰ <b>เวลา:</b> ${timeStr} น.\n` +
+                                    `📍 <b>สถานะ:</b> ${status === 'OnTime' ? '✅ มาปกติ' : '⚠️ มาสาย'}\n` +
+                                    `📅 <b>วันที่:</b> ${getThaiDate(dateStr)}\n` +
+                                    `🗺️ <b>พิกัด:</b> <a href="${googleMapsLink}">ดูบน Google Maps</a>`;
+                    
+                    // แจ้งเตือนคุณครูที่ลงเวลา
+                    if (currentUser.telegramChatId) {
+                        sendTelegramMessage(schoolConfig.telegram_bot_token, currentUser.telegramChatId, message);
+                    }
+
+                    // แจ้งเตือนผู้อำนวยการและผู้ดูแล
                     const directors = allTeachers.filter(t => 
                         (t.roles || []).includes('DIRECTOR') || 
                         t.isActingDirector || 
@@ -341,27 +396,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     
                     for (const director of directors) {
                         if (director.telegramChatId) {
-                            const message = `🔔 <b>แจ้งเตือนการลงเวลาเข้างาน</b>\n\n` +
-                                            `👤 <b>ชื่อ:</b> ${currentUser.name}\n` +
-                                            `⏰ <b>เวลา:</b> ${timeStr} น.\n` +
-                                            `📍 <b>สถานะ:</b> ${status === 'OnTime' ? '✅ มาปกติ' : '⚠️ มาสาย'}\n` +
-                                            `📅 <b>วันที่:</b> ${getThaiDate(dateStr)}`;
-                            
-                            try {
-                                fetch(schoolConfig.script_url, {
-                                    method: 'POST',
-                                    mode: 'no-cors',
-                                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                                    body: JSON.stringify({
-                                        action: 'sendTelegram',
-                                        token: schoolConfig.telegram_bot_token,
-                                        chatId: director.telegramChatId,
-                                        text: message
-                                    })
-                                });
-                            } catch (err) {
-                                console.error("Telegram Notification Error:", err);
-                            }
+                            sendTelegramMessage(schoolConfig.telegram_bot_token, director.telegramChatId, message);
                         }
                     }
                 }
@@ -373,8 +408,21 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 if (error) throw error;
                 alert(`ลงเวลากลับสำเร็จ: ${timeStr} น.`);
 
-                // ส่งการแจ้งเตือน Telegram ถึงผู้อำนวยการ (ขาออก)
-                if (schoolConfig?.script_url && schoolConfig?.telegram_bot_token) {
+                // ส่งการแจ้งเตือน Telegram ถึงผู้อำนวยการและคุณครู (ขาออก)
+                if (schoolConfig?.telegram_bot_token) {
+                    const googleMapsLink = `https://www.google.com/maps?q=${lat},${lng}`;
+                    const message = `🚪 <b>แจ้งเตือนการลงเวลากลับ</b>\n\n` +
+                                    `👤 <b>ชื่อ:</b> ${currentUser.name}\n` +
+                                    `⏰ <b>เวลา:</b> ${timeStr} น.\n` +
+                                    `📅 <b>วันที่:</b> ${getThaiDate(dateStr)}\n` +
+                                    `🗺️ <b>พิกัด:</b> <a href="${googleMapsLink}">ดูบน Google Maps</a>`;
+                    
+                    // แจ้งเตือนคุณครูที่ลงเวลา
+                    if (currentUser.telegramChatId) {
+                        sendTelegramMessage(schoolConfig.telegram_bot_token, currentUser.telegramChatId, message);
+                    }
+
+                    // แจ้งเตือนผู้อำนวยการและผู้ดูแล
                     const directors = allTeachers.filter(t => 
                         (t.roles || []).includes('DIRECTOR') || 
                         t.isActingDirector || 
@@ -383,26 +431,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     
                     for (const director of directors) {
                         if (director.telegramChatId) {
-                            const message = `🚪 <b>แจ้งเตือนการลงเวลากลับ</b>\n\n` +
-                                            `👤 <b>ชื่อ:</b> ${currentUser.name}\n` +
-                                            `⏰ <b>เวลา:</b> ${timeStr} น.\n` +
-                                            `📅 <b>วันที่:</b> ${getThaiDate(dateStr)}`;
-                            
-                            try {
-                                fetch(schoolConfig.script_url, {
-                                    method: 'POST',
-                                    mode: 'no-cors',
-                                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                                    body: JSON.stringify({
-                                        action: 'sendTelegram',
-                                        token: schoolConfig.telegram_bot_token,
-                                        chatId: director.telegramChatId,
-                                        text: message
-                                    })
-                                });
-                            } catch (err) {
-                                console.error("Telegram Notification Error:", err);
-                            }
+                            sendTelegramMessage(schoolConfig.telegram_bot_token, director.telegramChatId, message);
                         }
                     }
                 }
@@ -524,20 +553,24 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                         </thead>
                         <tbody>
                             {sortedSummaryData.map((item, idx) => {
-                                // Absent calculation: totalWorkDays - presentDays - leaveDays
-                                const absentDays = Math.max(0, totalWorkDays - item.presentDays - item.leaveDays);
-                                
                                 return (
-                                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                                    <tr 
+                                        key={item.id} 
+                                        className="hover:bg-blue-50 transition-colors cursor-pointer group"
+                                        onClick={() => setSelectedTeacherDetails(item)}
+                                    >
                                         <td className="border border-slate-900 p-3 text-center font-mono">{idx + 1}</td>
                                         <td className="border border-slate-900 p-3">
-                                            <div className="font-bold text-slate-800">{item.name}</div>
+                                            <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors flex items-center gap-2">
+                                                {item.name}
+                                                <Search size={14} className="opacity-0 group-hover:opacity-100 text-blue-400"/>
+                                            </div>
                                             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{item.position}</div>
                                         </td>
                                         <td className="border border-slate-900 p-3 text-center font-black text-green-700">{item.presentDays}</td>
                                         <td className="border border-slate-900 p-3 text-center font-black text-orange-600">{item.lateDays}</td>
                                         <td className="border border-slate-900 p-3 text-center font-black text-blue-600">{item.leaveDays}</td>
-                                        <td className="border border-slate-900 p-3 text-center font-black text-red-600">{absentDays}</td>
+                                        <td className="border border-slate-900 p-3 text-center font-black text-red-600">{item.absentDays}</td>
                                     </tr>
                                 );
                             })}
@@ -574,6 +607,111 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                         รายงานนี้สร้างขึ้นโดยระบบอัตโนมัติ เมื่อวันที่ {getThaiDate(getTodayDateStr())} เวลา {new Date().toLocaleTimeString('th-TH')} น.
                     </div>
                 </div>
+
+                {/* Teacher Details Modal */}
+                {selectedTeacherDetails && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
+                        <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-fade-in border border-slate-200">
+                            <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
+                                <div>
+                                    <h3 className="text-2xl font-black">{selectedTeacherDetails.name}</h3>
+                                    <p className="text-blue-400 font-bold text-xs uppercase tracking-widest mt-1">{selectedTeacherDetails.position}</p>
+                                </div>
+                                <button 
+                                    onClick={() => setSelectedTeacherDetails(null)}
+                                    className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl transition-all"
+                                >
+                                    <ArrowLeft size={24}/>
+                                </button>
+                            </div>
+
+                            <div className="p-8 max-h-[70vh] overflow-y-auto space-y-8">
+                                {/* Summary Stats in Modal */}
+                                <div className="grid grid-cols-4 gap-4">
+                                    <div className="bg-green-50 p-4 rounded-3xl text-center border border-green-100">
+                                        <p className="text-[10px] font-black text-green-600 uppercase mb-1">มาปกติ</p>
+                                        <p className="text-2xl font-black text-green-700">{selectedTeacherDetails.presentDays}</p>
+                                    </div>
+                                    <div className="bg-orange-50 p-4 rounded-3xl text-center border border-orange-100">
+                                        <p className="text-[10px] font-black text-orange-600 uppercase mb-1">มาสาย</p>
+                                        <p className="text-2xl font-black text-orange-700">{selectedTeacherDetails.lateDays}</p>
+                                    </div>
+                                    <div className="bg-blue-50 p-4 rounded-3xl text-center border border-blue-100">
+                                        <p className="text-[10px] font-black text-blue-600 uppercase mb-1">ลา</p>
+                                        <p className="text-2xl font-black text-blue-700">{selectedTeacherDetails.leaveDays}</p>
+                                    </div>
+                                    <div className="bg-red-50 p-4 rounded-3xl text-center border border-red-100">
+                                        <p className="text-[10px] font-black text-red-600 uppercase mb-1">ขาด</p>
+                                        <p className="text-2xl font-black text-red-700">{selectedTeacherDetails.absentDays}</p>
+                                    </div>
+                                </div>
+
+                                {/* Detailed Date Lists */}
+                                <div className="space-y-6">
+                                    {selectedTeacherDetails.lateDatesList.length > 0 && (
+                                        <div className="space-y-3">
+                                            <h4 className="font-black text-orange-600 flex items-center gap-2 text-sm uppercase tracking-widest">
+                                                <Clock size={16}/> วันที่มาสาย
+                                            </h4>
+                                            <div className="flex flex-wrap gap-2">
+                                                {selectedTeacherDetails.lateDatesList.map((date: string) => (
+                                                    <span key={date} className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">
+                                                        {getThaiDate(date)}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selectedTeacherDetails.leaveDatesList.length > 0 && (
+                                        <div className="space-y-3">
+                                            <h4 className="font-black text-blue-600 flex items-center gap-2 text-sm uppercase tracking-widest">
+                                                <Calendar size={16}/> วันที่ลา
+                                            </h4>
+                                            <div className="flex flex-wrap gap-2">
+                                                {selectedTeacherDetails.leaveDatesList.map((date: string) => (
+                                                    <span key={date} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">
+                                                        {getThaiDate(date)}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selectedTeacherDetails.absentDatesList.length > 0 && (
+                                        <div className="space-y-3">
+                                            <h4 className="font-black text-red-600 flex items-center gap-2 text-sm uppercase tracking-widest">
+                                                <AlertTriangle size={16}/> วันที่ขาดงาน
+                                            </h4>
+                                            <div className="flex flex-wrap gap-2">
+                                                {selectedTeacherDetails.absentDatesList.map((date: string) => (
+                                                    <span key={date} className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold">
+                                                        {getThaiDate(date)}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selectedTeacherDetails.presentDatesList.length === 0 && 
+                                     selectedTeacherDetails.leaveDatesList.length === 0 && 
+                                     selectedTeacherDetails.absentDatesList.length === 0 && (
+                                        <p className="text-center text-slate-400 italic py-10">ไม่พบข้อมูลรายละเอียด</p>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="p-6 bg-slate-50 border-t flex justify-end">
+                                <button 
+                                    onClick={() => setSelectedTeacherDetails(null)}
+                                    className="px-8 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm hover:bg-black transition-all active:scale-95"
+                                >
+                                    ปิดหน้าต่าง
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <style>{`
                     @media print {
