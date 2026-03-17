@@ -415,8 +415,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
     const handleFetchAndUploadFromUrl = async (url: string, customName?: string) => {
         const client = supabase;
-        if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId || !client) {
-            alert("ไม่พบการตั้งค่า Google Drive!");
+        if (!sysConfig?.scriptUrl?.trim() || !sysConfig?.driveFolderId?.trim() || !client) {
+            alert("ไม่พบการตั้งค่า Google Drive! กรุณาตรวจสอบการตั้งค่าในเมนูตั้งค่าระบบ");
             return;
         }
 
@@ -430,6 +430,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             message: 'กำลังส่งคำสั่งดึงไฟล์จากต้นทาง...', 
             notified: false 
         }]);
+
+        if (!sysConfig?.scriptUrl?.trim() || !sysConfig?.driveFolderId?.trim()) {
+            updateTask(taskId, { status: 'error', message: 'ขัดข้อง: ไม่พบการตั้งค่า Google Drive' });
+            return;
+        }
 
         try {
             const trimmedUrl = url.trim();
@@ -445,7 +450,22 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             });
 
             if (!response.ok) throw new Error("Cloud Bridge Connection Error");
-            const result = await response.json();
+            
+            const responseText = await response.text();
+            if (responseText.trim().startsWith('error:')) {
+                const errMsg = responseText.trim().replace('error:', '').trim();
+                if (errMsg.includes('DriveApp') || errMsg.includes('Permission')) {
+                    throw new Error(`ไม่ได้รับอนุญาตให้เข้าถึง Google Drive (DriveApp Error)\n\nรายละเอียด: ${errMsg}\n\nวิธีแก้ไข:\n1. ไปที่เมนู "ตั้งค่าระบบ" ในแอปนี้\n2. คัดลอกโค้ดสคริปต์ใหม่ (v15.1)\n3. นำไปวางใน Google Apps Script แทนที่ของเดิม\n4. กด "เรียกใช้" ฟังก์ชัน A_RUN_ME_FIRST_initialSetup เพื่อให้สิทธิ์\n5. สำคัญมาก: กด "Deploy" -> "Manage Deployments" -> "Edit" -> เลือก Version เป็น "New Version" แล้วกด Deploy`);
+                }
+                throw new Error(errMsg);
+            }
+
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                throw new Error("เซิร์ฟเวอร์ตอบกลับด้วยรูปแบบที่ไม่ถูกต้อง (Invalid JSON): " + responseText.substring(0, 100));
+            }
 
             if (result.status !== 'success' || !result.fileData) {
                 throw new Error(result.message || "ไม่สามารถเข้าถึงไฟล์ต้นทางได้");
@@ -488,7 +508,21 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                 redirect: 'follow'
             });
 
-            const upResult = await uploadResp.json();
+            const uploadResponseText = await uploadResp.text();
+            if (uploadResponseText.trim().startsWith('error:')) {
+                const errMsg = uploadResponseText.trim().replace('error:', '').trim();
+                if (errMsg.includes('DriveApp') || errMsg.includes('Permission')) {
+                    throw new Error(`ไม่ได้รับอนุญาตให้เข้าถึง Google Drive (DriveApp Error)\n\nรายละเอียด: ${errMsg}\n\nวิธีแก้ไข:\n1. ไปที่เมนู "ตั้งค่าระบบ" ในแอปนี้\n2. คัดลอกโค้ดสคริปต์ใหม่ (v15.1)\n3. นำไปวางใน Google Apps Script แทนที่ของเดิม\n4. กด "เรียกใช้" ฟังก์ชัน A_RUN_ME_FIRST_initialSetup เพื่อให้สิทธิ์\n5. สำคัญมาก: กด "Deploy" -> "Manage Deployments" -> "Edit" -> เลือก Version เป็น "New Version" แล้วกด Deploy`);
+                }
+                throw new Error(errMsg);
+            }
+
+            let upResult;
+            try {
+                upResult = JSON.parse(uploadResponseText);
+            } catch (e) {
+                throw new Error("เซิร์ฟเวอร์ตอบกลับด้วยรูปแบบที่ไม่ถูกต้องระหว่างอัปโหลด: " + uploadResponseText.substring(0, 100));
+            }
             if (upResult.status === 'success') {
                 setTempAttachments(prev => [...prev, { id: `att_${Date.now()}`, name: uploadName, type: 'LINK', url: upResult.viewUrl || upResult.url, fileType: result.mimeType }]);
                 updateTask(taskId, { status: 'done', message: 'ดึงไฟล์+จัดเก็บ สำเร็จ' });
@@ -501,8 +535,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
 
     const handleFileUploadInBackground = async (file: File) => {
         const client = supabase;
-        if (!sysConfig?.scriptUrl || !sysConfig?.driveFolderId || !client) {
-            alert("ไม่พบการตั้งค่า Google Drive!");
+        if (!sysConfig?.scriptUrl?.trim() || !sysConfig?.driveFolderId?.trim() || !client) {
+            alert("ไม่พบการตั้งค่า Google Drive! กรุณาตรวจสอบการตั้งค่าในเมนูตั้งค่าระบบ");
             return;
         }
 
@@ -562,7 +596,22 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             }); 
             
             if (!response.ok) throw new Error("Cloud Storage Error");
-            const result = await response.json(); 
+            
+            const responseText = await response.text();
+            if (responseText.trim().startsWith('error:')) {
+                const errMsg = responseText.trim().replace('error:', '').trim();
+                if (errMsg.includes('DriveApp') || errMsg.includes('Permission')) {
+                    throw new Error(`ไม่ได้รับอนุญาตให้เข้าถึง Google Drive (DriveApp Error)\n\nรายละเอียด: ${errMsg}\n\nวิธีแก้ไข:\n1. ไปที่เมนู "ตั้งค่าระบบ" ในแอปนี้\n2. คัดลอกโค้ดสคริปต์ใหม่ (v15.1)\n3. นำไปวางใน Google Apps Script แทนที่ของเดิม\n4. กด "เรียกใช้" ฟังก์ชัน A_RUN_ME_FIRST_initialSetup เพื่อให้สิทธิ์\n5. สำคัญมาก: กด "Deploy" -> "Manage Deployments" -> "Edit" -> เลือก Version เป็น "New Version" แล้วกด Deploy`);
+                }
+                throw new Error(errMsg);
+            }
+
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                throw new Error("เซิร์ฟเวอร์ตอบกลับด้วยรูปแบบที่ไม่ถูกต้อง: " + responseText.substring(0, 100));
+            }
             if (result.status === 'success') { 
                 setTempAttachments(prev => [...prev, { id: `att_${Date.now()}`, name: finalFileName, type: 'LINK', url: result.viewUrl || result.url, fileType: file.type }]); 
                 updateTask(taskId, { status: 'done', message: 'อัปโหลดสำเร็จ' });
@@ -587,6 +636,10 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
             message: 'กำลังรวบรวมข้อมูล...', 
             notified: false 
         }]);
+
+        if (!sysConfig?.scriptUrl?.trim() || !sysConfig?.driveFolderId?.trim()) {
+            throw new Error("ไม่พบการตั้งค่า Google Drive! กรุณาตรวจสอบการตั้งค่าระบบ");
+        }
 
         try {
             const isActorVice = targetDoc.status === 'PendingViceDirector' || (targetDoc.assignedViceDirectorId === currentUser.id);
@@ -662,7 +715,21 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                     fileData: getCleanBase64(pdfBase64) 
                 };
                 const upResp = await fetch(sysConfig.scriptUrl.trim(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload), redirect: 'follow' });
-                const upRes = await upResp.json();
+                const upResponseText = await upResp.text();
+                if (upResponseText.trim().startsWith('error:')) {
+                    const errMsg = upResponseText.trim().replace('error:', '').trim();
+                    if (errMsg.includes('DriveApp') || errMsg.includes('Permission')) {
+                        throw new Error(`ไม่ได้รับอนุญาตให้เข้าถึง Google Drive (DriveApp Error)\n\nรายละเอียด: ${errMsg}\n\nวิธีแก้ไข:\n1. ไปที่เมนู "ตั้งค่าระบบ" ในแอปนี้\n2. คัดลอกโค้ดสคริปต์ใหม่ (v15.1)\n3. นำไปวางใน Google Apps Script แทนที่ของเดิม\n4. กด "เรียกใช้" ฟังก์ชัน A_RUN_ME_FIRST_initialSetup เพื่อให้สิทธิ์\n5. สำคัญมาก: กด "Deploy" -> "Manage Deployments" -> "Edit" -> เลือก Version เป็น "New Version" แล้วกด Deploy`);
+                    }
+                    throw new Error(errMsg);
+                }
+
+                let upRes;
+                try {
+                    upRes = JSON.parse(upResponseText);
+                } catch (e) {
+                    throw new Error("เซิร์ฟเวอร์ตอบกลับด้วยรูปแบบที่ไม่ถูกต้องระหว่างบันทึกไฟล์: " + upResponseText.substring(0, 100));
+                }
                 if (upRes.status === 'success') signedUrl = upRes.viewUrl || upRes.url;
             }
 

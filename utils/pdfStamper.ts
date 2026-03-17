@@ -64,7 +64,17 @@ const fetchThaiFont = async (proxyUrl?: string, customBase64?: string) => {
                 body: JSON.stringify({ action: 'fetchRemote', url: GLOBAL_FONT_REGULAR_URL }),
                 redirect: 'follow'
             });
-            const result = await resp.json();
+            const responseText = await resp.text();
+            if (responseText.trim().startsWith('error:')) {
+                throw new Error(responseText.trim().replace('error:', '').trim());
+            }
+
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                throw new Error("เซิร์ฟเวอร์ตอบกลับด้วยรูปแบบที่ไม่ถูกต้องระหว่างโหลดฟอนต์: " + responseText.substring(0, 100));
+            }
             if (result.status === 'success' && result.fileData) return dataURItoUint8Array(result.fileData).buffer;
         } catch (e) {}
     }
@@ -82,7 +92,17 @@ const fetchThaiFontBold = async (proxyUrl?: string, customBase64?: string) => {
                 body: JSON.stringify({ action: 'fetchRemote', url: GLOBAL_FONT_REGULAR_URL }),
                 redirect: 'follow'
             });
-            const result = await resp.json();
+            const responseText = await resp.text();
+            if (responseText.trim().startsWith('error:')) {
+                throw new Error(responseText.trim().replace('error:', '').trim());
+            }
+
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                throw new Error("เซิร์ฟเวอร์ตอบกลับด้วยรูปแบบที่ไม่ถูกต้องระหว่างโหลดฟอนต์ (Bold): " + responseText.substring(0, 100));
+            }
             if (result.status === 'success' && result.fileData) return dataURItoUint8Array(result.fileData).buffer;
         } catch (e) {}
     }

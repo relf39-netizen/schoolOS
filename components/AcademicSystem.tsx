@@ -261,7 +261,17 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 body: JSON.stringify({ folderId: sysConfig.driveFolderId, fileName, mimeType: file.type, fileData: base64Data }),
                 redirect: 'follow'
             });
-            const result = await response.json();
+            const responseText = await response.text();
+            if (responseText.trim().startsWith('error:')) {
+                throw new Error(responseText.trim().replace('error:', '').trim());
+            }
+
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                throw new Error("เซิร์ฟเวอร์ตอบกลับด้วยรูปแบบที่ไม่ถูกต้อง: " + responseText.substring(0, 100));
+            }
             if (result.status === 'success') {
                 const { error } = await supabase!.from('academic_sar').insert([{
                     school_id: currentUser.schoolId, year: newSar.year, type: newSar.type, file_url: result.viewUrl || result.url, file_name: fileName

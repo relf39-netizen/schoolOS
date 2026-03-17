@@ -126,7 +126,16 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' }
             });
 
-            const result = await response.json();
+            const responseText = await response.text();
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                if (responseText.trim().startsWith('error:')) {
+                    throw new Error(responseText.trim().replace('error:', '').trim());
+                }
+                throw new Error("Server returned invalid JSON response");
+            }
             if (result.status === 'success') {
                 if (isEdit && selectedStudent) {
                     setSelectedStudent({ ...selectedStudent, photoUrl: result.viewUrl });
@@ -160,6 +169,12 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
     );
     const pendingTeachers = teachers.filter(t => t.isApproved === false);
 
+    const [schoolForm, setSchoolForm] = useState<School>(currentSchool);
+    const [isLoadingConfig, setIsLoadingConfig] = useState(false);
+    const [isSavingConfig, setIsSavingConfig] = useState(false);
+    const [isGettingLocation, setIsGettingLocation] = useState(false);
+    const [availableClasses, setAvailableClasses] = useState<string[]>([]);
+
     const [config, setConfig] = useState<SystemConfig>({ 
         driveFolderId: '', 
         scriptUrl: '', 
@@ -170,24 +185,43 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
         directorSignatureYOffset: 0, 
         schoolLogoBase64: '', 
         officialGarudaBase64: '', 
-        telegramBotToken: '', 
-        telegramBotUsername: '', 
-        appBaseUrl: '' 
     });
-    const [isLoadingConfig, setIsLoadingConfig] = useState(false);
-    const [isSavingConfig, setIsSavingConfig] = useState(false);
-    
-    const [schoolForm, setSchoolForm] = useState<Partial<School>>({});
-    const [isGettingLocation, setIsGettingLocation] = useState(false);
-    const [availableClasses, setAvailableClasses] = useState<string[]>([]);
 
     const gasCode = `/**
- * SchoolOS - Cloud Storage & Telegram Tracking Bridge v12.6
+ * SchoolOS - Cloud Storage & Telegram Tracking Bridge v15.1
+ * 
+ * *** ขั้นตอนสำคัญที่สุด (ต้องทำทุกครั้งที่แก้ไขโค้ด) ***
+ * 1. กดปุ่ม "บันทึก" (Ctrl+S)
+ * 2. เลือกฟังก์ชัน "A_RUN_ME_FIRST_initialSetup" -> กด "เรียกใช้" (Run) -> กดยอมรับสิทธิ์ให้ผ่าน
+ * 3. กดปุ่ม "การทำให้ใช้งานได้" (Deploy) -> "จัดการการทำให้ใช้งานได้" (Manage Deployments)
+ * 4. กดรูป "ดินสอ" (Edit) -> เลือก Version เป็น "รุ่นใหม่" (New Version)
+ * 5. กด "ทำให้ใช้งานได้" (Deploy) และคัดลอก URL ใหม่มาใส่ในแอป
  */
+
 var SUPABASE_URL = "วาง URL Supabase ที่นี่";
 var SUPABASE_KEY = "วาง Anon Key ที่นี่";
 
+function A_RUN_ME_FIRST_initialSetup() {
+  try {
+    // บังคับให้ขอสิทธิ์อ่าน/เขียนไฟล์
+    var root = DriveApp.getRootFolder();
+    var testFile = root.createFile("SchoolOS_Auth_Test.txt", "Verify Auth: " + new Date().toString());
+    testFile.setTrashed(true);
+    
+    // บังคับให้ขอสิทธิ์เชื่อมต่อภายนอก
+    UrlFetchApp.fetch("https://www.google.com");
+    
+    var email = Session.getActiveUser().getEmail();
+    Logger.log("✅ Authorization Successful!");
+    Logger.log("บัญชีที่ใช้งาน: " + email);
+    Logger.log("กรุณาอย่าลืมกด 'Deploy' -> 'Manage Deployments' -> 'New Version' เพื่อให้ Web App ใช้งานสิทธิ์ใหม่นี้");
+  } catch (e) {
+    Logger.log("❌ Authorization Failed: " + e.toString());
+  }
+}
+
 function doGet(e) {
+  if (e.parameter.check === 'version') return ContentService.createTextOutput("v15.1");
   var action = e.parameter.action;
   if (action === 'ack') {
     var docId = e.parameter.docId;
@@ -217,23 +251,58 @@ function doPost(e) {
     if (data.message) return handleTelegramWebhook(data.message);
     if (data.action === 'fetchRemote') return fetchRemoteFile(data.url);
     if (data.action === 'setup') return setTelegramWebhook();
+    if (data.action === 'testDrive') return testDriveAccess(data.folderId);
     if (data.action === 'sendTelegram') {
       sendMessage(data.token, data.chatId, data.text);
       return createJsonResponse({'status': 'success'});
     }
     
     if (data.folderId && data.fileData) {
-      var folder = DriveApp.getFolderById(data.folderId);
-      var bytes = Utilities.base64Decode(data.fileData);
-      var blob = Utilities.newBlob(bytes, data.mimeType, data.fileName);
-      var file = folder.createFile(blob);
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      var directUrl = "https://lh3.googleusercontent.com/d/" + file.getId();
-      return createJsonResponse({'status': 'success', 'url': file.getUrl(), 'id': file.getId(), 'viewUrl': directUrl});
+      try {
+        var folder = DriveApp.getFolderById(data.folderId);
+        var bytes = Utilities.base64Decode(data.fileData);
+        var blob = Utilities.newBlob(bytes, data.mimeType, data.fileName);
+        var file = folder.createFile(blob);
+        
+        // Robust Sharing: ลองแชร์ไฟล์ ถ้าติดนโยบายองค์กรให้ข้ามไป (ไม่ Error จนหยุดทำงาน)
+        try {
+          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {
+          Logger.log("Warning: Could not set sharing to ANYONE_WITH_LINK. This is common in restricted Workspace domains.");
+        }
+        
+        var directUrl = "https://lh3.googleusercontent.com/d/" + file.getId();
+        return createJsonResponse({'status': 'success', 'url': file.getUrl(), 'id': file.getId(), 'viewUrl': directUrl});
+      } catch (driveError) {
+        return ContentService.createTextOutput("error: DriveApp Error. Details: " + driveError.toString());
+      }
     }
     return ContentService.createTextOutput("ok");
   } catch (f) {
     return ContentService.createTextOutput("error: " + f.toString());
+  }
+}
+
+function testDriveAccess(folderId) {
+  try {
+    if (!folderId) return createJsonResponse({'status': 'error', 'message': 'ไม่พบ Folder ID'});
+    var folder = DriveApp.getFolderById(folderId);
+    var folderName = folder.getName();
+    
+    // ทดสอบการเขียนไฟล์จริง (Write Test)
+    var testFile = folder.createFile("SchoolOS_Write_Test.txt", "Test at " + new Date().toString());
+    testFile.setTrashed(true);
+    
+    return createJsonResponse({'status': 'success', 'message': 'เชื่อมต่อสมบูรณ์! อ่าน/เขียนโฟลเดอร์ "' + folderName + '" ได้ปกติ'});
+  } catch (e) {
+    var errStr = e.toString();
+    var msg = "ไม่สามารถเข้าถึง DriveApp ได้";
+    if (errStr.indexOf("Permission") !== -1 || errStr.indexOf("not authorized") !== -1 || errStr.indexOf("Access denied") !== -1) {
+      msg = "ไม่ได้รับอนุญาต (Permission Denied) กรุณารัน initialSetup และ Redeploy เป็น New Version";
+    } else if (errStr.indexOf("not found") !== -1) {
+      msg = "ไม่พบโฟลเดอร์ (Folder ID ไม่ถูกต้อง)";
+    }
+    return createJsonResponse({'status': 'error', 'message': msg + "\\nรายละเอียด: " + errStr});
   }
 }
 
@@ -267,11 +336,9 @@ function handleTelegramWebhook(msg) {
           }, 
           "payload": JSON.stringify({ "telegram_chat_id": chatId }) 
         });
-        // การแจ้งเตือนถูกปิดตามคำขอของผู้ใช้เพื่อป้องกันการส่งข้อความซ้ำ
       }
     }
   } catch (e) {
-    // Return OK anyway to stop Telegram from retrying
   }
   return ContentService.createTextOutput("ok");
 }
@@ -286,8 +353,8 @@ function createJsonResponse(obj) {
 }
 
 function setTelegramWebhook() {
-  var botToken = "${config.telegramBotToken ? config.telegramBotToken.replace(/"/g, '\\"') : ''}";
-  var scriptUrl = "${config.scriptUrl ? config.scriptUrl.replace(/"/g, '\\"') : ''}";
+  var botToken = "${config.telegramBotToken ? config.telegramBotToken.replace(/"/g, '\\\\"') : ''}";
+  var scriptUrl = "${config.scriptUrl ? config.scriptUrl.replace(/"/g, '\\\\"') : ''}";
   if (!botToken || !scriptUrl) return createJsonResponse({'status': 'error', 'message': 'Missing Token or URL'});
   var url = "https://api.telegram.org/bot" + botToken + "/setWebhook?url=" + encodeURIComponent(scriptUrl);
   var resp = UrlFetchApp.fetch(url);
@@ -670,6 +737,84 @@ function setTelegramWebhook() {
         (selectedClass === 'All' || s.currentClass === selectedClass) &&
         (s.name.includes(studentSearch) || s.id.includes(studentSearch))
     );
+
+    const checkScriptVersion = async () => {
+        if (!config.scriptUrl) {
+            alert("กรุณาระบุ GAS Web App URL ก่อนตรวจสอบ");
+            return;
+        }
+        
+        setIsSavingConfig(true);
+        try {
+            const response = await fetch(`${config.scriptUrl}${config.scriptUrl.includes('?') ? '&' : '?'}check=version`);
+            const text = await response.text();
+            
+            if (text.includes('<!DOCTYPE html>')) {
+                alert("❌ ตรวจสอบล้มเหลว: เซิร์ฟเวอร์ส่งคืนหน้าเว็บ HTML\n\nสาเหตุ: ท่านอาจยังไม่ได้ตั้งค่าการ Deploy เป็น 'Anyone' (ทุกคน)");
+            } else if (text.trim() === 'v15.0') {
+                alert("✅ ตรวจสอบสำเร็จ: สคริปต์ของท่านเป็นเวอร์ชันล่าสุด (v15.0)");
+            } else {
+                alert(`⚠️ เวอร์ชันไม่ตรงกัน: สคริปต์ที่รันอยู่คือ ${text.trim() || 'ไม่ทราบเวอร์ชัน'}\n\nกรุณา Copy โค้ดใหม่ไปวาง และ 'Redeploy' เป็น 'รุ่นใหม่' (New Version)`);
+            }
+        } catch (err: any) {
+            alert("❌ ไม่สามารถเชื่อมต่อกับสคริปต์ได้: " + err.message);
+        } finally {
+            setIsSavingConfig(false);
+        }
+    };
+
+    const testDriveConnection = async () => {
+        if (!config.scriptUrl || !config.driveFolderId) {
+            alert("กรุณาระบุ GAS Web App URL และ Drive Folder ID ก่อนทดสอบ");
+            return;
+        }
+        
+        setIsSavingConfig(true);
+        try {
+            const response = await fetch(config.scriptUrl, {
+                method: 'POST',
+                body: JSON.stringify({ action: 'testDrive', folderId: config.driveFolderId }),
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+            });
+            
+            const responseText = await response.text();
+            
+            // Check if it's an HTML response (common when not authorized or wrong URL)
+            if (responseText.includes('<!DOCTYPE html>') || responseText.includes('<html')) {
+                alert("❌ การเชื่อมต่อล้มเหลว: เซิร์ฟเวอร์ส่งคืนหน้าเว็บ HTML แทนที่จะเป็นข้อมูล JSON\n\nสาเหตุที่เป็นไปได้:\n1. ยังไม่ได้รัน 'initialSetup' ใน GAS\n2. ตั้งค่าการ Deploy ไม่เป็น 'Anyone'\n3. URL ของ Web App ไม่ถูกต้อง");
+                setIsSavingConfig(false);
+                return;
+            }
+
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                if (responseText.trim().startsWith('error:')) {
+                    const errMsg = responseText.trim().replace('error:', '').trim();
+                    if (errMsg.includes('DriveApp') || errMsg.includes('Permission')) {
+                        alert("❌ การเชื่อมต่อล้มเหลว: ไม่ได้รับอนุญาตให้เข้าถึง DriveApp\n\nสาเหตุ: แม้จะรัน initialSetup แล้ว แต่ท่านอาจยังไม่ได้ 'Redeploy' เป็นรุ่นใหม่\n\nวิธีแก้ไข:\n1. กลับไปที่หน้า Google Apps Script\n2. กดปุ่ม 'Deploy' -> 'Manage Deployments'\n3. กดรูป 'ดินสอ' (Edit) ของรายการเดิม\n4. เลือก Version เป็น 'New Version' (รุ่นใหม่)\n5. กด 'Deploy' แล้วนำ URL ใหม่มาใส่ในแอปอีกครั้ง");
+                    } else {
+                        alert("❌ การเชื่อมต่อล้มเหลว: " + errMsg);
+                    }
+                    setIsSavingConfig(false);
+                    return;
+                }
+                console.error("Raw response:", responseText);
+                throw new Error("Server returned invalid JSON response (ตรวจสอบ Console เพื่อดูรายละเอียด)");
+            }
+            
+            if (result.status === 'success') {
+                alert("✅ การเชื่อมต่อสำเร็จ!\n" + result.message);
+            } else {
+                alert("❌ การเชื่อมต่อล้มเหลว: " + result.message);
+            }
+        } catch (err: any) {
+            alert("❌ เกิดข้อผิดพลาดในการเชื่อมต่อ: " + err.message);
+        } finally {
+            setIsSavingConfig(false);
+        }
+    };
 
     const handleSaveConfig = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1080,7 +1225,16 @@ function setTelegramWebhook() {
                                                             body: JSON.stringify({ action: 'setup' }),
                                                             headers: { 'Content-Type': 'text/plain;charset=utf-8' }
                                                         });
-                                                        const res = await resp.json();
+                                                        const responseText = await resp.text();
+                                                        let res;
+                                                        try {
+                                                            res = JSON.parse(responseText);
+                                                        } catch (e) {
+                                                            if (responseText.trim().startsWith('error:')) {
+                                                                throw new Error(responseText.trim().replace('error:', '').trim());
+                                                            }
+                                                            throw new Error("Server returned invalid JSON response");
+                                                        }
                                                         if (res.status === 'success') {
                                                             alert("เชื่อมต่อ Webhook สำเร็จ! บอทพร้อมใช้งานแล้ว");
                                                         } else {
@@ -1136,7 +1290,25 @@ function setTelegramWebhook() {
                                     </div>
                                     <div className="lg:col-span-2"><div className="bg-slate-900 p-8 rounded-2xl border-2 border-slate-800 shadow-md relative overflow-hidden group"><h5 className="font-black text-white flex items-center gap-4 uppercase text-[10px] tracking-widest mb-6"><Zap className="text-yellow-400" size={24}/> Application URL</h5><div className="space-y-4"><input type="text" placeholder="https://your-app.vercel.app" value={config.appBaseUrl || ''} onChange={e => setConfig({...config, appBaseUrl: e.target.value})} className="w-full px-6 py-3 bg-white/5 border border-white/10 focus:border-yellow-400 rounded-xl font-mono text-base text-yellow-100 outline-none transition-all shadow-inner"/><div className="flex gap-4 items-center text-slate-500 px-6 py-2 bg-white/5 rounded-xl border border-white/10 w-fit backdrop-blur-md"><Info size={16} className="text-yellow-400 shrink-0"/><p className="text-[10px] font-bold uppercase tracking-widest">* URL หลักของแอปที่ท่านติดตั้ง เพื่อส่งลิงก์ใน Telegram</p></div></div></div></div>
                                 </div>
-                                <button type="submit" disabled={isSavingConfig} className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-base shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-4 active:scale-95 uppercase tracking-widest border-b-4 border-indigo-950">{isSavingConfig ? <Loader className="animate-spin" size={24}/> : <Save size={24}/>} บันทึกการเชื่อมต่อ Cloud SQL</button>
+                                <div className="flex flex-wrap gap-4">
+                                    <button
+                                        onClick={testDriveConnection}
+                                        disabled={isSavingConfig}
+                                        className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-black text-base shadow-xl hover:bg-blue-700 transition-all flex items-center justify-center gap-4 active:scale-95 uppercase tracking-widest border-b-4 border-blue-950"
+                                    >
+                                        {isSavingConfig ? <Loader className="animate-spin" size={24}/> : <Zap size={24}/>}
+                                        ทดสอบการเชื่อมต่อ Drive
+                                    </button>
+                                    <button
+                                        onClick={checkScriptVersion}
+                                        disabled={isSavingConfig}
+                                        className="flex-1 py-4 bg-slate-600 text-white rounded-xl font-black text-base shadow-xl hover:bg-slate-700 transition-all flex items-center justify-center gap-4 active:scale-95 uppercase tracking-widest border-b-4 border-slate-950"
+                                    >
+                                        {isSavingConfig ? <Loader className="animate-spin" size={24}/> : <Activity size={24}/>}
+                                        ตรวจสอบเวอร์ชันสคริปต์
+                                    </button>
+                                </div>
+                                <button type="submit" disabled={isSavingConfig} className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-base shadow-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-4 active:scale-95 uppercase tracking-widest border-b-4 border-indigo-950">{isSavingConfig ? <Loader className="animate-spin" size={24}/> : <Save size={24}/>} บันทึกการตั้งค่าทั้งหมด</button>
                             </form>
                         )}
                     </div>
@@ -1144,8 +1316,33 @@ function setTelegramWebhook() {
 
                 {activeTab === 'CLOUD_SETUP' && (
                     <div className="space-y-10 animate-fade-in max-w-6xl mx-auto py-4 pb-10">
+                        {/* Current Config Summary */}
+                        <div className="bg-slate-900 p-8 rounded-[2rem] border-2 border-slate-800 shadow-2xl relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-all">
+                                <Settings size={120} className="text-blue-400 rotate-12"/>
+                            </div>
+                            <h3 className="text-xl font-black text-white flex items-center gap-4 uppercase tracking-widest mb-8">
+                                <ShieldCheck className="text-blue-400" size={32}/> 
+                                การตั้งค่าปัจจุบัน (Current Config)
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">GAS Web App URL</label>
+                                    <div className="px-6 py-3 bg-white/5 border border-white/10 rounded-xl font-mono text-xs text-blue-200 break-all">
+                                        {config.scriptUrl || 'ยังไม่ได้ตั้งค่า'}
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Google Drive Folder ID</label>
+                                    <div className="px-6 py-3 bg-white/5 border border-white/10 rounded-xl font-mono text-xs text-emerald-200 break-all">
+                                        {config.driveFolderId || 'ยังไม่ได้ตั้งค่า'}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="bg-gradient-to-br from-emerald-50 to-teal-50 border border-white rounded-[2rem] p-8 md:p-12 shadow-sm relative overflow-hidden">
-                            <div className="relative z-10"><div className="flex items-center gap-6 mb-10"><div className="p-6 bg-emerald-600 text-white rounded-2xl shadow-lg"><Cloud size={36}/></div><div><h3 className="text-2xl font-black text-emerald-900 tracking-tight leading-none mb-1">Direct Tracking Bridge v12.6</h3><p className="text-emerald-600 font-bold text-[10px] uppercase tracking-widest mt-1">Direct Access Protocol for Documents</p></div></div>
+                            <div className="relative z-10"><div className="flex items-center gap-6 mb-10"><div className="p-6 bg-emerald-600 text-white rounded-2xl shadow-lg"><Cloud size={36}/></div><div><h3 className="text-2xl font-black text-emerald-900 tracking-tight leading-none mb-1">Direct Tracking Bridge v14.0</h3><p className="text-emerald-600 font-bold text-[10px] uppercase tracking-widest mt-1">Direct Access Protocol for Documents</p></div></div>
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
                                     <div className="space-y-8"><div className="p-6 bg-white rounded-xl border-l-8 border-blue-600 shadow-sm"><p className="text-slate-700 text-base leading-relaxed font-bold">เพื่อให้บุคลากรสามารถ <b>"พรีวิวไฟล์และรับทราบได้ทันทีผ่าน Telegram"</b> ต้องนำโค้ดด้านข้างไปติดตั้งใน Google Apps Script ครับ</p></div>
                                         <div className="space-y-6"><h4 className="text-[11px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-3"><ChevronRight className="text-emerald-500" size={24}/> Workflow การติดตั้งใช้งาน</h4>
@@ -1156,7 +1353,28 @@ function setTelegramWebhook() {
                                                 <li className="pl-2">กดปุ่ม <b>Deploy &gt; New Deployment</b> เลือกประเภท <b>Web App</b></li>
                                                 <li className="pl-2">ตั้งค่า Execute as: <b>Me</b> และ Who has access: <b>Anyone</b></li>
                                                 <li className="pl-2">คัดลอก URL ของ Web App ที่ได้มาใส่ในเมนู <b>"การเชื่อมต่อ"</b></li>
+                                                <li className="pl-2 text-rose-600 font-black"><b>สำคัญมาก:</b> ต้องเลือกฟังก์ชัน <code className="bg-rose-100 px-1">A_RUN_ME_FIRST_initialSetup</code> แล้วกด <b>Run</b> ก่อน</li>
+                                                <li className="pl-2 text-blue-600 font-black"><b>หลังจาก Run สำเร็จ:</b> ต้องกด <b>Deploy</b> อีกครั้งและเลือก <b>New Version</b> เพื่ออัปเดตสิทธิ์</li>
+                                                <li className="pl-2 text-emerald-600 font-black"><b>ตรวจสอบ:</b> กดปุ่ม "ตรวจสอบเวอร์ชันสคริปต์" ด้านล่าง ต้องเป็น <b>v14.0</b></li>
                                             </ol>
+                                            <div className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                <button 
+                                                    onClick={testDriveConnection}
+                                                    disabled={isSavingConfig}
+                                                    className="w-full py-4 bg-white border-2 border-emerald-600 text-emerald-600 rounded-2xl font-black shadow-sm hover:bg-emerald-50 transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs"
+                                                >
+                                                    {isSavingConfig ? <RefreshCw size={18} className="animate-spin"/> : <ShieldCheck size={18}/>}
+                                                    ทดสอบการเชื่อมต่อ DriveApp
+                                                </button>
+                                                <button 
+                                                    onClick={checkScriptVersion}
+                                                    disabled={isSavingConfig}
+                                                    className="w-full py-4 bg-white border-2 border-blue-600 text-blue-600 rounded-2xl font-black shadow-sm hover:bg-blue-50 transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs"
+                                                >
+                                                    {isSavingConfig ? <RefreshCw size={18} className="animate-spin"/> : <Activity size={18}/>}
+                                                    ตรวจสอบเวอร์ชันสคริปต์
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="space-y-4">

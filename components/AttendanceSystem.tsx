@@ -69,6 +69,126 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
     const [schoolConfig, setSchoolConfig] = useState<any>(null);
     const [selectedTeacherDetails, setSelectedTeacherDetails] = useState<any | null>(null);
 
+    // --- Helper Components ---
+    const TeacherDetailsModal = () => {
+        if (!selectedTeacherDetails) return null;
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
+                <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-fade-in border border-slate-200">
+                    <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
+                        <div>
+                            <h3 className="text-2xl font-black">{selectedTeacherDetails.name}</h3>
+                            <p className="text-blue-400 font-bold text-xs uppercase tracking-widest mt-1">{selectedTeacherDetails.position}</p>
+                        </div>
+                        <button 
+                            onClick={() => setSelectedTeacherDetails(null)}
+                            className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl transition-all"
+                        >
+                            <ArrowLeft size={24}/>
+                        </button>
+                    </div>
+
+                    <div className="p-8 max-h-[70vh] overflow-y-auto space-y-8">
+                        {/* Summary Stats in Modal */}
+                        <div className="grid grid-cols-4 gap-4">
+                            <div className="bg-green-50 p-4 rounded-3xl text-center border border-green-100">
+                                <p className="text-[10px] font-black text-green-600 uppercase mb-1">มาปกติ</p>
+                                <p className="text-2xl font-black text-green-700">{selectedTeacherDetails.presentDays}</p>
+                            </div>
+                            <div className="bg-orange-50 p-4 rounded-3xl text-center border border-orange-100">
+                                <p className="text-[10px] font-black text-orange-600 uppercase mb-1">มาสาย</p>
+                                <p className="text-2xl font-black text-orange-700">{selectedTeacherDetails.lateDays}</p>
+                            </div>
+                            <div className="bg-blue-50 p-4 rounded-3xl text-center border border-blue-100">
+                                <p className="text-[10px] font-black text-blue-600 uppercase mb-1">ลา</p>
+                                <p className="text-2xl font-black text-blue-700">{selectedTeacherDetails.leaveDays}</p>
+                            </div>
+                            <div className="bg-red-50 p-4 rounded-3xl text-center border border-red-100">
+                                <p className="text-[10px] font-black text-red-600 uppercase mb-1">ขาด</p>
+                                <p className="text-2xl font-black text-red-700">{selectedTeacherDetails.absentDays}</p>
+                            </div>
+                        </div>
+
+                        {/* Detailed Date Lists */}
+                        <div className="space-y-6">
+                            {selectedTeacherDetails.lateDatesList?.length > 0 && (
+                                <div className="space-y-3">
+                                    <h4 className="font-black text-orange-600 flex items-center gap-2 text-sm uppercase tracking-widest">
+                                        <Clock size={16}/> วันที่มาสาย
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedTeacherDetails.lateDatesList.map((date: string) => (
+                                            <span key={date} className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">
+                                                {getThaiDate(date)}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedTeacherDetails.leaveDatesList?.length > 0 && (
+                                <div className="space-y-3">
+                                    <h4 className="font-black text-blue-600 flex items-center gap-2 text-sm uppercase tracking-widest">
+                                        <Calendar size={16}/> วันที่ลา
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedTeacherDetails.leaveDatesList.map((date: string) => (
+                                            <span key={date} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">
+                                                {getThaiDate(date)}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedTeacherDetails.absentDatesList?.length > 0 && (
+                                <div className="space-y-3">
+                                    <h4 className="font-black text-red-600 flex items-center gap-2 text-sm uppercase tracking-widest">
+                                        <AlertTriangle size={16}/> วันที่ขาดงาน
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedTeacherDetails.absentDatesList.map((date: string) => (
+                                            <span key={date} className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold">
+                                                {getThaiDate(date)}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {selectedTeacherDetails.presentDatesList?.length === 0 && 
+                             selectedTeacherDetails.leaveDatesList?.length === 0 && 
+                             selectedTeacherDetails.absentDatesList?.length === 0 && (
+                                <p className="text-center text-slate-400 italic py-10">ไม่พบข้อมูลรายละเอียด</p>
+                            )}
+                        </div>
+                    </div>
+                    
+                    <div className="p-6 bg-slate-50 border-t flex justify-end">
+                        <button 
+                            onClick={() => setSelectedTeacherDetails(null)}
+                            className="px-8 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm hover:bg-black transition-all active:scale-95"
+                        >
+                            ปิดหน้าต่าง
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const LoadingOverlay = () => {
+        if (!isFetchingSummary || viewMode === 'SUMMARY_REPORT') return null;
+        return (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]">
+                <div className="bg-white p-6 rounded-3xl shadow-2xl flex items-center gap-4 border border-slate-100">
+                    <RefreshCw className="animate-spin text-blue-600" size={24}/>
+                    <span className="font-black text-slate-700">กำลังดึงข้อมูลรายละเอียด...</span>
+                </div>
+            </div>
+        );
+    };
+
     const isAdminView = currentUser.roles.some(role => 
         ['SYSTEM_ADMIN', 'DIRECTOR', 'VICE_DIRECTOR', 'DOCUMENT_OFFICER'].includes(role)
     ) || currentUser.isActingDirector;
@@ -77,17 +197,19 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
         ['DIRECTOR', 'DOCUMENT_OFFICER', 'SYSTEM_ADMIN'].includes(role)
     ) || currentUser.isActingDirector;
 
-    const fetchSummaryData = async () => {
-        if (!supabase) return;
+    const fetchSummaryData = async (customStart?: string, customEnd?: string) => {
+        if (!supabase) return [];
         setIsFetchingSummary(true);
+        const startToUse = customStart || startDate;
+        const endToUse = customEnd || endDate;
         try {
             // Fetch all attendance records in range
             const { data: attendance, error: attError } = await supabase
                 .from('attendance')
                 .select('*')
                 .eq('school_id', currentUser.schoolId)
-                .gte('date', startDate)
-                .lte('date', endDate);
+                .gte('date', startToUse)
+                .lte('date', endToUse);
             
             if (attError) throw attError;
 
@@ -97,8 +219,8 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 .select('*')
                 .eq('school_id', currentUser.schoolId)
                 .eq('status', 'Approved')
-                .lte('start_date', endDate)
-                .gte('end_date', startDate);
+                .lte('start_date', endToUse)
+                .gte('end_date', startToUse);
 
             if (leaveError) throw leaveError;
 
@@ -106,8 +228,8 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
 
             // Pre-calculate all workdays in range for absent calculation
             const allWorkDays: string[] = [];
-            const startRange = new Date(startDate);
-            const endRange = new Date(endDate);
+            const startRange = new Date(startToUse);
+            const endRange = new Date(endToUse);
             const curRange = new Date(startRange);
             while (curRange <= endRange) {
                 const day = curRange.getDay();
@@ -142,8 +264,8 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                 // Count unique leave days in range
                 const leaveDates = new Set<string>();
                 teacherLeaves.forEach(leave => {
-                    const start = new Date(leave.start_date > startDate ? leave.start_date : startDate);
-                    const end = new Date(leave.end_date < endDate ? leave.end_date : endDate);
+                    const start = new Date(leave.start_date > startToUse ? leave.start_date : startToUse);
+                    const end = new Date(leave.end_date < endToUse ? leave.end_date : endToUse);
                     const cur = new Date(start);
                     while (cur <= end) {
                         const day = cur.getDay();
@@ -182,11 +304,31 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
             });
 
             setSummaryData(summary);
+            return summary;
         } catch (err: any) {
             console.error("Summary Fetch Error:", err.message);
             alert("ไม่สามารถดึงข้อมูลสรุปได้");
+            return [];
         } finally {
             setIsFetchingSummary(false);
+        }
+    };
+
+    const handleTeacherClick = async (teacher: Teacher, existingData?: any) => {
+        if (existingData) {
+            setSelectedTeacherDetails(existingData);
+            return;
+        }
+
+        // Fetch summary for current month by default when clicking from main view
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        
+        const data = await fetchSummaryData(start, end);
+        const teacherData = data.find(d => d.id === teacher.id);
+        if (teacherData) {
+            setSelectedTeacherDetails(teacherData);
         }
     };
 
@@ -509,7 +651,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                             <span className="text-white/60 text-[10px] font-black uppercase">สิ้นสุด:</span>
                             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-white font-bold text-xs outline-none cursor-pointer"/>
                         </div>
-                        <button onClick={fetchSummaryData} className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all">
+                        <button onClick={() => fetchSummaryData()} className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all">
                             <RefreshCw size={20} className={isFetchingSummary ? 'animate-spin' : ''}/>
                         </button>
                         <div className="h-8 w-px bg-white/20 mx-2 hidden md:block"></div>
@@ -557,7 +699,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                                     <tr 
                                         key={item.id} 
                                         className="hover:bg-blue-50 transition-colors cursor-pointer group"
-                                        onClick={() => setSelectedTeacherDetails(item)}
+                                        onClick={() => handleTeacherClick({ id: item.id, name: item.name, position: item.position } as Teacher, item)}
                                     >
                                         <td className="border border-slate-900 p-3 text-center font-mono">{idx + 1}</td>
                                         <td className="border border-slate-900 p-3">
@@ -608,110 +750,7 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     </div>
                 </div>
 
-                {/* Teacher Details Modal */}
-                {selectedTeacherDetails && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
-                        <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-fade-in border border-slate-200">
-                            <div className="bg-slate-900 p-8 text-white flex justify-between items-center">
-                                <div>
-                                    <h3 className="text-2xl font-black">{selectedTeacherDetails.name}</h3>
-                                    <p className="text-blue-400 font-bold text-xs uppercase tracking-widest mt-1">{selectedTeacherDetails.position}</p>
-                                </div>
-                                <button 
-                                    onClick={() => setSelectedTeacherDetails(null)}
-                                    className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl transition-all"
-                                >
-                                    <ArrowLeft size={24}/>
-                                </button>
-                            </div>
-
-                            <div className="p-8 max-h-[70vh] overflow-y-auto space-y-8">
-                                {/* Summary Stats in Modal */}
-                                <div className="grid grid-cols-4 gap-4">
-                                    <div className="bg-green-50 p-4 rounded-3xl text-center border border-green-100">
-                                        <p className="text-[10px] font-black text-green-600 uppercase mb-1">มาปกติ</p>
-                                        <p className="text-2xl font-black text-green-700">{selectedTeacherDetails.presentDays}</p>
-                                    </div>
-                                    <div className="bg-orange-50 p-4 rounded-3xl text-center border border-orange-100">
-                                        <p className="text-[10px] font-black text-orange-600 uppercase mb-1">มาสาย</p>
-                                        <p className="text-2xl font-black text-orange-700">{selectedTeacherDetails.lateDays}</p>
-                                    </div>
-                                    <div className="bg-blue-50 p-4 rounded-3xl text-center border border-blue-100">
-                                        <p className="text-[10px] font-black text-blue-600 uppercase mb-1">ลา</p>
-                                        <p className="text-2xl font-black text-blue-700">{selectedTeacherDetails.leaveDays}</p>
-                                    </div>
-                                    <div className="bg-red-50 p-4 rounded-3xl text-center border border-red-100">
-                                        <p className="text-[10px] font-black text-red-600 uppercase mb-1">ขาด</p>
-                                        <p className="text-2xl font-black text-red-700">{selectedTeacherDetails.absentDays}</p>
-                                    </div>
-                                </div>
-
-                                {/* Detailed Date Lists */}
-                                <div className="space-y-6">
-                                    {selectedTeacherDetails.lateDatesList.length > 0 && (
-                                        <div className="space-y-3">
-                                            <h4 className="font-black text-orange-600 flex items-center gap-2 text-sm uppercase tracking-widest">
-                                                <Clock size={16}/> วันที่มาสาย
-                                            </h4>
-                                            <div className="flex flex-wrap gap-2">
-                                                {selectedTeacherDetails.lateDatesList.map((date: string) => (
-                                                    <span key={date} className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">
-                                                        {getThaiDate(date)}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {selectedTeacherDetails.leaveDatesList.length > 0 && (
-                                        <div className="space-y-3">
-                                            <h4 className="font-black text-blue-600 flex items-center gap-2 text-sm uppercase tracking-widest">
-                                                <Calendar size={16}/> วันที่ลา
-                                            </h4>
-                                            <div className="flex flex-wrap gap-2">
-                                                {selectedTeacherDetails.leaveDatesList.map((date: string) => (
-                                                    <span key={date} className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">
-                                                        {getThaiDate(date)}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {selectedTeacherDetails.absentDatesList.length > 0 && (
-                                        <div className="space-y-3">
-                                            <h4 className="font-black text-red-600 flex items-center gap-2 text-sm uppercase tracking-widest">
-                                                <AlertTriangle size={16}/> วันที่ขาดงาน
-                                            </h4>
-                                            <div className="flex flex-wrap gap-2">
-                                                {selectedTeacherDetails.absentDatesList.map((date: string) => (
-                                                    <span key={date} className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold">
-                                                        {getThaiDate(date)}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {selectedTeacherDetails.presentDatesList.length === 0 && 
-                                     selectedTeacherDetails.leaveDatesList.length === 0 && 
-                                     selectedTeacherDetails.absentDatesList.length === 0 && (
-                                        <p className="text-center text-slate-400 italic py-10">ไม่พบข้อมูลรายละเอียด</p>
-                                    )}
-                                </div>
-                            </div>
-                            
-                            <div className="p-6 bg-slate-50 border-t flex justify-end">
-                                <button 
-                                    onClick={() => setSelectedTeacherDetails(null)}
-                                    className="px-8 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm hover:bg-black transition-all active:scale-95"
-                                >
-                                    ปิดหน้าต่าง
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                <TeacherDetailsModal />
 
                 <style>{`
                     @media print {
@@ -1037,12 +1076,16 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                                         statusClass = 'bg-blue-600 text-white shadow-blue-100';
                                     }
                                     return (
-                                        <tr key={t.id} className="hover:bg-blue-50/50 transition-colors group">
+                                        <tr 
+                                            key={t.id} 
+                                            className="hover:bg-blue-50/50 transition-colors group cursor-pointer"
+                                            onClick={() => handleTeacherClick(t)}
+                                        >
                                             <td className="p-6">
                                                 <div className="flex items-center gap-4">
                                                     <div className={`w-10 h-10 rounded-xl bg-white border-2 border-slate-100 flex items-center justify-center font-black text-slate-400 shadow-sm transition-all group-hover:border-blue-200`}>{idx + 1}</div>
                                                     <div>
-                                                        <div className="font-black text-slate-700">{t.name}</div>
+                                                        <div className="font-black text-slate-700 group-hover:text-blue-600 transition-colors">{t.name}</div>
                                                         <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{t.position}</div>
                                                     </div>
                                                 </div>
@@ -1059,6 +1102,9 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                     )}
                 </div>
             </div>
+
+            <TeacherDetailsModal />
+            <LoadingOverlay />
 
             <style>{`
                 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } } .animate-shake { animation: shake 0.3s ease-in-out; }

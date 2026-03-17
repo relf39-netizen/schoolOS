@@ -197,7 +197,16 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' }
             });
 
-            const result = await response.json();
+            const responseText = await response.text();
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (e) {
+                if (responseText.trim().startsWith('error:')) {
+                    throw new Error(responseText.trim().replace('error:', '').trim());
+                }
+                throw new Error("Server returned invalid JSON response");
+            }
             if (result.status === 'success') {
                 setSelectedStudentForInfo(prev => prev ? { ...prev, photoUrl: result.viewUrl } : null);
             } else {

@@ -41,7 +41,15 @@ export const sendTelegramMessage = async (botToken: string, chatId: string, mess
             body: JSON.stringify(payload)
         });
 
-        const data = await response.json();
+        const responseText = await response.text();
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (e) {
+            console.error("Telegram API returned invalid JSON:", responseText);
+            return;
+        }
+        
         if (!data.ok) {
             console.error("Telegram API Error Response:", data);
         } else {
