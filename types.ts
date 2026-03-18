@@ -48,6 +48,9 @@ export interface School {
   autoCheckOutEnabled?: boolean;
   autoCheckOutTime?: string;
   
+  // Outgoing Document Prefix
+  outgoingBookPrefix?: string; // e.g. "ศธ ๐๔๐๘๔.๒๐๖"
+  
   // Academic Year Settings (MM-DD)
   academicYearStart?: string; // e.g. "05-16"
   academicYearEnd?: string;   // e.g. "03-31" or next year "05-15"
@@ -64,7 +67,7 @@ export interface Attachment {
 export interface DocumentItem {
   id: string;
   schoolId?: string; // Filter by school
-  category?: 'INCOMING' | 'ORDER'; // NEW: INCOMING=หนังสือรับ, ORDER=หนังสือคำสั่ง
+  category?: 'INCOMING' | 'ORDER' | 'OUTGOING'; // NEW: INCOMING=หนังสือรับ, ORDER=หนังสือคำสั่ง, OUTGOING=หนังสือส่ง
   bookNumber: string; // เลขที่รับหนังสือ หรือ เลขที่คำสั่ง
   title: string;
   description: string;
@@ -377,4 +380,7 @@ export interface SystemConfig {
   telegramBotToken?: string; // Token from @BotFather
   telegramBotUsername?: string; // Username of the bot (e.g. SchoolOS_Bot)
   appBaseUrl?: string; // The deployed URL of this app (e.g., https://myschool.vercel.app)
+
+  // Outgoing Document Prefix
+  outgoingBookPrefix?: string; // e.g. "ศธ ๐๔๐๘๔.๒๐๖"
 }

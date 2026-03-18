@@ -119,7 +119,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     // --- Pagination & Filter State ---
     const [currentPage, setCurrentPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
-    const [activeTab, setActiveTab] = useState<'ALL' | 'INCOMING' | 'ORDER' | 'PENDING' | 'UNREAD'>('ALL');
+    const [activeTab, setActiveTab] = useState<'ALL' | 'INCOMING' | 'ORDER' | 'OUTGOING' | 'PENDING' | 'UNREAD'>('ALL');
     const ITEMS_PER_PAGE = 10;
     
     // --- Configuration & Navigation ---
@@ -135,7 +135,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
     const [selectedOfficerDept, setSelectedOfficerDept] = useState('');
 
     // --- Form State (Document Creation) ---
-    const [docCategory, setDocCategory] = useState<'INCOMING' | 'ORDER'>('INCOMING');
+    const [docCategory, setDocCategory] = useState<'INCOMING' | 'ORDER' | 'OUTGOING'>('INCOMING');
     const [newDoc, setNewDoc] = useState({ 
         id: '',
         bookNumber: '', 
@@ -966,6 +966,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
         if (!isVisible) return false;
         if (activeTab === 'INCOMING' && doc.category !== 'INCOMING') return false;
         if (activeTab === 'ORDER' && doc.category !== 'ORDER') return false;
+        if (activeTab === 'OUTGOING' && doc.category !== 'OUTGOING') return false;
         if (activeTab === 'PENDING' && doc.status !== 'PendingDirector') return false;
         if (activeTab === 'UNREAD') {
             const isDistributed = doc.status === 'Distributed';
@@ -1144,6 +1145,9 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <button onClick={() => setActiveTab('ALL')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'ALL' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>ทั้งหมด</button>
                             <button onClick={() => setActiveTab('INCOMING')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'INCOMING' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>หนังสือรับ</button>
                             <button onClick={() => setActiveTab('ORDER')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'ORDER' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>คำสั่งโรงเรียน</button>
+                            {(isDirector || isDocOfficer || isSystemAdmin) && (
+                                <button onClick={() => setActiveTab('OUTGOING')} className={`px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'OUTGOING' ? 'bg-orange-500 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>หนังสือส่ง</button>
+                            )}
                             {isDirector || isDocOfficer || isSystemAdmin ? (
                                 <button onClick={() => setActiveTab('PENDING')} className={`relative px-6 py-2 rounded-lg text-xs font-black transition-all ${activeTab === 'PENDING' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>
                                     รอเกษียณ
@@ -1345,6 +1349,12 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                             <div className="bg-slate-100 p-1 rounded-xl md:rounded-2xl flex shadow-inner w-full md:w-auto">
                                 <button type="button" onClick={() => setDocCategory('INCOMING')} className={`flex-1 md:px-8 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${docCategory === 'INCOMING' ? 'bg-white text-blue-700 shadow-md' : 'text-slate-600'}`}>หนังสือรับ</button>
                                 <button type="button" onClick={() => setDocCategory('ORDER')} className={`flex-1 md:px-8 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${docCategory === 'ORDER' ? 'bg-emerald-700 text-white shadow-md' : 'text-slate-600'}`}>ประกาศ/คำสั่ง</button>
+                                <button type="button" onClick={() => {
+                                    setDocCategory('OUTGOING');
+                                    if (!isEditMode && currentSchool.outgoingBookPrefix) {
+                                        setNewDoc(prev => ({ ...prev, bookNumber: currentSchool.outgoingBookPrefix + ' ' }));
+                                    }
+                                }} className={`flex-1 md:px-8 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-black transition-all ${docCategory === 'OUTGOING' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-600'}`}>หนังสือส่ง</button>
                             </div>
                         )}
                         {isEditMode && (
@@ -1364,7 +1374,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     book_number: newDoc.bookNumber, 
                                     title: newDoc.title, 
                                     description: newDoc.description, 
-                                    from: docCategory === 'ORDER' ? currentSchool.name : newDoc.from, 
+                                    from: (docCategory === 'ORDER' || docCategory === 'OUTGOING') ? currentSchool.name : newDoc.from, 
                                     priority: newDoc.priority, 
                                     attachments: tempAttachments, 
                                 };
@@ -1382,16 +1392,16 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     bookNumber: newDoc.bookNumber, 
                                     title: newDoc.title, 
                                     description: newDoc.description, 
-                                    from: docCategory === 'ORDER' ? currentSchool.name : newDoc.from, 
+                                    from: (docCategory === 'ORDER' || docCategory === 'OUTGOING') ? currentSchool.name : newDoc.from, 
                                     date: now.toISOString().split('T')[0], 
                                     timestamp: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), 
                                     priority: newDoc.priority, 
                                     attachments: tempAttachments, 
-                                    status: docCategory === 'ORDER' ? 'Distributed' : 'PendingDirector', 
+                                    status: (docCategory === 'ORDER' || docCategory === 'OUTGOING') ? 'Distributed' : 'PendingDirector', 
                                     targetTeachers: docCategory === 'ORDER' ? selectedTeachers : [], 
                                     acknowledgedBy: [], 
-                                    directorCommand: docCategory === 'ORDER' ? 'สั่งการตามเอกสารแนบ' : '', 
-                                    directorSignatureDate: docCategory === 'ORDER' ? now.toLocaleString('th-TH') : '' 
+                                    directorCommand: (docCategory === 'ORDER' || docCategory === 'OUTGOING') ? 'สั่งการตามเอกสารแนบ' : '', 
+                                    directorSignatureDate: (docCategory === 'ORDER' || docCategory === 'OUTGOING') ? now.toLocaleString('th-TH') : '' 
                                 };
                                 const { data, error } = await client.from('documents').insert([mapDocToDb(created)]).select();
                                 if (error) throw error;
@@ -1403,6 +1413,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         const directors = allTeachers.filter(t => t.schoolId === currentUser.schoolId && (t.roles || []).includes('DIRECTOR'));
                                         if (directors.length > 0) triggerTelegramNotification(directors, savedId, created.title, created.bookNumber, false, created.from, tempAttachments, undefined, created.priority);
                                     }
+                                    // No notification for OUTGOING as requested
                                 }
                             }
                             setViewMode('LIST'); fetchDocs(); 
@@ -1438,6 +1449,8 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                                 ))}
                                                 <option value="อื่นๆ">อื่นๆ (ระบุในรายละเอียด)</option>
                                             </select>
+                                        ) : docCategory === 'OUTGOING' ? (
+                                            <input disabled value={currentSchool.name} className="w-full px-4 md:px-5 py-3 border-2 border-slate-100 rounded-xl md:rounded-2xl font-bold text-sm bg-slate-50 text-slate-400" />
                                         ) : (
                                             <input disabled value={currentSchool.name} className="w-full px-4 md:px-5 py-3 border-2 border-slate-100 rounded-xl md:rounded-2xl font-bold text-sm bg-slate-50 text-slate-400" />
                                         )}

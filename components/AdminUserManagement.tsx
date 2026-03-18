@@ -1171,6 +1171,19 @@ function setTelegramWebhook() {
                                 <div className="space-y-1"><label className="block text-[10px] font-bold text-slate-400 ml-1">เวลาเริ่มเข้าสาย</label><input type="time" value={schoolForm.lateTimeThreshold || '08:30'} onChange={e => setSchoolForm({...schoolForm, lateTimeThreshold: e.target.value})} className="w-full px-4 py-2 border rounded-lg font-bold bg-white text-lg outline-none focus:ring-2 ring-orange-500/10"/></div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-orange-100">
+                                <div className="space-y-1">
+                                    <label className="block text-[10px] font-black text-slate-800 uppercase tracking-tight ml-1">เลขทะเบียนหนังสือส่ง (Prefix)</label>
+                                    <input 
+                                        type="text" 
+                                        value={schoolForm.outgoingBookPrefix || ''} 
+                                        onChange={e => setSchoolForm({...schoolForm, outgoingBookPrefix: e.target.value})} 
+                                        className="w-full px-4 py-2 border rounded-lg font-bold bg-white text-base outline-none focus:ring-2 ring-orange-500/10"
+                                        placeholder="เช่น ศธ ๐๔๐๘๔.๒๐๖"
+                                    />
+                                    <p className="text-[9px] text-slate-400 font-bold ml-1">ใช้สำหรับกำหนดเลขที่หนังสือส่งอัตโนมัติ</p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-orange-100">
                                 <div className="flex items-center gap-4 p-4 bg-white rounded-xl border border-orange-100 shadow-sm">
                                     <div 
                                         onClick={() => setSchoolForm({ ...schoolForm, autoCheckOutEnabled: !schoolForm.autoCheckOutEnabled })}

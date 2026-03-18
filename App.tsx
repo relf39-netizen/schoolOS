@@ -231,6 +231,7 @@ const App: React.FC = () => {
             late_time_threshold: s.lateTimeThreshold, 
             auto_check_out_enabled: s.autoCheckOutEnabled,
             auto_check_out_time: s.autoCheckOutTime,
+            outgoing_book_prefix: s.outgoingBookPrefix,
             is_suspended: s.isSuspended || false
         }]);
         if (!error) setAllSchools(prev => prev.map(sch => sch.id === s.id ? s : sch));
