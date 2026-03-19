@@ -1236,7 +1236,11 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                         </div>
                                         <h3 className="font-bold text-base md:text-lg text-slate-800 leading-tight group-hover:text-blue-600 transition-colors break-words">{docItem.title}</h3>
                                         <div className="flex flex-wrap items-center gap-x-4 md:gap-x-6 gap-y-1 text-[10px] md:text-[11px] text-slate-400 font-bold uppercase tracking-tight">
-                                            <span className="flex items-center gap-1.5"><History size={10}/> จาก: {docItem.from}</span>
+                                            <span className="flex items-center gap-1.5">
+                                                <History size={10}/> 
+                                                {docItem.category === 'OUTGOING' ? 'ส่งถึง: ' : 'จาก: '} 
+                                                {docItem.from}
+                                            </span>
                                             <span className="flex items-center gap-1.5"><Clock size={10}/> {docItem.date}</span>
                                         </div>
                                     </div>
@@ -1374,7 +1378,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     book_number: newDoc.bookNumber, 
                                     title: newDoc.title, 
                                     description: newDoc.description, 
-                                    from: (docCategory === 'ORDER' || docCategory === 'OUTGOING') ? currentSchool.name : newDoc.from, 
+                                    from: docCategory === 'ORDER' ? currentSchool.name : newDoc.from, 
                                     priority: newDoc.priority, 
                                     attachments: tempAttachments, 
                                 };
@@ -1392,7 +1396,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     bookNumber: newDoc.bookNumber, 
                                     title: newDoc.title, 
                                     description: newDoc.description, 
-                                    from: (docCategory === 'ORDER' || docCategory === 'OUTGOING') ? currentSchool.name : newDoc.from, 
+                                    from: docCategory === 'ORDER' ? currentSchool.name : newDoc.from, 
                                     date: now.toISOString().split('T')[0], 
                                     timestamp: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }), 
                                     priority: newDoc.priority, 
@@ -1435,7 +1439,9 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1">
-                                        <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">จาก (หน่วยงานต้นเรื่อง)</label>
+                                        <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">
+                                            {docCategory === 'OUTGOING' ? 'ส่งถึง (หน่วยงานปลายทาง)' : 'จาก (หน่วยงานต้นเรื่อง)'}
+                                        </label>
                                         {docCategory === 'INCOMING' ? (
                                             <select 
                                                 required 
@@ -1450,7 +1456,21 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                                 <option value="อื่นๆ">อื่นๆ (ระบุในรายละเอียด)</option>
                                             </select>
                                         ) : docCategory === 'OUTGOING' ? (
-                                            <input disabled value={currentSchool.name} className="w-full px-4 md:px-5 py-3 border-2 border-slate-100 rounded-xl md:rounded-2xl font-bold text-sm bg-slate-50 text-slate-400" />
+                                            <>
+                                                <input 
+                                                    required 
+                                                    placeholder="ระบุหน่วยงานผู้รับ..." 
+                                                    list="externalAgencies"
+                                                    value={newDoc.from} 
+                                                    onChange={e => setNewDoc({...newDoc, from: e.target.value})} 
+                                                    className="w-full px-4 md:px-5 py-3 border-2 border-slate-200 rounded-xl md:rounded-2xl font-bold text-sm outline-none focus:border-blue-600 transition-all" 
+                                                />
+                                                <datalist id="externalAgencies">
+                                                    {sysConfig?.externalAgencies?.map((agency, i) => (
+                                                        <option key={i} value={agency} />
+                                                    ))}
+                                                </datalist>
+                                            </>
                                         ) : (
                                             <input disabled value={currentSchool.name} className="w-full px-4 md:px-5 py-3 border-2 border-slate-100 rounded-xl md:rounded-2xl font-bold text-sm bg-slate-50 text-slate-400" />
                                         )}
@@ -1545,7 +1565,7 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                         <div className="bg-slate-50 px-6 md:px-10 py-6 md:py-8 border-b flex flex-col md:flex-row justify-between items-start gap-6 md:gap-10">
                             <div className="space-y-3 md:space-y-5 flex-1">
                                 <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                                    <span className={`px-3 md:px-5 py-1 md:py-2 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-widest shadow-sm border-2 ${selectedDoc.category === 'ORDER' ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-blue-600 text-white border-blue-400'}`}>{selectedDoc.category === 'ORDER' ? 'ประกาศ / คำสั่ง' : 'หนังสือภายนอก'}</span>
+                                    <span className={`px-3 md:px-5 py-1 md:py-2 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-widest shadow-sm border-2 ${selectedDoc.category === 'ORDER' ? 'bg-emerald-600 text-white border-emerald-400' : selectedDoc.category === 'OUTGOING' ? 'bg-orange-600 text-white border-orange-400' : 'bg-blue-600 text-white border-blue-400'}`}>{selectedDoc.category === 'ORDER' ? 'ประกาศ / คำสั่ง' : selectedDoc.category === 'OUTGOING' ? 'หนังสือส่ง' : 'หนังสือรับ'}</span>
                                     <span className="px-3 md:px-5 py-1 md:py-2 bg-slate-900 text-white rounded-full text-[8px] md:text-[10px] font-black font-mono">#{selectedDoc.bookNumber}</span>
                                     {selectedDoc.status === 'PendingDirector' && (
                                         <span className="px-5 py-2 bg-orange-600 text-white rounded-full text-[10px] md:text-xs font-black uppercase shadow-lg animate-pulse border-2 border-white ring-4 ring-orange-50">
@@ -1559,10 +1579,14 @@ const DocumentsSystem: React.FC<DocumentsSystemProps> = ({
                                     )}
                                 </div>
                                 <h2 className="text-lg md:text-2xl font-black text-slate-800 leading-tight break-words">{selectedDoc.title}</h2>
-                                <div className="flex flex-wrap gap-4 md:gap-8 text-[9px] md:text-[11px] font-bold text-slate-400 uppercase tracking-[0.1em]">
-                                    <span className="flex items-center gap-2"><History size={14} className="text-slate-300"/> ต้นเรื่อง: {selectedDoc.from}</span>
-                                    <span className="flex items-center gap-2"><Clock size={14} className="text-slate-300"/> {selectedDoc.date}</span>
-                                </div>
+                                    <div className="flex flex-wrap gap-4 md:gap-8 text-[9px] md:text-[11px] font-bold text-slate-400 uppercase tracking-[0.1em]">
+                                        <span className="flex items-center gap-2">
+                                            <History size={14} className="text-slate-300"/> 
+                                            {selectedDoc.category === 'OUTGOING' ? 'ส่งถึง (ปลายทาง): ' : 'ต้นเรื่อง (จาก): '} 
+                                            {selectedDoc.from}
+                                        </span>
+                                        <span className="flex items-center gap-2"><Clock size={14} className="text-slate-300"/> {selectedDoc.date}</span>
+                                    </div>
                             </div>
                             <div className="flex md:flex-col items-center justify-center p-4 md:p-6 bg-white rounded-xl md:rounded-[2.5rem] border shadow-inner min-w-full md:min-w-[180px] gap-4 md:gap-0">
                                 <p className="text-[8px] md:text-[10px] font-black text-slate-300 uppercase tracking-widest md:mb-2">รับทราบ</p>

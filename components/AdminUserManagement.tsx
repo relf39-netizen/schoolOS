@@ -1186,6 +1186,18 @@ function setTelegramWebhook() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-orange-100">
                                 <div className="flex items-center gap-4 p-4 bg-white rounded-xl border border-orange-100 shadow-sm">
                                     <div 
+                                        onClick={() => setSchoolForm({ ...schoolForm, wfhModeEnabled: !schoolForm.wfhModeEnabled })}
+                                        className={`w-12 h-6 rounded-full relative transition-all cursor-pointer ${schoolForm.wfhModeEnabled ? 'bg-orange-500' : 'bg-slate-200'}`}
+                                    >
+                                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${schoolForm.wfhModeEnabled ? 'left-7' : 'left-1'}`}></div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-black text-slate-800 uppercase tracking-tight">โหมด Work From Home (WFH)</label>
+                                        <p className="text-[9px] text-slate-400 font-bold">อนุญาตให้ลงเวลาได้ทุกที่ (ไม่ต้องตรวจสอบพิกัด)</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-4 p-4 bg-white rounded-xl border border-orange-100 shadow-sm">
+                                    <div 
                                         onClick={() => setSchoolForm({ ...schoolForm, autoCheckOutEnabled: !schoolForm.autoCheckOutEnabled })}
                                         className={`w-12 h-6 rounded-full relative transition-all cursor-pointer ${schoolForm.autoCheckOutEnabled ? 'bg-orange-500' : 'bg-slate-200'}`}
                                     >
@@ -1196,11 +1208,15 @@ function setTelegramWebhook() {
                                         <p className="text-[9px] text-slate-400 font-bold">กรณีลืมลงเวลากลับในวันถัดไป</p>
                                     </div>
                                 </div>
-                                <div className={`space-y-1 transition-all ${schoolForm.autoCheckOutEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                                    <label className="block text-[10px] font-bold text-slate-400 ml-1">เวลากลับอัตโนมัติ</label>
-                                    <input type="time" value={schoolForm.autoCheckOutTime || '16:30'} onChange={e => setSchoolForm({...schoolForm, autoCheckOutTime: e.target.value})} className="w-full px-4 py-2 border rounded-lg font-bold bg-white text-lg outline-none focus:ring-2 ring-orange-500/10"/>
-                                </div>
                             </div>
+                            {schoolForm.autoCheckOutEnabled && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 animate-fade-in">
+                                    <div className="space-y-1">
+                                        <label className="block text-[10px] font-bold text-slate-400 ml-1">เวลากลับอัตโนมัติ</label>
+                                        <input type="time" value={schoolForm.autoCheckOutTime || '16:30'} onChange={e => setSchoolForm({...schoolForm, autoCheckOutTime: e.target.value})} className="w-full px-4 py-2 border rounded-lg font-bold bg-white text-lg outline-none focus:ring-2 ring-orange-500/10"/>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="flex justify-end pt-4"><button type="submit" className="bg-slate-900 text-white px-10 py-3 rounded-xl font-bold shadow-lg hover:bg-black transition-all flex items-center gap-2 text-sm active:scale-95"><Save size={20}/> บันทึกการตั้งค่าทั้งหมด</button></div>
                     </form>

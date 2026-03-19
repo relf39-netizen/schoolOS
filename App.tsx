@@ -70,6 +70,7 @@ const App: React.FC = () => {
                     lateTimeThreshold: s.late_time_threshold, 
                     autoCheckOutEnabled: s.auto_check_out_enabled,
                     autoCheckOutTime: s.auto_check_out_time,
+                    wfhModeEnabled: s.wfh_mode_enabled,
                     logoBase64: s.logo_base_64, 
                     isSuspended: s.is_suspended
                 })));
@@ -141,7 +142,33 @@ const App: React.FC = () => {
                         }
                     }
                 }).subscribe();
-            return () => { client.removeChannel(profileChannel); };
+
+            const schoolChannel = client.channel('schools_realtime_sync')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'schools' }, async () => {
+                    const { data } = await client.from('schools').select('*');
+                    if (data) {
+                        setAllSchools(data.map(s => ({
+                            id: s.id, 
+                            name: s.name, 
+                            district: s.district, 
+                            province: s.province,
+                            lat: s.lat, 
+                            lng: s.lng, 
+                            radius: s.radius, 
+                            lateTimeThreshold: s.late_time_threshold, 
+                            autoCheckOutEnabled: s.auto_check_out_enabled,
+                            autoCheckOutTime: s.auto_check_out_time,
+                            wfhModeEnabled: s.wfh_mode_enabled,
+                            logoBase64: s.logo_base_64, 
+                            isSuspended: s.is_suspended
+                        })));
+                    }
+                }).subscribe();
+
+            return () => { 
+                client.removeChannel(profileChannel); 
+                client.removeChannel(schoolChannel);
+            };
         }
     }, []);
 
@@ -231,6 +258,7 @@ const App: React.FC = () => {
             late_time_threshold: s.lateTimeThreshold, 
             auto_check_out_enabled: s.autoCheckOutEnabled,
             auto_check_out_time: s.autoCheckOutTime,
+            wfh_mode_enabled: s.wfhModeEnabled,
             outgoing_book_prefix: s.outgoingBookPrefix,
             is_suspended: s.isSuspended || false
         }]);
@@ -467,7 +495,7 @@ const App: React.FC = () => {
                                 notification={getDocBadge()} 
                                 hasBorder={true}
                             />
-                            {(isDirector || isDocOfficer || isSystemAdmin) && (
+                            {(isDirector || isDocOfficer || isSystemAdmin || (currentUser?.roles || []).includes('TEACHER')) && (
                                 <DashboardCard 
                                     view={SystemView.DIRECTOR_CALENDAR} 
                                     title="ปฏิทินปฏิบัติงาน ผอ." 

@@ -47,6 +47,7 @@ export interface School {
   lateTimeThreshold?: string; // Time string e.g., "08:15"
   autoCheckOutEnabled?: boolean;
   autoCheckOutTime?: string;
+  wfhModeEnabled?: boolean; // New: If true, allow check-in from any location
   
   // Outgoing Document Prefix
   outgoingBookPrefix?: string; // e.g. "ศธ ๐๔๐๘๔.๒๐๖"
@@ -71,7 +72,7 @@ export interface DocumentItem {
   bookNumber: string; // เลขที่รับหนังสือ หรือ เลขที่คำสั่ง
   title: string;
   description: string;
-  from: string; // หน่วยงานต้นเรื่อง
+  from: string; // หน่วยงานต้นเรื่อง หรือ หน่วยงานปลายทาง (สำหรับหนังสือส่ง)
   date: string;
   timestamp: string; // เวลาที่รับ
   priority: 'Normal' | 'Urgent' | 'Critical';

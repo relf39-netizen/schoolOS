@@ -494,7 +494,11 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
             const buffer = 25; // เพิ่มระยะเผื่อ 25 เมตรสำหรับความคลาดเคลื่อนของ GPS
             const dist = calculateDistance(lat, lng, schoolLat, schoolLng);
             setGpsStatus({ lat, lng, dist });
-            if (dist > (radius + buffer)) {
+            
+            // Check if WFH mode is enabled. If so, bypass location check.
+            const isWfh = currentSchool.wfhModeEnabled === true;
+            
+            if (!isWfh && dist > (radius + buffer)) {
                 throw new Error(`ไม่อนุญาตให้ลงเวลา: ท่านอยู่นอกพื้นที่โรงเรียน (${Math.round(dist)} ม.)\nพิกัดโรงเรียน: ${schoolLat.toFixed(6)}, ${schoolLng.toFixed(6)}\nพิกัดของท่าน: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
             }
             const now = new Date();
@@ -935,7 +939,12 @@ const AttendanceSystem: React.FC<AttendanceSystemProps> = ({ currentUser, allTea
                         <div className="p-5 bg-blue-600 rounded-3xl shadow-xl shadow-blue-500/20"><MapPinned size={32}/></div>
                         <div>
                             <h2 className="text-3xl font-black tracking-tight">ลงเวลาปฏิบัติราชการ</h2>
-                            <p className="text-blue-400 font-bold flex items-center gap-2 uppercase tracking-widest text-xs mt-1"><ShieldCheck size={14}/> {currentSchool.name}</p>
+                            <div className="flex items-center gap-3 mt-1">
+                                <p className="text-blue-400 font-bold flex items-center gap-2 uppercase tracking-widest text-xs"><ShieldCheck size={14}/> {currentSchool.name}</p>
+                                {currentSchool.wfhModeEnabled && (
+                                    <span className="bg-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/30 font-black uppercase tracking-tighter animate-pulse">WFH MODE ACTIVE</span>
+                                )}
+                            </div>
                         </div>
                     </div>
                     <div className="text-center md:text-right bg-white/5 p-4 px-8 rounded-3xl border border-white/10 backdrop-blur-md">
