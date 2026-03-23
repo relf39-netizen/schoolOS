@@ -846,8 +846,13 @@ function setTelegramWebhook() {
     const handleSaveSchool = async (e: React.FormEvent) => {
         e.preventDefault();
         if (schoolForm.id) {
-            onUpdateSchool(schoolForm as School);
-            alert("บันทึกข้อมูลโรงเรียนสำเร็จ");
+            try {
+                await onUpdateSchool(schoolForm as School);
+                alert("บันทึกข้อมูลโรงเรียนสำเร็จ");
+            } catch (err: any) {
+                console.error("Save School Error:", err);
+                alert("บันทึกล้มเหลว: " + err.message + "\n(กรุณาตรวจสอบว่าท่านได้รันคำสั่ง SQL เพิ่มคอลัมน์ wfh_mode_enabled แล้วหรือยัง)");
+            }
         }
     };
 

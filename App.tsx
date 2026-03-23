@@ -262,7 +262,11 @@ const App: React.FC = () => {
             outgoing_book_prefix: s.outgoingBookPrefix,
             is_suspended: s.isSuspended || false
         }]);
-        if (!error) setAllSchools(prev => prev.map(sch => sch.id === s.id ? s : sch));
+        if (error) {
+            console.error("Update School Error:", error.message);
+            throw error;
+        }
+        setAllSchools(prev => prev.map(sch => sch.id === s.id ? s : sch));
     };
 
     const handleEditTeacher = async (t: Teacher) => {
