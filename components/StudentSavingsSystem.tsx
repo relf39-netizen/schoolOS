@@ -11,10 +11,20 @@ import { supabase } from '../supabaseClient';
 import { Teacher, Student, StudentSaving, SavingTransactionType, ClassRoom, AcademicYear } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
+import { notifyGuardianSavings } from '../utils/telegram';
 
 interface StudentSavingsSystemProps {
     currentUser: Teacher;
 }
+
+const getTodayDateStr = () => {
+    return new Intl.DateTimeFormat('en-CA', { 
+        timeZone: 'Asia/Bangkok', 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit' 
+    }).format(new Date());
+};
 
 const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser }) => {
     const [students, setStudents] = useState<Student[]>([]);
@@ -25,6 +35,7 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedClass, setSelectedClass] = useState<string>('All');
     const [currentAcademicYear, setCurrentAcademicYear] = useState<string>(new Date().getFullYear() + 543 + '');
+    const [schoolConfig, setSchoolConfig] = useState<any>(null);
     
     // Modals
     const [isTransactionOpen, setIsTransactionOpen] = useState(false);
@@ -51,9 +62,9 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
 
     // Date range for individual reports
     const [reportStartDate, setReportStartDate] = useState<string>('');
-    const [reportEndDate, setReportEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [reportEndDate, setReportEndDate] = useState<string>(getTodayDateStr());
 
-    const [transactionDate, setTransactionDate] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [transactionDate, setTransactionDate] = useState<string>(getTodayDateStr());
 
     const isAdmin = (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR') || (currentUser.roles || []).includes('ACTING_DIRECTOR');
     const isDirector = (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('VICE_DIRECTOR') || (currentUser.roles || []).includes('ACTING_DIRECTOR');
@@ -66,6 +77,16 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
         if (!supabase) return;
         setIsLoading(true);
         try {
+            // Fetch School Config
+            const { data: configData } = await supabase
+                .from('school_configs')
+                .select('*')
+                .eq('school_id', currentUser.schoolId)
+                .single();
+            if (configData) {
+                setSchoolConfig(configData);
+            }
+
             // Fetch Academic Years
             const { data: yearsData } = await supabase
                 .from('academic_years')
@@ -624,7 +645,22 @@ const StudentSavingsSystem: React.FC<StudentSavingsSystemProps> = ({ currentUser
                 setStudents(prev => prev.map(s => {
                     if (s.id === selectedStudent.id) {
                         const change = transactionType === 'DEPOSIT' ? parseFloat(amount) : -parseFloat(amount);
-                        return { ...s, totalSavings: (s.totalSavings || 0) + change };
+                        const newTotal = (s.totalSavings || 0) + change;
+                        
+                        // Send Notification
+                        if (schoolConfig?.telegram_bot_token) {
+                            notifyGuardianSavings(
+                                schoolConfig.telegram_bot_token,
+                                s.id,
+                                s.name,
+                                parseFloat(amount),
+                                transactionType,
+                                newTotal,
+                                schoolConfig.school_name || 'โรงเรียนของเรา'
+                            );
+                        }
+                        
+                        return { ...s, totalSavings: newTotal };
                     }
                     return s;
                 }));

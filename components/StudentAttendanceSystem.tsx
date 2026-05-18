@@ -22,10 +22,13 @@ const THAI_MONTHS = [
 ];
 
 const formatToISODate = (date: Date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    // บังคับใช้ timezone Asia/Bangkok เพื่อให้วันที่ตรงกับประเทศไทยเสมอ
+    return new Intl.DateTimeFormat('en-CA', { 
+        timeZone: 'Asia/Bangkok', 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit' 
+    }).format(date);
 };
 
 const formatToThaiDate = (dateString: string) => {
@@ -40,6 +43,8 @@ const formatToThaiDate = (dateString: string) => {
 interface StudentAttendanceSystemProps {
     currentUser: Teacher;
 }
+
+import { notifyGuardianAttendance } from '../utils/telegram';
 
 const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ currentUser }) => {
     const [viewMode, setViewMode] = useState<'DASHBOARD' | 'RECORD' | 'HISTORY' | 'STUDENT_INFO' | 'OVERALL_REPORT' | 'CLASS_REPORT'>('DASHBOARD');
@@ -245,7 +250,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                 height: r.height,
                 recordedDate: r.recorded_at, // Map to recordedDate to match types.ts
                 academicYear: r.academic_year,
-                recordedBy: r.recorded_by,
+                createdBy: r.created_by,
                 createdAt: r.created_at
             })));
         }
@@ -296,7 +301,7 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                     height: parseFloat(newHeight),
                     recorded_at: new Date().toISOString(),
                     academic_year: currentAcademicYear,
-                    recorded_by: currentUser.id
+                    created_by: currentUser.id
                 }]);
             
             if (error) throw error;
@@ -589,6 +594,28 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
 
             if (error) throw error;
             
+            // Send Telegram Notifications
+            if (schoolConfig?.telegram_bot_token) {
+                const dateThai = formatToThaiDate(selectedDate);
+                const schoolName = schoolConfig.school_name || 'โรงเรียนของเรา';
+                
+                // Process notifications in the background
+                Object.entries(tempAttendance).forEach(([studentId, status]) => {
+                    const student = students.find(s => s.id === studentId);
+                    if (student) {
+                        const statusLabel = getStatusLabel(status);
+                        notifyGuardianAttendance(
+                            schoolConfig.telegram_bot_token,
+                            studentId,
+                            student.name,
+                            dateThai,
+                            statusLabel,
+                            schoolName
+                        );
+                    }
+                });
+            }
+
             alert('บันทึกข้อมูลการมาเรียนเรียบร้อยแล้ว');
             await fetchAttendance(selectedDate);
             setViewMode('DASHBOARD');

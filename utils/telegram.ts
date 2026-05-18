@@ -1,5 +1,5 @@
-
 // Utility for sending Telegram Notifications with rich formatting
+import { supabase } from '../supabaseClient';
 
 interface SendMessagePayload {
     chat_id: string;
@@ -12,7 +12,7 @@ interface SendMessagePayload {
  * Sends a formatted message to a Telegram chat.
  * Supports HTML tags like <b>, <i>, <a>, <code>, <pre>
  */
-export const sendTelegramMessage = async (botToken: string, chatId: string, message: string, deepLinkUrl?: string) => {
+const sendTelegramMessage = async (botToken: string, chatId: string, message: string, deepLinkUrl?: string) => {
     if (!botToken || !chatId) {
         console.warn("Telegram Bot Token or Chat ID is missing. Notification skipped.");
         return;
@@ -58,4 +58,92 @@ export const sendTelegramMessage = async (botToken: string, chatId: string, mess
     } catch (error) {
         console.error("Failed to send Telegram message fetch error:", error);
     }
+};
+
+/**
+ * Notifies guardians about student attendance
+ */
+const notifyGuardianAttendance = async (
+    botToken: string, 
+    studentId: string, 
+    studentName: string, 
+    dateThai: string, 
+    status: string,
+    schoolName: string
+) => {
+    if (!supabase || !botToken) return;
+
+    try {
+        const { data: refs } = await supabase
+            .from('guardian_telegram_refs')
+            .select('chat_id')
+            .eq('student_id', studentId);
+
+        if (!refs || refs.length === 0) return;
+
+        const statusEmoji = status === 'มาเรียน' ? '✅' : status === 'สาย' ? '⏰' : status === 'ลาป่วย/ธุระ' ? '🤒' : '❌';
+        const message = `<b>🔔 แจ้งเตือนการมาเรียน (${schoolName})</b>\n\n` +
+            `👤 นักเรียน: <b>${studentName}</b>\n` +
+            `📅 วันที่: ${dateThai}\n` +
+            `📊 สถานะ: ${statusEmoji} <b>${status}</b>\n\n` +
+            `<i>ขอบคุณที่ไว้วางใจให้เราดูแลบุตรหลานของท่าน</i>`;
+
+        for (const ref of refs) {
+            await sendTelegramMessage(botToken, ref.chat_id, message);
+        }
+    } catch (error) {
+        console.error("Error in notifyGuardianAttendance:", error);
+    }
+};
+
+/**
+ * Notifies guardians about student savings transactions
+ */
+const notifyGuardianSavings = async (
+    botToken: string,
+    studentId: string,
+    studentName: string,
+    amount: number,
+    type: 'DEPOSIT' | 'WITHDRAWAL',
+    totalBalance: number,
+    schoolName: string
+) => {
+    if (!supabase || !botToken) return;
+
+    try {
+        const { data: refs } = await supabase
+            .from('guardian_telegram_refs')
+            .select('chat_id')
+            .eq('student_id', studentId);
+
+        if (!refs || refs.length === 0) return;
+
+        const typeLabel = type === 'DEPOSIT' ? 'ฝากเงิน' : 'ถอนเงิน';
+        const typeEmoji = type === 'DEPOSIT' ? '💰' : '💸';
+        
+        const message = `<b>🔔 แจ้งเตือนรายการออมทรัพย์ (${schoolName})</b>\n\n` +
+            `👤 นักเรียน: <b>${studentName}</b>\n` +
+            `📝 รายการ: ${typeEmoji} <b>${typeLabel}</b>\n` +
+            `💵 จำนวนเงิน: <b>${amount.toLocaleString()} บาท</b>\n` +
+            `🏦 ยอดเงินคงเหลือ: <b>${totalBalance.toLocaleString()} บาท</b>\n\n` +
+            `<i>บันทึกข้อมูลเมื่อ: ${new Date().toLocaleDateString('th-TH', { 
+                day: 'numeric', 
+                month: 'long', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            })} น.</i>`;
+
+        for (const ref of refs) {
+            await sendTelegramMessage(botToken, ref.chat_id, message);
+        }
+    } catch (error) {
+        console.error("Error in notifyGuardianSavings:", error);
+    }
+};
+
+export {
+    sendTelegramMessage,
+    notifyGuardianAttendance,
+    notifyGuardianSavings
 };
