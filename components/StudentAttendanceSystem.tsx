@@ -250,7 +250,8 @@ const StudentAttendanceSystem: React.FC<StudentAttendanceSystemProps> = ({ curre
                 height: r.height,
                 recordedDate: r.recorded_at, // Map to recordedDate to match types.ts
                 academicYear: r.academic_year,
-                createdBy: r.created_by,
+                createdBy: r.created_by || r.recorded_by || '',
+                recordedBy: r.recorded_by || r.created_by || '',
                 createdAt: r.created_at
             })));
         }
