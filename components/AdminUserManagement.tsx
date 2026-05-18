@@ -1164,7 +1164,7 @@ function setTelegramWebhook() {
                     </button>
                     <button onClick={() => setActiveTab('STUDENTS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'STUDENTS' ? 'bg-white text-indigo-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>จัดการนักเรียน</button>
                     <button onClick={() => setActiveTab('SCHOOL_SETTINGS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-white text-orange-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>ข้อมูลโรงเรียน</button>
-                    <button onClick={() => setActiveTab('ASSIGNMENTS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'ASSIGNMENTS' ? 'bg-white text-rose-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>มอบหมายห้องเรียน</button>
+                    <button onClick={() => setActiveTab('ASSIGNMENTS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'ASSIGNMENTS' ? 'bg-white text-rose-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>มอบหมายห้องรายคน</button>
                     <button onClick={() => setActiveTab('SETTINGS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'SETTINGS' ? 'bg-white text-indigo-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>การเชื่อมต่อ</button>
                     <button onClick={() => setActiveTab('CLOUD_SETUP')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'CLOUD_SETUP' ? 'bg-white text-emerald-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>Cloud Logic</button>
                     {isSuperAdmin && (
@@ -1656,11 +1656,33 @@ function setTelegramWebhook() {
                                 </h3>
                                 <p className="text-sm font-bold text-rose-800 leading-relaxed max-w-3xl">หากท่านพบปัญหา "new row violates row-level security policy" หรือ "401 Unauthorized" ขณะเพิ่มห้องเรียนหรือปีการศึกษา กรุณาคัดลอก SQL ด้านล่างไปรันใน <b>Supabase SQL Editor</b> เพื่อเปิดสิทธิ์การเขียนข้อมูลครับ</p>
                                 <div className="relative mt-6">
-                                    <pre className="bg-slate-950 text-emerald-400 p-6 rounded-2xl font-mono text-xs overflow-x-auto border-2 border-slate-900">
+                                    <button 
+                                        onClick={() => {
+                                            const sql = `-- ปิด RLS เพื่ออนุญาตให้ใช้งานได้ทุกฟังก์ชัน
+ALTER TABLE academic_years DISABLE ROW LEVEL SECURITY;
+ALTER TABLE class_rooms DISABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE students DISABLE ROW LEVEL SECURITY;
+ALTER TABLE schools DISABLE ROW LEVEL SECURITY;
+ALTER TABLE school_configs DISABLE ROW LEVEL SECURITY;
+
+-- เพื่อความชัวร์ ให้รันคำสั่งเพิ่มคอลัมน์มอบหมายห้องเรียนด้วย
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS assigned_classes TEXT[] DEFAULT '{}';`;
+                                            navigator.clipboard.writeText(sql);
+                                            alert("คัดลอก SQL แล้ว! กรุณานำไปรันใน Supabase SQL Editor");
+                                        }}
+                                        className="absolute top-4 right-4 p-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-all font-black text-[10px] flex items-center gap-2"
+                                    >
+                                        <Copy size={14}/> COPY SQL
+                                    </button>
+                                    <pre className="bg-slate-950 text-emerald-400 p-6 rounded-2xl font-mono text-xs overflow-x-auto border-2 border-slate-900 shadow-inner">
 {`-- ปิด RLS เพื่ออนุญาตให้ใช้งานได้ทุกฟังก์ชัน
 ALTER TABLE academic_years DISABLE ROW LEVEL SECURITY;
 ALTER TABLE class_rooms DISABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE students DISABLE ROW LEVEL SECURITY;
+ALTER TABLE schools DISABLE ROW LEVEL SECURITY;
+ALTER TABLE school_configs DISABLE ROW LEVEL SECURITY;
 
 -- เพื่อความชัวร์ ให้รันคำสั่งเพิ่มคอลัมน์มอบหมายห้องเรียนด้วย
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS assigned_classes TEXT[] DEFAULT '{}';`}

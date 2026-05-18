@@ -432,7 +432,7 @@ const App: React.FC = () => {
             onDeleteSchool={async(id)=> { if(confirm(`ลบโรงเรียน?`)) { const client = supabase; if(client) await client.from('schools').delete().eq('id', id); setAllSchools(allSchools.filter(s => s.id !== id)); } }} 
             onUpdateTeacher={handleEditTeacher} onDeleteTeacher={handleDeleteTeacher}
             onLogout={handleLogout} 
-            onEnterSchool={(schoolId) => {
+            onEnterSchool={(schoolId: string) => {
                 setImpersonatedSchoolId(schoolId);
                 setIsSuperAdminMode(false);
                 setCurrentView(SystemView.ADMIN_USERS);

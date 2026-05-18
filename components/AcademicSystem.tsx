@@ -194,7 +194,7 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
 
             if (error) {
                 if (error.code === '42501') {
-                    alert('❌ ไม่สามารถเพิ่มปีการศึกษาได้: ติดนโยบายความปลอดภัย RLS\n\nวิธีแก้ไข: กรุณาติดต่อ Admin เพื่อรัน SQL ปิด RLS หรือเรียกใช้คำสั่ง "DISABLE ROW LEVEL SECURITY" บนตาราง academic_years');
+                    alert('❌ ไม่สามารถเพิ่มปีการศึกษาได้: ติดนโยบายความปลอดภัย RLS\n\nวิธีแก้ไข: กรุณารัน SQL "DISABLE ROW LEVEL SECURITY" สำหรับตาราง academic_years ใน Supabase SQL Editor ครับ');
                 } else {
                     throw error;
                 }
