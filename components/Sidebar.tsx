@@ -20,6 +20,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isMobileOp
     
     const menuItems = [
         { id: SystemView.DASHBOARD, label: 'ภาพรวม', icon: Home, visible: true },
+        { id: SystemView.STUDENT_ATTENDANCE, label: 'บันทึกการมาเรียน', icon: UserCircle, visible: true },
+        { id: SystemView.SAVINGS, label: 'ระบบออมทรัพย์', icon: DollarSign, visible: true },
         { id: SystemView.DOCUMENTS, label: 'งานสารบรรณ', icon: FileText, visible: true },
         { id: SystemView.LEAVE, label: 'ระบบการลา', icon: UserMinus, visible: true },
         { id: SystemView.DIRECTOR_CALENDAR, label: 'ปฏิทินปฏิบัติงาน ผอ.', icon: Calendar, visible: (currentUser.roles || []).includes('SYSTEM_ADMIN') || (currentUser.roles || []).includes('DIRECTOR') || (currentUser.roles || []).includes('DOCUMENT_OFFICER') || currentUser.isActingDirector || (currentUser.roles || []).includes('TEACHER') },

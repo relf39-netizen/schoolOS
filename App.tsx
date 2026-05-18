@@ -18,11 +18,10 @@ import { SystemView, Teacher, School, TeacherRole } from './types';
 import { 
     Activity, Users, Clock, FileText, CalendarRange, 
     Loader, LogOut, AlertCircle,
-    Settings, ChevronLeft, UserCircle, Calendar, GraduationCap, LayoutGrid, UserCheck, PiggyBank
+    Settings, ChevronLeft, UserCircle, Calendar, GraduationCap, LayoutGrid, UserCheck, PiggyBank, Shield
 } from 'lucide-react';
 import { MOCK_TEACHERS, MOCK_SCHOOLS } from './constants';
 import { supabase, isConfigured as isSupabaseConfigured } from './supabaseClient';
-import { db, collection, query, where, onSnapshot } from './firebaseConfig';
 
 const SESSION_KEY = 'schoolos_session_v1';
 const APP_LOGO_URL = "https://img2.pic.in.th/pic/9c2e0f8ba684e3441fc58d880fdf143d.png";
@@ -36,7 +35,19 @@ const App: React.FC = () => {
     // --- Auth State ---
     const [currentUser, setCurrentUser] = useState<Teacher | null>(null);
     const [isSuperAdminMode, setIsSuperAdminMode] = useState(false);
+    const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+    const [impersonatedSchoolId, setImpersonatedSchoolId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+
+    const virtualUser: Teacher | null = currentUser || (isSuperAdmin ? {
+        id: 'SUPER_ADMIN',
+        schoolId: impersonatedSchoolId || '',
+        name: 'Super Admin',
+        roles: ['SYSTEM_ADMIN', 'DIRECTOR'],
+        position: 'Super Admin',
+        isApproved: true,
+        isSuspended: false
+    } as Teacher : null);
 
     // --- UI & Deep Link State ---
     const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
@@ -44,6 +55,7 @@ const App: React.FC = () => {
     const [hasDirectorMissionToday, setHasDirectorMissionToday] = useState(false);
     const [focusItem, setFocusItem] = useState<{ view: SystemView, id: string } | null>(null);
     const [currentView, setCurrentView] = useState<SystemView>(SystemView.DASHBOARD);
+    const [initialAdminTab, setInitialAdminTab] = useState<any>(undefined);
 
     // --- 1. DATA LOADING & REALTIME SYNC ---
     const fetchInitialData = async () => {
@@ -95,6 +107,7 @@ const App: React.FC = () => {
                         const session = JSON.parse(storedSession);
                         if (session.isSuperAdmin) {
                             setIsSuperAdminMode(true);
+                            setIsSuperAdmin(true);
                         } else {
                             const user = mappedTeachers.find(t => t.id === session.userId);
                             if (user && !user.isSuspended && user.isApproved) {
@@ -210,23 +223,29 @@ const App: React.FC = () => {
         };
         fetchCounts();
 
-        let unsubEvents: (() => void) | undefined;
-        if (db) {
+        const fetchMissionToday = async () => {
             const today = new Date();
             const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-            const q = query(collection(db, "director_events"), where("schoolId", "==", currentUser.schoolId), where("date", "==", todayStr));
-            unsubEvents = onSnapshot(q, (snapshot) => {
-                setHasDirectorMissionToday(!snapshot.empty);
-            });
-        }
+            const { data } = await client.from('director_events')
+                .select('id')
+                .eq('school_id', currentUser.schoolId)
+                .eq('date', todayStr)
+                .limit(1);
+            setHasDirectorMissionToday(!!data && data.length > 0);
+        };
+        fetchMissionToday();
 
+        const missionSub = client.channel('mission_today')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'director_events' }, () => fetchMissionToday())
+            .subscribe();
+        
         const leaveSub = client.channel('counts_leave').on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, () => fetchCounts()).subscribe();
         const docSub = client.channel('counts_docs').on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, () => fetchCounts()).subscribe();
         
         return () => {
+            client.removeChannel(missionSub);
             client.removeChannel(leaveSub);
             client.removeChannel(docSub);
-            if (unsubEvents) unsubEvents();
         };
     }, [currentUser?.id]);
 
@@ -284,7 +303,8 @@ const App: React.FC = () => {
             telegram_chat_id: t.telegramChatId,
             is_suspended: t.isSuspended || false, 
             is_approved: t.isApproved !== false,
-            signature_base_64: t.signatureBase64
+            signature_base_64: t.signatureBase64,
+            assigned_classes: t.assignedClasses || []
         }).eq('id', t.id);
         
         if (error) {
@@ -333,12 +353,12 @@ const App: React.FC = () => {
     };
 
     // --- DASHBOARD UI COMPONENTS ---
-    const currentSchool = allSchools.find(s => s.id === currentUser?.schoolId);
-    const schoolTeachers = allTeachers.filter(t => t.schoolId === currentUser?.schoolId);
+    const currentSchool = allSchools.find(s => s.id === (impersonatedSchoolId || virtualUser?.schoolId));
+    const schoolTeachers = allTeachers.filter(t => t.schoolId === (impersonatedSchoolId || virtualUser?.schoolId));
 
-    const DashboardCard = ({ view, title, slogan, icon: Icon, gradient, notification, hasBorder }: any) => (
+    const DashboardCard = ({ view, title, slogan, icon: Icon, gradient, notification, hasBorder, onClick }: any) => (
         <button 
-            onClick={() => setCurrentView(view)}
+            onClick={() => { setCurrentView(view); if(onClick) onClick(); }}
             className={`group relative p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-lg hover:shadow-2xl transition-all duration-700 text-left overflow-hidden flex flex-col justify-between h-56 md:h-60 hover:-translate-y-2 bg-gradient-to-br ${gradient} text-white border-none`}
         >
             <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-[0.15] group-hover:opacity-[0.3] transition-opacity duration-700">
@@ -412,10 +432,16 @@ const App: React.FC = () => {
             onDeleteSchool={async(id)=> { if(confirm(`ลบโรงเรียน?`)) { const client = supabase; if(client) await client.from('schools').delete().eq('id', id); setAllSchools(allSchools.filter(s => s.id !== id)); } }} 
             onUpdateTeacher={handleEditTeacher} onDeleteTeacher={handleDeleteTeacher}
             onLogout={handleLogout} 
+            onEnterSchool={(schoolId) => {
+                setImpersonatedSchoolId(schoolId);
+                setIsSuperAdminMode(false);
+                setCurrentView(SystemView.ADMIN_USERS);
+                setInitialAdminTab('MIGRATION');
+            }}
         />
     );
 
-    if (!currentUser) return <LoginScreen schools={allSchools} teachers={allTeachers} onLogin={handleLogin} onRegister={async (sid, id, n) => {
+    if (!virtualUser) return <LoginScreen schools={allSchools} teachers={allTeachers} onLogin={handleLogin} onRegister={async (sid, id, n) => {
         const client = supabase;
         if (!client) return;
         const { error } = await client.from('profiles').insert([{ 
@@ -429,13 +455,17 @@ const App: React.FC = () => {
             is_approved: false 
         }]);
         if (!error) { await fetchInitialData(); } else { alert(error.message); }
-    }} onSuperAdminLogin={()=>setIsSuperAdminMode(true)} />;
+    }} onSuperAdminLogin={() => {
+        setIsSuperAdminMode(true);
+        setIsSuperAdmin(true);
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ isSuperAdmin: true }));
+    }} />;
     
-    if (currentUser.isFirstLogin) return <FirstLoginSetup user={currentUser} onComplete={async (p, pos) => {
+    if (virtualUser.isFirstLogin) return <FirstLoginSetup user={virtualUser} onComplete={async (p, pos) => {
         const client = supabase;
         if (!client) return;
-        const roles = pos.includes('ผู้อำนวยการ') ? ['DIRECTOR', 'TEACHER'] : currentUser.roles;
-        await client.from('profiles').update({ password: p, position: pos, roles }).eq('id', currentUser.id);
+        const roles = pos.includes('ผู้อำนวยการ') ? ['DIRECTOR', 'TEACHER'] : virtualUser!.roles;
+        await client.from('profiles').update({ password: p, position: pos, roles }).eq('id', virtualUser!.id);
         await fetchInitialData();
     }} onLogout={handleLogout} />;
 
@@ -451,6 +481,12 @@ const App: React.FC = () => {
             <header className="bg-white/90 backdrop-blur-md sticky top-0 z-40 border-b border-slate-100 h-20 flex items-center shadow-sm print:hidden">
                 <div className="max-w-7xl mx-auto w-full px-4 md:px-8 flex justify-between items-center">
                     <div className="flex items-center gap-2 md:gap-6">
+                        {isSuperAdmin && !isSuperAdminMode && (
+                            <button onClick={() => setIsSuperAdminMode(true)} className="p-2 md:p-3 bg-rose-50 hover:bg-rose-100 rounded-2xl text-rose-600 transition-all flex items-center gap-2 font-black text-xs">
+                                <Shield size={18}/>
+                                <span className="hidden md:inline">กลับหน้าหลัก Super Admin</span>
+                            </button>
+                        )}
                         {currentView !== SystemView.DASHBOARD ? (
                             <button onClick={() => setCurrentView(SystemView.DASHBOARD)} className="p-2 md:p-3 bg-slate-50 hover:bg-slate-100 rounded-2xl text-slate-400 transition-all">
                                 <ChevronLeft size={20} className="md:w-[24px] md:h-[24px]"/>
@@ -473,11 +509,11 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-3 md:gap-6">
                         <div className="hidden md:flex flex-col items-end">
-                            <span className="text-sm font-black text-slate-800 leading-none">{currentUser.name}</span>
-                            <span className="text-[10px] text-slate-400 font-bold uppercase mt-1.5 tracking-widest">{currentUser.position}</span>
+                            <span className="text-sm font-black text-slate-800 leading-none">{virtualUser!.name}</span>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase mt-1.5 tracking-widest">{virtualUser!.position}</span>
                         </div>
                         <div onClick={() => setCurrentView(SystemView.PROFILE)} className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-blue-600 flex items-center justify-center text-white font-black cursor-pointer hover:scale-110 transition-all shadow-lg shadow-blue-500/20">
-                            {currentUser.name[0]}
+                            {virtualUser!.name[0]}
                         </div>
                         <button onClick={handleLogout} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
                             <LogOut size={20} className="md:w-[24px] md:h-[24px]"/>
@@ -523,8 +559,15 @@ const App: React.FC = () => {
                             />
                             <DashboardCard view={SystemView.ATTENDANCE} title="ลงเวลาทำงาน" slogan="เช็คเวลาแม่นยำ ด้วย GPS" icon={Clock} gradient="from-rose-400 to-red-600"/>
                             <DashboardCard view={SystemView.FINANCE} title="ระบบการเงิน" slogan="งบประมาณ และรายรับ-จ่าย" icon={Activity} gradient="from-amber-400 to-orange-600"/>
-                            {currentUser?.roles && (currentUser.roles || []).includes('SYSTEM_ADMIN') && (
-                                <DashboardCard view={SystemView.ADMIN_USERS} title="ผู้ดูแลระบบ" slogan="ตั้งค่าระบบ และผู้ใช้งาน" icon={Settings} gradient="from-slate-500 to-slate-700"/>
+                            {(isSuperAdmin || (currentUser?.roles && (currentUser.roles || []).includes('SYSTEM_ADMIN'))) && (
+                                <DashboardCard 
+                                    view={SystemView.ADMIN_USERS} 
+                                    title="ผู้ดูแลระบบ" 
+                                    slogan="ตั้งค่าระบบ และผู้ใช้งาน" 
+                                    icon={Settings} 
+                                    gradient="from-slate-500 to-slate-700"
+                                    onClick={() => setInitialAdminTab('USERS')}
+                                />
                             )}
                             <DashboardCard view={SystemView.PROFILE} title="ข้อมูลส่วนตัว" slogan="แก้ไขรหัสผ่าน / ลายเซ็นดิจิทัล" icon={UserCircle} gradient="from-violet-400 to-indigo-600"/>
                         </div>
@@ -532,21 +575,24 @@ const App: React.FC = () => {
                         <div className="animate-fade-in">
                             {(() => {
                                 switch (currentView) {
-                                    case SystemView.PROFILE: return <UserProfile currentUser={currentUser} onUpdateUser={handleUpdateUserProfile} />;
-                                    case SystemView.DOCUMENTS: return <DocumentsSystem currentUser={currentUser} currentSchool={currentSchool!} allTeachers={schoolTeachers} focusDocId={focusItem?.id} onClearFocus={() => setFocusItem(null)} />;
-                                    case SystemView.LEAVE: return <LeaveSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool!} focusRequestId={focusItem?.id} onClearFocus={() => setFocusItem(null)} />;
-                                    case SystemView.FINANCE: return <FinanceSystem currentUser={currentUser} allTeachers={schoolTeachers} />;
-                                    case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={currentUser} allTeachers={schoolTeachers} currentSchool={currentSchool!} />;
-                                    case SystemView.PLAN: return <ActionPlanSystem currentUser={currentUser} currentSchool={currentSchool!} />;
-                                    case SystemView.ACADEMIC: return <AcademicSystem currentUser={currentUser} />;
-                                    case SystemView.SAVINGS: return <StudentSavingsSystem currentUser={currentUser} />;
-                                    case SystemView.STUDENT_ATTENDANCE: return <StudentAttendanceSystem currentUser={currentUser} />;
+                                    case SystemView.PROFILE: return <UserProfile currentUser={virtualUser!} onUpdateUser={handleUpdateUserProfile} />;
+                                    case SystemView.DOCUMENTS: return <DocumentsSystem currentUser={virtualUser!} currentSchool={currentSchool!} allTeachers={schoolTeachers} focusDocId={focusItem?.id} onClearFocus={() => setFocusItem(null)} />;
+                                    case SystemView.LEAVE: return <LeaveSystem currentUser={virtualUser!} allTeachers={schoolTeachers} currentSchool={currentSchool!} focusRequestId={focusItem?.id} onClearFocus={() => setFocusItem(null)} />;
+                                    case SystemView.FINANCE: return <FinanceSystem currentUser={virtualUser!} allTeachers={schoolTeachers} />;
+                                    case SystemView.ATTENDANCE: return <AttendanceSystem currentUser={virtualUser!} allTeachers={schoolTeachers} currentSchool={currentSchool!} />;
+                                    case SystemView.PLAN: return <ActionPlanSystem currentUser={virtualUser!} currentSchool={currentSchool!} />;
+                                    case SystemView.ACADEMIC: return <AcademicSystem currentUser={virtualUser!} />;
+                                    case SystemView.SAVINGS: return <StudentSavingsSystem currentUser={virtualUser!} />;
+                                    case SystemView.STUDENT_ATTENDANCE: return <StudentAttendanceSystem currentUser={virtualUser!} />;
                                     case SystemView.ADMIN_USERS: 
-                                        if (!currentUser?.roles || !(currentUser.roles || []).includes('SYSTEM_ADMIN')) {
+                                        if (!isSuperAdmin && (!virtualUser?.roles || !(virtualUser.roles || []).includes('SYSTEM_ADMIN'))) {
                                             setCurrentView(SystemView.DASHBOARD);
                                             return null;
                                         }
                                         return <AdminUserManagement teachers={schoolTeachers} currentSchool={currentSchool!} onUpdateSchool={handleUpdateSchool} 
+                                            isSuperAdmin={isSuperAdmin}
+                                            initialTab={initialAdminTab}
+                                            currentUser={virtualUser!}
                                             onAddTeacher={async (t) => { 
                                             const client = supabase; 
                                             if(!client) return;
@@ -564,7 +610,8 @@ const App: React.FC = () => {
                                                 signature_base_64: t.signatureBase64,
                                                 telegram_chat_id: t.telegramChatId,
                                                 is_suspended: t.isSuspended || false,
-                                                is_approved: t.isApproved !== false
+                                                is_approved: t.isApproved !== false,
+                                                assigned_classes: t.assignedClasses || []
                                             }]); 
                                             if (error) {
                                                 console.error("Add Teacher Error:", error.message);
@@ -604,7 +651,7 @@ const App: React.FC = () => {
                                         }} 
                                         onEditTeacher={handleEditTeacher} 
                                         onDeleteTeacher={handleDeleteTeacher} />;
-                                    case SystemView.DIRECTOR_CALENDAR: return <DirectorCalendar currentUser={currentUser} allTeachers={schoolTeachers} />;
+                                    case SystemView.DIRECTOR_CALENDAR: return <DirectorCalendar currentUser={virtualUser!} allTeachers={schoolTeachers} />;
                                     default: return null;
                                 }
                             })()}

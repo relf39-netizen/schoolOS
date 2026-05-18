@@ -59,6 +59,13 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
         setIsLoading(true);
         if (isConfigured && supabase) {
             try {
+                // Fetch academic years first
+                const { data: academicYearsData } = await supabase
+                    .from('academic_years')
+                    .select('*')
+                    .eq('school_id', currentUser.schoolId)
+                    .order('year', { ascending: false });
+
                 const { data: configData } = await supabase.from('school_configs').select('*').eq('school_id', currentUser.schoolId).maybeSingle();
                 if (configData) {
                     setSysConfig({
@@ -111,12 +118,20 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
                 setSars(mappedSar);
 
                 const years = new Set<string>(['2565', '2566', '2567', '2568', '2569']);
+                if (academicYearsData) academicYearsData.forEach(y => years.add(y.year));
                 mappedEnroll.forEach(e => years.add(e.year));
                 mappedScores.forEach(s => years.add(s.year));
                 mappedCal.forEach(c => years.add(c.year));
                 mappedSar.forEach(s => years.add(s.year));
-                setAvailableYears(Array.from(years).sort((a,b) => parseInt(b) - parseInt(a)));
+                
+                const sortedYears = Array.from(years).sort((a,b) => parseInt(b) - parseInt(a));
+                setAvailableYears(sortedYears);
 
+                if (academicYearsData && academicYearsData.length > 0) {
+                    const current = academicYearsData.find(y => y.is_current);
+                    if (current) setSelectedYear(current.year);
+                    else if (!selectedYear) setSelectedYear(sortedYears[0]);
+                }
             } catch (err) {
                 console.error("Database Fetch Error:", err);
             }
@@ -149,19 +164,52 @@ const AcademicSystem: React.FC<AcademicSystemProps> = ({ currentUser }) => {
         }
     };
 
-    const handleAddYear = () => {
+    const handleAddYear = async () => {
         if (!newYearInput || newYearInput.length !== 4) {
             alert("กรุณาระบุปีการศึกษา 4 หลัก (พ.ศ.)");
             return;
         }
-        if (availableYears.includes(newYearInput)) {
-            alert("มีปีการศึกษานี้ในระบบอยู่แล้ว");
-            return;
+
+        if (!supabase) return;
+        
+        setIsSaving(true);
+        try {
+            const { data: existing } = await supabase
+                .from('academic_years')
+                .select('*')
+                .eq('school_id', currentUser.schoolId)
+                .eq('year', newYearInput);
+            
+            if (existing && existing.length > 0) {
+                alert("มีปีการศึกษานี้ในระบบอยู่แล้ว");
+                setIsSaving(false);
+                return;
+            }
+
+            const { error } = await supabase.from('academic_years').insert([{
+                school_id: currentUser.schoolId,
+                year: newYearInput,
+                is_current: false
+            }]);
+
+            if (error) {
+                if (error.code === '42501') {
+                    alert('❌ ไม่สามารถเพิ่มปีการศึกษาได้: ติดนโยบายความปลอดภัย RLS\n\nวิธีแก้ไข: กรุณาติดต่อ Admin เพื่อรัน SQL ปิด RLS หรือเรียกใช้คำสั่ง "DISABLE ROW LEVEL SECURITY" บนตาราง academic_years');
+                } else {
+                    throw error;
+                }
+            }
+            
+            alert("เพิ่มปีการศึกษาเรียบร้อยแล้ว");
+            await loadData();
+            setSelectedYear(newYearInput);
+            setShowAddYearModal(false);
+            setNewYearInput('');
+        } catch (err: any) {
+            alert("เกิดข้อผิดพลาด: " + err.message);
+        } finally {
+            setIsSaving(false);
         }
-        setAvailableYears(prev => [...prev, newYearInput].sort((a,b) => parseInt(b) - parseInt(a)));
-        setSelectedYear(newYearInput);
-        setShowAddYearModal(false);
-        setNewYearInput('');
     };
 
     const handleSaveEnrollment = async () => {

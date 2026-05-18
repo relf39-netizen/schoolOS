@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase, isConfigured as isSupabaseConfigured } from '../supabaseClient';
+import { db as firebaseDb, isConfigured as isFirebaseConfigured, collection as firebaseCollection, getDocs as firebaseGetDocs } from '../firebaseConfig';
 import { Teacher, TeacherRole, SystemConfig, School, Student, ClassRoom, AcademicYear } from '../types';
 import { getDirectDriveUrl } from '../utils/drive';
 import { ACADEMIC_POSITIONS } from '../constants';
@@ -25,6 +26,9 @@ interface AdminUserManagementProps {
     onDeleteTeacher: (id: string) => void;
     currentSchool: School;
     onUpdateSchool: (school: School) => void;
+    isSuperAdmin?: boolean;
+    initialTab?: 'USERS' | 'PENDING' | 'STUDENTS' | 'SCHOOL_SETTINGS' | 'SETTINGS' | 'CLOUD_SETUP' | 'MIGRATION';
+    currentUser: Teacher;
 }
 
 const AVAILABLE_ROLES: { id: TeacherRole, label: string }[] = [
@@ -46,9 +50,12 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
     onEditTeacher, 
     onDeleteTeacher, 
     currentSchool, 
-    onUpdateSchool 
+    onUpdateSchool,
+    isSuperAdmin = false,
+    initialTab,
+    currentUser
 }) => {
-    const [activeTab, setActiveTab] = useState<'USERS' | 'PENDING' | 'STUDENTS' | 'SCHOOL_SETTINGS' | 'SETTINGS' | 'CLOUD_SETUP'>('USERS');
+    const [activeTab, setActiveTab] = useState<'USERS' | 'PENDING' | 'STUDENTS' | 'SCHOOL_SETTINGS' | 'SETTINGS' | 'CLOUD_SETUP' | 'MIGRATION' | 'ASSIGNMENTS'>(initialTab || 'USERS');
     const [copied, setCopied] = useState(false);
     const [userSearch, setUserSearch] = useState('');
     
@@ -172,6 +179,8 @@ const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
     const [schoolForm, setSchoolForm] = useState<School>(currentSchool);
     const [isLoadingConfig, setIsLoadingConfig] = useState(false);
     const [isSavingConfig, setIsSavingConfig] = useState(false);
+    const [isMigrating, setIsMigrating] = useState(false);
+    const [migrationStats, setMigrationStats] = useState<{ total: number, success: number, error: number } | null>(null);
     const [isGettingLocation, setIsGettingLocation] = useState(false);
     const [availableClasses, setAvailableClasses] = useState<string[]>([]);
 
@@ -651,12 +660,22 @@ function setTelegramWebhook() {
             const { error } = await supabase.from('class_rooms').insert([{
                 school_id: currentSchool.id,
                 name: newClassName,
-                academic_year: currentAcademicYear
+                academic_year: currentAcademicYear || (new Date().getFullYear() + 543).toString()
             }]);
-            if (error) throw error;
-            fetchStudentData();
-            setNewClassName('');
-        } catch (err) { console.error(err); }
+            if (error) {
+                if (error.code === '42501') {
+                    alert('❌ ไม่สามารถเพิ่มห้องเรียนได้: ติดนโยบายความปลอดภัย RLS\n\nวิธีแก้ไข: ไปที่แท็บ Cloud Logic และทำตามขั้นตอน "Fix Database RLS"');
+                } else {
+                    throw error;
+                }
+            } else {
+                fetchStudentData();
+                setNewClassName('');
+            }
+        } catch (err: any) { 
+            console.error(err); 
+            alert('เกิดข้อผิดพลาด: ' + err.message);
+        }
     };
 
     const handleDeleteClass = async (id: string) => {
@@ -676,19 +695,38 @@ function setTelegramWebhook() {
                 year: newYearName,
                 is_current: academicYears.length === 0
             }]);
-            if (error) throw error;
-            fetchStudentData();
-            setNewYearName('');
-        } catch (err) { console.error(err); }
+            if (error) {
+                if (error.code === '42501') {
+                    alert('❌ ไม่สามารถเพิ่มปีการศึกษาได้: ติดนโยบายความปลอดภัย RLS\n\nวิธีแก้ไข: ไปที่แท็บ Cloud Logic และทำตามขั้นตอน "Fix Database RLS"');
+                } else {
+                    throw error;
+                }
+            } else {
+                fetchStudentData();
+                setNewYearName('');
+            }
+        } catch (err: any) { 
+            console.error(err); 
+            alert('เกิดข้อผิดพลาด: ' + err.message);
+        }
     };
 
     const handleSetCurrentYear = async (id: string) => {
         if (!supabase) return;
         try {
-            await supabase.from('academic_years').update({ is_current: false }).eq('school_id', currentSchool.id);
-            await supabase.from('academic_years').update({ is_current: true }).eq('id', id);
+            const { error: err1 } = await supabase.from('academic_years').update({ is_current: false }).eq('school_id', currentSchool.id);
+            if (err1) throw err1;
+            const { error: err2 } = await supabase.from('academic_years').update({ is_current: true }).eq('id', id);
+            if (err2) throw err2;
             fetchStudentData();
-        } catch (err) { console.error(err); }
+        } catch (err: any) { 
+            console.error(err);
+            if (err.code === '42501') {
+                alert('❌ ไม่สามารถเปลี่ยนปีการศึกษาปัจจุบันได้: ติดนโยบายความปลอดภัย RLS\n\nวิธีแก้ไข: ไปที่แท็บ Cloud Logic และทำตามขั้นตอน "Fix Database RLS"');
+            } else {
+                alert('ขัดข้อง: ' + err.message);
+            }
+        }
     };
 
     const downloadTemplate = () => {
@@ -927,6 +965,180 @@ function setTelegramWebhook() {
         });
     };
 
+    const handleMigrateData = async () => {
+        if (!isSuperAdmin) {
+            alert("สิทธิ์ไม่เพียงพอ: เฉพาะ Super Admin เท่านั้นที่สามารถนำเข้าข้อมูลได้");
+            return;
+        }
+        if (!isFirebaseConfigured || !firebaseDb) {
+            alert("Firebase ไม่ได้ถูกตั้งค่า ไม่สามารถนำเข้าข้อมูลได้");
+            return;
+        }
+        if (!isSupabaseConfigured || !supabase) {
+            alert("Supabase ไม่ได้ถูกตั้งค่า ไม่สามารถนำเข้าข้อมูลได้");
+            return;
+        }
+        if (!confirm("ยืนยันการนำเข้าข้อมูลปฏิทินผู้บริหารจาก Firebase มายัง Supabase?")) return;
+
+        setIsMigrating(true);
+        setMigrationStats({ total: 0, success: 0, error: 0 });
+
+        try {
+            // 1. Migrate director_events
+            console.log("Starting migration: director_events...");
+            const querySnapshot = await firebaseGetDocs(firebaseCollection(firebaseDb, "director_events"));
+            const events = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            console.log("Found events:", events.length);
+            if (events.length > 0) console.log("Sample event data:", events[0]);
+
+            setMigrationStats(prev => ({ ...prev!, total: events.length }));
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            // Helper to format date to YYYY-MM-DD for SQL
+            const formatToSqlDate = (d: any) => {
+                if (!d) return null;
+                // Handle Firestore Timestamp
+                if (d.seconds) {
+                    return new Date(d.seconds * 1000).toISOString().split('T')[0];
+                }
+                // Handle ISO string or Date object
+                try {
+                    const dateObj = new Date(d);
+                    if (!isNaN(dateObj.getTime())) {
+                        return dateObj.toISOString().split('T')[0];
+                    }
+                } catch (e) {
+                    console.warn("Date parsing failed for:", d);
+                }
+                return d;
+            };
+
+            for (const event of events as any[]) {
+                try {
+                    const payload = {
+                        school_id: event.schoolId || event.school_id || currentSchool.id,
+                        date: formatToSqlDate(event.date),
+                        title: event.title || 'Untitled Event',
+                        description: event.description || '',
+                        start_time: event.startTime || event.start_time || '09:00',
+                        end_time: event.endTime || event.end_time || null,
+                        location: event.location || '',
+                        // Use current user ID because Firebase UIDs won't match Supabase profiles
+                        created_by: currentUser.id, 
+                        notified_one_day_before: event.notifiedOneDayBefore ?? event.notified_one_day_before ?? false,
+                        notified_on_day: event.notifiedOnDay ?? event.notified_on_day ?? false,
+                        created_at: event.createdAt ? (typeof event.createdAt === 'string' ? event.createdAt : new Date(event.createdAt.seconds * 1000).toISOString()) : new Date().toISOString()
+                    };
+
+                    // Use insert instead of upsert to avoid conflict issues if unique constraints aren't set
+                    const { error } = await supabase.from('director_events').insert(payload);
+
+                    if (error) {
+                        console.error(`Migration error for event ${event.id}:`, error.message || error);
+                        errorCount++;
+                    } else {
+                        successCount++;
+                    }
+                    setMigrationStats(prev => ({ ...prev!, success: successCount, error: errorCount }));
+                } catch (e: any) {
+                    console.error(`Migration exception for event ${event.id}:`, e.message || e);
+                    errorCount++;
+                    setMigrationStats(prev => ({ ...prev!, error: errorCount }));
+                }
+            }
+
+            alert(`นำเข้าข้อมูลสำเร็จ: ${successCount} รายการ, ล้มเหลว: ${errorCount} รายการ\nตรวจสอบ Console Log สำหรับรายละเอียดข้อผิดพลาด`);
+        } catch (err: any) {
+            console.error("Global migration error:", err);
+            alert("เกิดข้อผิดพลาดในการนำเข้าข้อมูล: " + err.message);
+        } finally {
+            setIsMigrating(false);
+        }
+    };
+
+    const handleMigrateCollection = async (firebaseColl: string, supabaseTable: string) => {
+        if (!isSuperAdmin) {
+            alert("สิทธิ์ไม่เพียงพอ");
+            return;
+        }
+        if (!isFirebaseConfigured || !firebaseDb || !supabase) {
+            alert("กรุณาตั้งค่า Firebase และ Supabase ก่อน");
+            return;
+        }
+        if (!confirm(`ยืนยันการนำเข้าข้อมูลจาก ${firebaseColl} มายัง ${supabaseTable}?`)) return;
+
+        setIsMigrating(true);
+        setMigrationStats({ total: 0, success: 0, error: 0 });
+
+        try {
+            console.log(`Starting migration: ${firebaseColl} -> ${supabaseTable}...`);
+            const querySnapshot = await firebaseGetDocs(firebaseCollection(firebaseDb, firebaseColl));
+            const items = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            
+            console.log(`Found ${items.length} items in ${firebaseColl}`);
+            if (items.length > 0) console.log("Sample item data:", items[0]);
+            
+            setMigrationStats(prev => ({ ...prev!, total: items.length }));
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const item of items as any[]) {
+                try {
+                    let payload: any = {};
+                    
+                    if (supabaseTable === 'students') {
+                        payload = {
+                            id: item.id.length === 13 ? item.id : undefined,
+                            school_id: item.schoolId || item.school_id || currentSchool.id,
+                            name: item.name,
+                            current_class: item.currentClass || item.current_class || '',
+                            academic_year: item.academicYear || item.academic_year || '',
+                            is_active: item.isActive ?? item.is_active ?? true,
+                            is_alumni: item.isAlumni ?? item.is_alumni ?? false,
+                            graduation_year: item.graduationYear || item.graduation_year || null,
+                            batch_number: item.batchNumber || item.batch_number || null,
+                            photo_url: item.photoUrl || item.photo_url || null,
+                            address: item.address || null,
+                            phone_number: item.phoneNumber || item.phone_number || null,
+                            father_name: item.fatherName || item.father_name || null,
+                            mother_name: item.motherName || item.mother_name || null,
+                            guardian_name: item.guardianName || item.guardian_name || null,
+                            medical_conditions: item.medicalConditions || item.medical_conditions || null,
+                            family_annual_income: item.familyAnnualIncome || item.family_annual_income || 0,
+                            location: item.location || null
+                        };
+                        if (!payload.id || payload.id.length !== 13) delete payload.id;
+                    }
+
+                    const { error } = await supabase.from(supabaseTable).insert(payload);
+
+                    if (error) {
+                        console.error(`Migration error for ${firebaseColl} ${item.id}:`, error.message);
+                        errorCount++;
+                    } else {
+                        successCount++;
+                    }
+                    setMigrationStats(prev => ({ ...prev!, success: successCount, error: errorCount }));
+                } catch (e: any) {
+                    console.error(`Migration exception for ${firebaseColl} ${item.id}:`, e.message || e);
+                    errorCount++;
+                    setMigrationStats(prev => ({ ...prev!, error: errorCount }));
+                }
+            }
+
+            alert(`นำเข้าข้อมูล ${supabaseTable} สำเร็จ: ${successCount} รายการ, ล้มเหลว: ${errorCount} รายการ`);
+        } catch (err: any) {
+            console.error("Migration error:", err);
+            alert("เกิดข้อผิดพลาด: " + err.message);
+        } finally {
+            setIsMigrating(false);
+        }
+    };
+
     const paginatedTeachers = approvedTeachers.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
     return (
@@ -952,8 +1164,12 @@ function setTelegramWebhook() {
                     </button>
                     <button onClick={() => setActiveTab('STUDENTS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'STUDENTS' ? 'bg-white text-indigo-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>จัดการนักเรียน</button>
                     <button onClick={() => setActiveTab('SCHOOL_SETTINGS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'SCHOOL_SETTINGS' ? 'bg-white text-orange-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>ข้อมูลโรงเรียน</button>
+                    <button onClick={() => setActiveTab('ASSIGNMENTS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'ASSIGNMENTS' ? 'bg-white text-rose-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>มอบหมายห้องเรียน</button>
                     <button onClick={() => setActiveTab('SETTINGS')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'SETTINGS' ? 'bg-white text-indigo-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>การเชื่อมต่อ</button>
                     <button onClick={() => setActiveTab('CLOUD_SETUP')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'CLOUD_SETUP' ? 'bg-white text-emerald-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>Cloud Logic</button>
+                    {isSuperAdmin && (
+                        <button onClick={() => setActiveTab('MIGRATION')} className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all ${activeTab === 'MIGRATION' ? 'bg-white text-rose-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>นำเข้าข้อมูลเก่า</button>
+                    )}
                 </div>
             </div>
 
@@ -1348,9 +1564,111 @@ function setTelegramWebhook() {
                     </div>
                 )}
 
+                {activeTab === 'ASSIGNMENTS' && (
+                    <div className="space-y-6 animate-fade-in py-4">
+                        <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-100 shadow-sm"><LayoutGrid size={28}/></div>
+                                <div>
+                                    <h3 className="font-black text-xl text-slate-800 leading-none mb-1">จัดการครูประจำชั้น</h3>
+                                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Teacher Classroom Assignments</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead className="bg-slate-50/80 backdrop-blur-md">
+                                        <tr>
+                                            <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">รายชื่อบุคลากร (ครู)</th>
+                                            <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">ชั้นเรียนที่รับผิดชอบ</th>
+                                            <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">ดำเนินการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {approvedTeachers.length === 0 ? (
+                                            <tr><td colSpan={3} className="px-8 py-20 text-center text-slate-300 font-bold italic">ไม่พบข้อมูลบุคลากรที่อนุมัติแล้ว</td></tr>
+                                        ) : approvedTeachers.map(t => (
+                                            <tr key={t.id} className="hover:bg-slate-50/50 transition-all group">
+                                                <td className="px-8 py-5">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-600 flex items-center justify-center font-black text-xl shadow-inner border border-white">
+                                                            {t.name[0]}
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-black text-slate-800 text-base leading-none mb-1.5 group-hover:text-indigo-600 transition-colors uppercase tracking-tight">{t.name}</p>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider bg-slate-100 px-2 py-0.5 rounded-lg">{t.position}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-8 py-5">
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {(t.assignedClasses || []).length === 0 ? (
+                                                            <div className="flex items-center gap-2 text-[10px] text-slate-300 font-black italic uppercase tracking-widest leading-none">
+                                                                <AlertCircle size={14} className="text-slate-200"/> ยังไม่ได้ระบุห้องเรียน
+                                                            </div>
+                                                        ) : (
+                                                            (t.assignedClasses || []).map(c => (
+                                                                <div key={c} className="px-3 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-xl text-[10px] font-black uppercase shadow-sm flex items-center gap-2">
+                                                                    <CheckCircle2 size={12} className="text-indigo-400"/>
+                                                                    ชั้น {c}
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="px-8 py-5 text-right">
+                                                    <button 
+                                                        onClick={() => { setEditForm(t); setEditingId(t.id); }}
+                                                        className="px-6 py-2.5 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all shadow-md active:scale-95"
+                                                    >
+                                                        แก้ไขการมอบหมาย
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100 flex items-start gap-4 shadow-sm">
+                            <div className="p-3 bg-white rounded-2xl text-blue-600 shadow-sm"><Info size={24}/></div>
+                            <div className="space-y-1">
+                                <h4 className="font-black text-blue-900 text-sm uppercase tracking-tight">คำแนะนำในการมอบหมาย</h4>
+                                <p className="text-xs text-blue-700 font-bold leading-relaxed opacity-80">การมอบหมายห้องเรียนจะช่วยให้คุณครูสามารถมองเห็นเฉพาะนักเรียนในความรับผิดชอบของตนเองในการบันทึกข้อมูลต่างๆ (การมาเรียน, ออมทรัพย์, สุขภาพ) ทำให้ระบบทำงานได้รวดเร็วขึ้น</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {activeTab === 'CLOUD_SETUP' && (
                     <div className="space-y-10 animate-fade-in max-w-6xl mx-auto py-4 pb-10">
                         {/* Current Config Summary */}
+                        <div className="bg-rose-900/10 p-8 rounded-[2rem] border-2 border-rose-500/20 shadow-xl relative overflow-hidden group mb-10">
+                            <div className="relative z-10 space-y-4">
+                                <h3 className="text-xl font-black text-rose-900 flex items-center gap-4 uppercase tracking-widest">
+                                    <ShieldAlert className="text-rose-600" size={32}/> 
+                                    Fix Database RLS (สำคัญมาก)
+                                </h3>
+                                <p className="text-sm font-bold text-rose-800 leading-relaxed max-w-3xl">หากท่านพบปัญหา "new row violates row-level security policy" หรือ "401 Unauthorized" ขณะเพิ่มห้องเรียนหรือปีการศึกษา กรุณาคัดลอก SQL ด้านล่างไปรันใน <b>Supabase SQL Editor</b> เพื่อเปิดสิทธิ์การเขียนข้อมูลครับ</p>
+                                <div className="relative mt-6">
+                                    <pre className="bg-slate-950 text-emerald-400 p-6 rounded-2xl font-mono text-xs overflow-x-auto border-2 border-slate-900">
+{`-- ปิด RLS เพื่ออนุญาตให้ใช้งานได้ทุกฟังก์ชัน
+ALTER TABLE academic_years DISABLE ROW LEVEL SECURITY;
+ALTER TABLE class_rooms DISABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
+
+-- เพื่อความชัวร์ ให้รันคำสั่งเพิ่มคอลัมน์มอบหมายห้องเรียนด้วย
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS assigned_classes TEXT[] DEFAULT '{}';`}
+                                    </pre>
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="bg-slate-900 p-8 rounded-[2rem] border-2 border-slate-800 shadow-2xl relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-all">
                                 <Settings size={120} className="text-blue-400 rotate-12"/>
@@ -1416,6 +1734,111 @@ function setTelegramWebhook() {
                                         <div className="bg-slate-900 rounded-2xl p-6 overflow-hidden shadow-inner relative border border-slate-800"><pre className="text-[10px] text-emerald-400 font-mono overflow-auto max-h-[400px] custom-scrollbar leading-relaxed no-scrollbar">{gasCode}</pre></div>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'MIGRATION' && isSuperAdmin && (
+                    <div className="animate-fade-in space-y-8 max-w-4xl mx-auto py-6">
+                        <div className="bg-rose-50 border border-rose-100 p-8 rounded-[2rem] shadow-sm relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-8 opacity-10">
+                                <RefreshCw size={120} className="text-rose-600 rotate-12"/>
+                            </div>
+                            <div className="relative z-10">
+                                <div className="flex items-center gap-6 mb-8">
+                                    <div className="p-5 bg-rose-600 text-white rounded-2xl shadow-lg">
+                                        <HardDrive size={32}/>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-2xl font-black text-rose-900 tracking-tight leading-none mb-1">Data Migration Tool</h3>
+                                        <p className="text-rose-600 font-bold text-[10px] uppercase tracking-widest mt-1">Firebase to Supabase Migration</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="bg-white/60 backdrop-blur-md p-6 rounded-2xl border border-white shadow-sm space-y-4 mb-8">
+                                    <p className="text-slate-700 font-bold text-sm leading-relaxed">
+                                        เครื่องมือนี้ใช้สำหรับนำเข้าข้อมูลเก่าจากระบบเดิม (Firebase) มายังระบบใหม่ (Supabase) 
+                                        โดยจะตรวจสอบข้อมูลที่ซ้ำกันจาก <code className="bg-rose-100 px-1 rounded text-rose-700">school_id</code>, <code className="bg-rose-100 px-1 rounded text-rose-700">date</code> และ <code className="bg-rose-100 px-1 rounded text-rose-700">title</code>
+                                    </p>
+                                    <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-100 rounded-xl">
+                                        <AlertCircle className="text-amber-600 shrink-0" size={20}/>
+                                        <p className="text-[11px] text-amber-800 font-bold">คำแนะนำ: ควรสำรองข้อมูลก่อนดำเนินการ และตรวจสอบการตั้งค่า Firebase ในไฟล์คอนฟิกให้เรียบร้อย</p>
+                                    </div>
+                                </div>
+
+                                {migrationStats && (
+                                    <div className="grid grid-cols-3 gap-4 mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">ทั้งหมด</p>
+                                            <p className="text-2xl font-black text-slate-800">{migrationStats.total}</p>
+                                        </div>
+                                        <div className="bg-white p-4 rounded-2xl border border-emerald-100 shadow-sm text-center">
+                                            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">สำเร็จ</p>
+                                            <p className="text-2xl font-black text-emerald-600">{migrationStats.success}</p>
+                                        </div>
+                                        <div className="bg-white p-4 rounded-2xl border border-rose-100 shadow-sm text-center">
+                                            <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-1">ล้มเหลว</p>
+                                            <p className="text-2xl font-black text-rose-600">{migrationStats.error}</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                                    <button
+                                        onClick={handleMigrateData}
+                                        disabled={isMigrating || !isFirebaseConfigured}
+                                        className={`py-5 rounded-2xl font-black text-lg shadow-xl transition-all flex items-center justify-center gap-4 active:scale-95 uppercase tracking-widest border-b-4 ${
+                                            isMigrating 
+                                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
+                                            : !isFirebaseConfigured
+                                            ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
+                                            : 'bg-rose-600 text-white border-rose-800 hover:bg-rose-700'
+                                        }`}
+                                    >
+                                        {isMigrating ? (
+                                            <>
+                                                <RefreshCw className="animate-spin" size={24}/>
+                                                กำลังนำเข้าข้อมูล...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Zap size={24}/>
+                                                นำเข้าปฏิทินผู้บริหาร
+                                            </>
+                                        )}
+                                    </button>
+
+                                    <button
+                                        onClick={() => handleMigrateCollection('students', 'students')}
+                                        disabled={isMigrating || !isFirebaseConfigured}
+                                        className={`py-5 rounded-2xl font-black text-lg shadow-xl transition-all flex items-center justify-center gap-4 active:scale-95 uppercase tracking-widest border-b-4 ${
+                                            isMigrating 
+                                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
+                                            : !isFirebaseConfigured
+                                            ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
+                                            : 'bg-blue-600 text-white border-blue-800 hover:bg-blue-700'
+                                        }`}
+                                    >
+                                        {isMigrating ? (
+                                            <>
+                                                <RefreshCw className="animate-spin" size={24}/>
+                                                กำลังนำเข้าข้อมูล...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Users size={24}/>
+                                                นำเข้าข้อมูลนักเรียน
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                                
+                                {!isFirebaseConfigured && (
+                                    <p className="text-center mt-4 text-[10px] font-black text-rose-500 uppercase tracking-widest">
+                                        * กรุณาตั้งค่า Firebase API Key ในระบบก่อนใช้งาน
+                                    </p>
+                                )}
                             </div>
                         </div>
                     </div>
